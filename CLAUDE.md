@@ -126,6 +126,8 @@ competitive play, not cartridge-exact behaviour for every input.
   a differential oracle in testing.
 - **Don't write mechanics from Showdown's source.** Use it for Smogon's
   clauses and for the team format, which aren't cartridge mechanics.
+  Exception, decided: the damage formula follows Showdown's arithmetic
+  (`src/gen3/README.md`, "Damage").
 
 ## Interface (libpkmn's shape)
 
@@ -220,6 +222,10 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 - `check_data`: `static_assert`s on the generated tables.
 - `check_teams`: parses `PKMN_TEAMS_DIR` (default `../teams/adv`); passes
   only if exactly the teams named with `--expect` fail.
+- `check_damage`: `damage.hpp` against Showdown 0.11.10, from the committed
+  `tools/damage_cases.inc`. Regenerate it with `node
+  tools/damage_oracle.cjs > tools/damage_cases.inc` (needs ADV-Simulator's
+  pinned Showdown, or its path as the argument).
 
 ```
 CMakeLists.txt, CMakePresets.json
@@ -239,12 +245,15 @@ src/gen3/
   chance.hpp          Random() catalogue, draft Actions and Durations
   helpers.hpp         helpers::Pokemon -> Battle at turn 0 (libpkmn helpers)
   showdown.hpp        Showdown export parser -> helpers::Pokemon
+  damage.hpp          Hit, crit_stage, can_crit, matchup, damage, apply_roll
   mechanics.hpp       update(), choices()                          (todo)
   calc.hpp            overrides, min_ko_roll                       (todo)
 tools/
   generate.py         one-off data generator from pokeemerald/
   check_data.cpp      static_asserts on the generated tables
   check_teams.cpp     parses teams/adv/ and builds a battle from each
+  check_damage.cpp    damage.hpp against damage_cases.inc
+  damage_oracle.cjs   writes damage_cases.inc from Showdown
 ```
 
 `pokeemerald/` is a depth-1 clone of pret/pokeemerald on the local branch
@@ -391,20 +400,12 @@ becomes a few lines.
 **Next steps, in order** (don't rush step 3 because "birch runs" feels like
 progress; every later mechanic inherits the frame):
 
-1. The remaining pure calculation functions (stat stages, crit stages, base
-   damage, type application in `ORDER`), checked against Smogon's damage
-   calculator. Also check `calc_stats` against ADV-Simulator over `teams/`.
-   **Start here.**
-   - Decomp path: `Cmd_critcalc` (bsc:1253), `Cmd_damagecalc` (bsc:1290),
-     which calls `CalculateBaseDamage` (pokemon.c:3106), then `Cmd_typecalc`
-     (bsc:1355), `ApplyRandomDmgMultiplier` (bsc:1639) and
-     `Cmd_adjustnormaldamage`. Ratio and crit tables are in
-     `data/tables.hpp`; type order is `ORDER` in `data/types.hpp`.
-   - Decide first: which header the pure functions live in (libpkmn keeps
-     them in `mechanics.zig`; `calc_stats` is in `data.hpp` for now).
-   - A possible oracle, not yet tried: `../ADV-Simulator/tools/showdown-oracle`
-     runs a pinned Showdown 0.11.10 (JSON-lines over stdin, with
-     damage-matrix scripts; see its README).
+1. The pure calculation functions. **Done** except checking `calc_stats`
+   against ADV-Simulator over `teams/`. `damage.hpp` follows Showdown's
+   arithmetic, takes no `options` and never draws; a zero divisor returns
+   `Result::Error`; the dynamic inputs are a `Hit`, which plan step 2's
+   per-action `State` (on the stack, as libpkmn gen2's) contains. Details
+   and the decomp comparison in `src/gen3/README.md`, "Damage".
 2. The turn frame and roll helpers, with null Chance and Calc.
 3. Switching and plain damaging moves end to end, including the turn-0
    start. Done when birch's search, adapted to this interface, runs against
@@ -446,15 +447,19 @@ progress; every later mechanic inherits the frame):
   `teams/adv/` parse and build. The other, which Showdown's validator also
   rejects, has a Hidden Power label its IVs don't produce.
 - Decided: header-only C++ library with no C API; Chance's probability is a
-  `double`.
+  `double`; the damage formula follows Showdown's arithmetic.
+- `gen3/damage.hpp`: crit stage, type matchup, damage before the roll, the
+  roll. `check_damage` matches Showdown 0.11.10 on all 74 cases (148 with
+  crits), covering every modifier it applies.
 
 - The build: CMake presets for debug (ASan/UBSan) and release, with
-  `headers`, `check_data` and `check_teams` passing in both, under g++ and
-  clang.
+  `headers`, `check_data`, `check_damage` and `check_teams` passing in both,
+  under g++ and clang.
 
 **Not started:** the mechanics (`update`, `choices`, the turn frame, the roll
-helpers), `calc.hpp`, scenario tests. Nothing has been compared with Showdown, Smogon's damage calculator or
-ADV-Simulator. birch's search still calls ADV-Simulator's `pkmn_gen3_*`
+helpers), `calc.hpp`, scenario tests. Only the damage formula has been
+compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
+through the damage cases. birch's search still calls ADV-Simulator's `pkmn_gen3_*`
 functions and must be adapted (plan step 3).
 
 **Open:**

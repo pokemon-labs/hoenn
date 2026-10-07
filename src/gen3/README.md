@@ -154,6 +154,91 @@ entries here are the exceptions.
     Knock Off only makes the target's item unusable; it cannot obtain a new
     item."
 
+### Damage
+
+`damage.hpp`, written 2026-10-07. Decided:
+
+- **The arithmetic is Showdown's, not the decomp's.** An exception to
+  "read Emerald" and to "don't write mechanics from Showdown's source"
+  (CLAUDE.md), decided because the two disagree on common OU damage (Thick
+  Fat Snorlax, Choice Band Guts Heracross) and the target is matching
+  Showdown. `damage.hpp` follows 0.11.10's `getDamage`
+  (`sim/battle-actions.ts`) and gen3 `modifyDamage`
+  (`data/mods/gen3/scripts.ts`), citing the handler for each modifier.
+  `tools/check_damage` compares it with Showdown over 74 cases, crit and
+  not, every roll (fixture from `tools/damage_oracle.cjs`).
+- **The formula lives in `damage.hpp`**, included by `mechanics.hpp` and
+  `calc.hpp` (so `min_ko_roll` reuses it without side effects). Its functions
+  read a `const Battle&` and take no `options`: they never draw. The draws
+  are roll helpers in `mechanics.hpp`, as libpkmn's `Rolls`.
+- **A zero divisor returns `Result::Error`** (a Def or SpD of 0–3 at −6, or
+  a corrupt stat of 0); Showdown would compute `Infinity` and truncate.
+- **The dynamic inputs are a `Hit`** (move, power, type, crit). The hit
+  backbone's per-action `State` (a local, as libpkmn gen2's, never in
+  `Battle`) holds one. The caller resolves power and type, as Showdown's
+  base power callbacks and `onModifyMove` do (Hidden Power, Weather Ball ×2
+  in weather, Revenge, Pursuit, Flail, Return...). Modifiers come from the
+  battle state inside `damage()`.
+
+Showdown's model, in order:
+
+1. `matchup()`: immunity (Levitate, Foresight), the summed type modifier,
+   Wonder Guard (type modifier ≤ 0). Struggle is typeless: none of these, no
+   STAB, no type-keyed modifier. The absorbing abilities are the backbone's.
+2. Base power × one chained modifier: Charge (on the move's actual type, so
+   Hidden Power Electric too), Mud and Water Sport (per user), the pinch
+   abilities, Thick Fat, Facade (any status but sleep), Solar Beam in rain,
+   sand or hail, Gust and Twister on Bounce.
+3. Attacking stat: the stage first (a crit ignores a drop), then one chained
+   modifier: Huge/Pure Power, Guts, Choice Band, Thick Club, Plus/Minus, Deep
+   Sea Tooth, Light Ball, Soul Dew, type items ×1.1 (Sea Incense ×1.05).
+   Hustle applies its ×1.5 directly, before the chain. Defending stat
+   likewise: Marvel Scale, Metal Powder, Soul Dew, Deep Sea Scale; then
+   Explosion and Self-Destruct halve Def (at least 1).
+4. `(2·level/5 + 2) · power · atk / def / 50`, floored at each division.
+5. Burn ×0.5 (physical, not Guts); the screens (not on a crit) and Flash
+   Fire as one chained modifier; weather (suppressed by an unfainted Cloud
+   Nine or Air Lock); physical at least 1; + 2; crit ×2; STAB ×1.5; ×2 per
+   super-effective type, then ÷2 per resisted one; Earthquake on Dig, Surf
+   and Whirlpool on Dive, Gust and Twister on Fly, Stomp on Minimize ×2.
+6. `apply_roll`: × (85 + index) / 100, at least 1.
+
+A chained modifier is in 4096ths: each factor is `trunc(m · 4096)` (so 1.1
+is 4505), folded in with `(a · b + 2048) >> 12`, and applied once as
+`(x · m + 2047) / 4096` (Showdown's `chain`, `chainModify`, `modify`).
+
+Where the decomp differs (pokemon = `src/pokemon.c`, `CalculateBaseDamage`
+at 3106; bsc; bs1 = `data/battle_scripts_1.s`):
+
+- It floors after every modifier and applies the stage *after* them.
+  Choice Band Guts Heracross's Megahorn on Celebi: 1713–2016 there,
+  1717–2020 here.
+- Thick Fat halves SpA (pokemon:3198), not base power. Charizard's
+  Flamethrower on Snorlax in sun: 105–124 there, 102–121 here.
+- Type items are ×(100 + param)/100 on the stat; Soul Dew applies outside
+  Frontier; Explosion halves Def before the stage, which can reach 0.
+- Weather, Flash Fire and the Sports: weather after the screens and Flash
+  Fire after weather, all on damage; the Sports on power, once whoever has
+  them; `ABILITY_ON_FIELD2` counts fainted Pokémon.
+- `gBattleScripting.dmgMultiplier` ×2 applies after the + 2, before STAB:
+  Weather Ball (bsc:9792), Revenge (bsc:9346), Facade, Earthquake on Dig and
+  the other semi-invulnerable bonuses (bs1:240–2274). Charge reads the
+  table type, so Hidden Power Electric isn't boosted.
+- Type effectiveness goes entry by entry in `gTypeEffectiveness` order
+  (`ORDER`), each step floored and at least 1. A special hit has no minimum
+  of 1 before the + 2.
+- Wonder Guard spares the charge turn (`AttacksThisTurn`); in Showdown the
+  charge turn never reaches it.
+
+Draws in the decomp's hit, for the roll helpers: crit (`Cmd_critcalc`,
+bsc:1253) before the type calculation; the damage roll and Focus Band
+(`Cmd_adjustnormaldamage`, bsc:1658), which `jumpifmovehadnoeffect`
+(bs1:623) skips when the move had no effect. Focus Band draws whenever the
+target holds it, at full HP or behind a Substitute. Multi-hit runs crit
+through the roll per hit (`BattleScript_MultiHitLoop`, bs1:612). Showdown
+checks immunity before rolling crit; which order the roll helpers follow is
+open.
+
 ## Teams
 
 `helpers.hpp` builds a battle from `helpers::Pokemon` sets, as libpkmn's

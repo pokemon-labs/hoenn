@@ -43,6 +43,12 @@ add_executable(check_data tools/check_data.cpp)
 target_link_libraries(check_data PRIVATE pkmn_gen3 pkmn_warnings)
 add_test(NAME check_data COMMAND check_data)
 
+# damage.hpp against Showdown, from the committed damage_cases.inc
+# (regenerate with tools/damage_oracle.cjs).
+add_executable(check_damage tools/check_damage.cpp)
+target_link_libraries(check_damage PRIVATE pkmn_gen3 pkmn_warnings)
+add_test(NAME check_damage COMMAND check_damage)
+
 # The team corpus lives in birch, beside this repo.
 set(PKMN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../teams/adv
     CACHE PATH "Showdown export teams for check_teams")
