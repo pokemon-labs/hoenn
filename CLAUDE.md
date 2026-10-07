@@ -5,6 +5,11 @@ libpkmn's design choices (a small POD battle, one `update` per turn, the
 choice/result protocol, and the Chance and Calc options), but it's written in
 C++ and doesn't chase every saved bit.
 
+**Singles only.** The engine is for 1v1 singles battles (Smogon ADV OU).
+Doubles get no consideration: skip the decomp's doubles-only branches
+(ally targeting, spread damage, `gBattlersCount > 2`, Follow Me, Helping
+Hand) rather than carrying them, and don't size or shape anything for them.
+
 ## Strategy: replace Emerald's battle scripts with direct code (candidate)
 
 Emerald drives battles with a bytecode VM. Scripts in
@@ -154,6 +159,24 @@ Uproar. The decomp sets the counters at infliction; take the ranges from it.
   multi-hit count, the move-slot draw (Sleep Talk), the Roar target, ability
   and item procs, and observations of hidden durations ending or continuing.
 - **`probability`** is the rational probability of the branch taken.
+
+**The observation must determine the branch exactly. No hashing.** Search
+keys a chance node's children by `Actions` and replays them as the same
+branch. So, given the battle before the update and both choices, `Actions`
+must determine the `Result`, the resulting `Durations` and every public part
+of the resulting battle. The only exception is the true values of the hidden
+counters, which search resamples from `Durations` anyway. Two different
+branches must never produce equal `Actions`. A hash can collide, and a
+collision silently desyncs the battle from the search tree, which breaks the
+safety priority. The same applies to everything Chance observes. So:
+
+- Every random draw that can affect public state gets its own field.
+- Size each field for the draw's **multiplicity**: the most times it can
+  happen for one player in one update, not just once. For example, a
+  multi-hit move rolls the crit and the damage on every hit. Enumerate the
+  multiplicity per `Random()` site from the decomp.
+- If a draw could happen more times than its fields hold, that's a bug.
+  Assert on it, and size the fields so it can't happen.
 
 Search resamples the hidden counters from `Durations` before each
 iteration, as Oak's `randomize_hidden_variables` does.

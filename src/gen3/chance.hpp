@@ -95,4 +95,139 @@ namespace pkmn::gen3 {
 // - Re-rolled every turn, so nothing to remember: thawing from freeze (1 in
 //   5), Shed Skin (1 in 3), full paralysis, infatuation, confusion self-hit.
 
+// TODO: Actions. The catalogue below lists every Random() site in battle
+// code that singles Smogon ADV play can reach, with its multiplicity: the
+// most times it can fire in one update. Nothing is implemented yet.
+//
+// Actions has two jobs. As an observation, it is the exact key for a chance
+// node's children. Given the battle before the update and both choices, it
+// must determine the Result, Durations and all public state. Hashing is out
+// (see CLAUDE.md). As a specification (Calc overrides), a nonzero field
+// forces that branch. Both jobs use the same struct with the same fields, per
+// hit included: anything worth observing is worth forcing, and the reverse.
+// Hidden rolls are in neither. To fix a sleep length, set the counter in the
+// battle, which holds the true value.
+//
+// Rules that follow:
+// - Draw only when the outcome can change state. Static on a target that is
+//   already paralyzed, King's Rock after the target has moved, and Focus
+//   Band on a non-lethal hit draw nothing. This doesn't change any
+//   distribution; it keeps irrelevant draws out of the key and the
+//   probability. The decomp often draws first and checks later (Static);
+//   reorder the checks.
+// - The decomp's rejection loops (Effect Spore, Sleep Talk, Roar, Starf
+//   Berry) are uniform over the accepted values. Draw that uniform directly,
+//   with no loop.
+// - Hidden rolls (the Durations table above) are never observed when they
+//   are rolled. Their *ending* is observed, at the tick where the stored
+//   counter says the effect ends or continues.
+//
+// Out of scope: doubles targeting (util:181-233, 3017, 3838-3875), running
+// (util:434-466), obedience (util:3945-4019), Pickup, catching, Metronome
+// and Mirror Move's random pick (singles has one candidate), Conversion and
+// Conversion 2, OHKO moves (OHKO Clause), and Roar's level check (bsc:7172,
+// which only draws when the user is lower level; Smogon is all level 100).
+// Present, Magnitude, Psywave and Spite are listed but low priority.
+//
+// Notation: P is the player whose action makes the draw. The defender's
+// Focus Band and contact abilities count toward the attacker's hit.
+//
+// Turn-level draws (one per update, shared, not per player)
+// ---------------------------------------------------------
+// Site                    Outcome                     Mult  Notes
+// Quick Claw              gRandomTurnNumber (u16)     1     main:4013, read in
+//                         < 0xFFFF * 20 / 100                GetWhoStrikesFirst.
+//                         = 13107/65536                      ONE draw per turn
+//                                                            serves both sides,
+//                                                            so two holders
+//                                                            proc together. Also
+//                                                            applies to the end
+//                                                            of turn order.
+// Speed tie, move order   1/2                         1     main:4728/4745 via
+//                                                            SetActionsAnd-
+//                                                            BattlersTurnOrder.
+//                                                            Battle start
+//                                                            (main:3858) uses
+//                                                            the same draw.
+// Speed tie, end of turn  1/2                         1     ENDTURN_ORDER
+//                                                            (util:1209) calls
+//                                                            GetWhoStrikesFirst
+//                                                            again: an
+//                                                            independent re-roll.
+//
+// Per player, per move execution (at most one per player per update; Sleep
+// Talk's called move is part of the same execution)
+// ------------------------------------------------------------------------
+// Site                    Outcome                     Mult  Notes
+// Thaw                    1/5 thaw                    1     CANCELER_FROZEN
+//                                                            (util:2048)
+// Confusion self-hit      1/2                         1     util:2148. On a
+//                                                            self-hit, also one
+//                                                            damage roll and
+//                                                            P's own Focus Band
+//                                                            (adjustnormal-
+//                                                            damage2, bsc:1705,
+//                                                            1720).
+// Full paralysis          1/4                         1     util:2175
+// Infatuation             1/2                         1     util:2190
+// Sleep Talk slot         uniform over usable slots   1     bsc:8268
+// Protect/Detect/Endure   sProtectSuccessRates/65536  1     bsc:6514
+// Accuracy                acc/100 after stages        1     bsc:1176. Once per
+//                                                            move, multi-hit
+//                                                            included.
+// Multi-hit count         2,3,4,5: 3/8,3/8,1/8,1/8    1     bsc:7147, two draws
+//                                                            folded into one
+//                                                            outcome
+// Crit                    1/n, n by crit stage        5     bsc:1282, per hit
+// Damage roll             85-100, 1/16 each           5     bsc:1662, per hit
+// Focus Band (defender)   10/100, lethal hits only    5     bsc:1677 and 5878
+//                                                            (fixed damage),
+//                                                            per hit
+// Contact ability         Static, Flame Body, Poison  5     util:2774-2844,
+//   (defender's)          Point, Cute Charm 1/3.             MOVEEND_ON_DAMAGE_
+//                         Effect Spore 1/10, then            ABILITIES, which
+//                         sleep/poison/paralysis             the multi-hit loop
+//                         at 1/3 each                        runs on every hit
+//                                                            (moveendto
+//                                                            MOVEEND_NEXT_
+//                                                            TARGET)
+// King's Rock             10/100                      6     util:3763. Per hit,
+//                                                            plus once more
+//                                                            after the multi-hit
+//                                                            loop (moveendfrom
+//                                                            IMMUNITY_ABILITIES
+//                                                            re-runs case 12).
+//                                                            At most one can
+//                                                            matter: a flinch
+//                                                            is set once.
+// Secondary effect        chance/100 (x2 Serene       1     bsc:2923, once,
+//                         Grace)                             after a multi-hit
+//                                                            loop too
+// Tri Attack's status     burn/freeze/par, 1/3 each   1     bsc:2601
+// Roar/Whirlwind target   uniform over the bench      1     bsc:7346
+// Spite                   2-5 PP, 1/4 each            1     bsc:8333
+// Present, Magnitude,     per decomp                  1     bsc:8615, 8672,
+//   Psywave                                                  7936
+//
+// Per player, end of turn
+// -----------------------
+// Site                    Outcome                     Mult  Notes
+// Future Sight / Doom     accuracy, damage roll,      1     BattleScript_Mon-
+//   Desire hit            target's Focus Band                TookFutureAttack.
+//                                                            P is the user's
+//                                                            side. No crit.
+// Shed Skin               1/3                         1     util:2607
+// Starf Berry stat        uniform over non-maxed      1     util:3462
+//                         stats (Atk-SpD, Acc, Eva)
+//
+// Per player, hidden durations ending (no draw here, but observed)
+// ---------------------------------------------------------------
+// Sleep, confusion, Disable, Encore, binding, Uproar and Thrash: at most one
+// end-or-continue observation each per player per update, since only one of
+// P's Pokémon can tick in an update. (Verify that Sleep Talk's called move
+// doesn't re-run the attack canceler and tick twice.)
+//
+// So the most per player in one update is one move execution with up to five
+// hits, one confusion self-hit instead of the move, and one Future Sight hit.
+
 } // namespace pkmn::gen3
