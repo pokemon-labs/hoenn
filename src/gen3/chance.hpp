@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <type_traits>
+
 namespace pkmn::gen3 {
 
 // TODO: Durations. These are findings from the decomp (pokeemerald, branch
@@ -95,9 +98,9 @@ namespace pkmn::gen3 {
 // - Re-rolled every turn, so nothing to remember: thawing from freeze (1 in
 //   5), Shed Skin (1 in 3), full paralysis, infatuation, confusion self-hit.
 
-// TODO: Actions. The catalogue below lists every Random() site in battle
+// Actions. The catalogue below lists every Random() site in battle
 // code that singles Smogon ADV play can reach, with its multiplicity: the
-// most times it can fire in one update. Nothing is implemented yet.
+// most times it can fire in one update. The struct follows it.
 //
 // Actions has two jobs. As an observation, it is the exact key for a chance
 // node's children. Given the battle before the update and both choices, it
@@ -229,5 +232,98 @@ namespace pkmn::gen3 {
 //
 // So the most per player in one update is one move execution with up to five
 // hits, one confusion self-hit instead of the move, and one Future Sight hit.
+
+// libpkmn's Optional(bool). None means no draw happened (observation) or
+// roll normally (specification).
+enum class Optional : uint8_t { None = 0, True = 1, False = 2 };
+
+// One damaging hit. A multi-hit move fills hits[0..n-1]. A confusion
+// self-hit uses hits[0] (damage and focus_band only); Action::confusion says
+// which it is. The two can't happen in the same update.
+struct Hit {
+  Optional crit;       // bsc:1282
+  uint8_t damage;      // the roll as a percentage, 85-100 (bsc:1662, 1705)
+  Optional focus_band; // the defender's; drawn only on a lethal hit
+                       // (bsc:1677, 1720, 5878)
+  Optional contact;    // the defender's Static, Flame Body, Poison Point,
+                       // Cute Charm or Effect Spore (util:2774-2844). Per hit:
+                       // a mid-loop burn changes later damage, and a mid-loop
+                       // sleep ends the loop.
+
+  friend constexpr bool operator==(const Hit&, const Hit&) = default;
+};
+
+// The draws that belong to one player's action in an update. Every field is
+// 0 when nothing was drawn; otherwise it is the outcome.
+struct Action {
+  // Before the move (AtkCanceller_UnableToUseMove, util:1971).
+  Optional thaw;        // util:2048, True = thawed
+  Optional confusion;   // util:2148, True = hit itself
+  Optional paralysis;   // util:2175, True = fully paralyzed
+  Optional infatuation; // util:2190, True = immobilized
+
+  // The move.
+  uint8_t move_slot;     // Sleep Talk's pick, 1-4 (bsc:8268)
+  Optional protect;      // Protect, Detect or Endure succeeding (bsc:6514)
+  Optional hit;          // accuracy (bsc:1176), once per move
+  uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147)
+  Hit hits[5];
+  uint8_t spore;         // Effect Spore's status: 1 sleep, 2 poison,
+                         // 3 paralysis
+  Optional kings_rock;   // True = flinched. A flinch is set at most once and
+                         // which draw set it doesn't change state.
+  Optional secondary;    // the move's secondary effect (bsc:2923)
+  uint8_t tri_attack;    // 1 burn, 2 freeze, 3 paralysis (bsc:2601)
+  uint8_t switch_target; // Roar or Whirlwind's team slot, 1-6 (bsc:7346)
+  uint8_t spite;         // PP removed, 2-5 (bsc:8333)
+  uint8_t variable;      // Present, Magnitude or Psywave's outcome, by move
+
+  // End of turn.
+  Optional future_hit; // Future Sight or Doom Desire's accuracy, on the
+                       // user's side
+  Hit future;          // crit stays None: future attacks don't crit
+  Optional shed_skin;  // util:2607
+  uint8_t starf;       // the stat Starf Berry raises, 1-7 (util:3462)
+
+  // Hidden durations at their tick: True = ended, False = continued.
+  Optional sleep;
+  Optional confusion_end;
+  Optional disable;
+  Optional encore;
+  Optional binding;
+  Optional uproar;
+  Optional thrash;
+
+  friend constexpr bool operator==(const Action&, const Action&) = default;
+};
+
+// Draws for the whole turn, each at most once per update.
+struct Turn {
+  Optional quick_claw;  // gRandomTurnNumber < 13107; one draw serves both
+                        // sides (main:4013)
+  uint8_t speed_tie;    // move order: 1 = P1 first, 2 = P2 first
+  uint8_t residual_tie; // ENDTURN_ORDER's independent re-roll (util:1209),
+                        // same encoding
+
+  friend constexpr bool operator==(const Turn&, const Turn&) = default;
+};
+
+// The chance branch an update took (Chance's observation), or the branch to
+// force (Calc's overrides). One struct serves both: anything worth observing
+// is worth forcing, and the reverse. Hidden rolls are in neither; to fix a
+// sleep length, set the counter in the battle.
+struct Actions {
+  Turn turn;
+  Action p1;
+  Action p2;
+
+  friend constexpr bool operator==(const Actions&, const Actions&) = default;
+};
+
+static_assert(sizeof(Hit) == 4);
+static_assert(sizeof(Action) == 49);
+static_assert(sizeof(Actions) == 3 + 2 * 49);
+static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
+static_assert(Actions{} == Actions{});
 
 } // namespace pkmn::gen3
