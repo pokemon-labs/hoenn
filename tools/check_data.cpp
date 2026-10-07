@@ -1,8 +1,8 @@
 // Compile-time spot checks of the generated tables:
-// g++ -std=c++20 -Wall -Wextra -fsyntax-only -Isrc/gen3/data tools/check_data.cpp
-#include "moves.hpp"
-#include "species.hpp"
-#include "items.hpp"
+// Built and run by the `check_data` test (CMakeLists.txt).
+#include "gen3/data/moves.hpp"
+#include "gen3/data/species.hpp"
+#include "gen3/data/items.hpp"
 using namespace pkmn::gen3;
 static_assert(get(Move::Tackle).bp == 35);
 static_assert(get(Move::HiddenPowerFire).type == Type::Fire);

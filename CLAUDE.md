@@ -63,7 +63,7 @@ part is control flow hidden in C: 313 direct assignments to
 3. Optionally (not built): a tool that decodes the script bytes and dumps
    every branch target and called script per label. It can't translate (the
    semantics are in the C handlers), but it gives a checklist and groups the
-   effects by backbone, so it's worth building before step 5 of the plan.
+   effects by backbone, so it's worth building before step 4 of the plan.
 
 Write mechanics analytically: understand the whole mechanic from the decomp,
 then write one code path. Don't grow code test-by-test; tests check the
@@ -172,7 +172,8 @@ from the decomp) and kept as remaining-turn counters. `Chance` keeps the
 
 - **`Durations`**: per hidden effect, how many steps its counter has visibly
   taken (0 inactive, 1 just started, +1 per step). Six sleeps per side by
-  SLOT, plus confusion, Disable, Encore, binding and attacking.
+  SLOT, plus confusion, Disable, Encore, binding and attacking. They count
+  counter steps, not move attempts: an Early Bird attempt adds 2.
 - **`Actions`**: which random branch this update took, one `Action` per
   player plus a shared `Turn` (Quick Claw, speed ties). `chance.hpp`
   catalogues every reachable `Random()` site with its multiplicity.
@@ -207,10 +208,21 @@ effects. Ignores multi-hit; fixed-damage moves return 0 or 16.
 ## Layout
 
 Mirrors libpkmn's `src/` tree, all headers. Not yet written:
-`gen3/mechanics.hpp`, `gen3/calc.hpp`, `gen3/test.cpp`, a build system (for
-tests and tools only).
+`gen3/mechanics.hpp`, `gen3/calc.hpp`, scenario tests.
+
+**Build** (CMake, tests and tools only): the library is the `INTERFACE`
+target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
+(asserts, ASan, UBSan) or `release` (`-O3`, no asserts), then
+`cmake --build --preset X` and `ctest --preset X`. Tests build with
+`-Wall -Wextra -Wpedantic -Werror`:
+- `headers`: every header compiles alone (so its `static_assert`s run), and
+  all are linked into one binary (no duplicate definitions).
+- `check_data`: `static_assert`s on the generated tables.
+- `check_teams`: parses `PKMN_TEAMS_DIR` (default `../teams/adv`); passes
+  only if exactly the teams named with `--expect` fail.
 
 ```
+CMakeLists.txt, CMakePresets.json
 src/common/
   data.hpp            Player, ID, Choice, Result
   rng.hpp             SplitMix64 RNG and its draw helpers
@@ -376,20 +388,28 @@ becomes a few lines.
 5. **The checks:** `Battle::valid()` asserted after every `update` in debug,
    plus soak runs.
 
-**Next steps, in order** (don't rush step 4 because "birch runs" feels like
+**Next steps, in order** (don't rush step 3 because "birch runs" feels like
 progress; every later mechanic inherits the frame):
 
-1. The build: release and ASan/UBSan presets and a test target, folding in
-   `tools/check_data.cpp`, `tools/check_teams.cpp` and the header
-   `static_assert`s.
-2. The remaining pure calculation functions (stat stages, crit stages, base
+1. The remaining pure calculation functions (stat stages, crit stages, base
    damage, type application in `ORDER`), checked against Smogon's damage
    calculator. Also check `calc_stats` against ADV-Simulator over `teams/`.
-3. The turn frame and roll helpers, with null Chance and Calc.
-4. Switching and plain damaging moves end to end, including the turn-0
+   **Start here.**
+   - Decomp path: `Cmd_critcalc` (bsc:1253), `Cmd_damagecalc` (bsc:1290),
+     which calls `CalculateBaseDamage` (pokemon.c:3106), then `Cmd_typecalc`
+     (bsc:1355), `ApplyRandomDmgMultiplier` (bsc:1639) and
+     `Cmd_adjustnormaldamage`. Ratio and crit tables are in
+     `data/tables.hpp`; type order is `ORDER` in `data/types.hpp`.
+   - Decide first: which header the pure functions live in (libpkmn keeps
+     them in `mechanics.zig`; `calc_stats` is in `data.hpp` for now).
+   - A possible oracle, not yet tried: `../ADV-Simulator/tools/showdown-oracle`
+     runs a pinned Showdown 0.11.10 (JSON-lines over stdin, with
+     damage-matrix scripts; see its README).
+2. The turn frame and roll helpers, with null Chance and Calc.
+3. Switching and plain damaging moves end to end, including the turn-0
    start. Done when birch's search, adapted to this interface, runs against
    it.
-5. Trace the hit backbone and the dispatchers, then add effects by group,
+4. Trace the hit backbone and the dispatchers, then add effects by group,
    starting with what `teams/` uses. The log comes last.
 
 **Testing.**
@@ -428,12 +448,14 @@ progress; every later mechanic inherits the frame):
 - Decided: header-only C++ library with no C API; Chance's probability is a
   `double`.
 
+- The build: CMake presets for debug (ASan/UBSan) and release, with
+  `headers`, `check_data` and `check_teams` passing in both, under g++ and
+  clang.
+
 **Not started:** the mechanics (`update`, `choices`, the turn frame, the roll
-helpers), `calc.hpp`, the build system and tests. Checking so far is
-`static_assert`s plus hand-built ASan/UBSan runs of `tools/check_teams.cpp`,
-and nothing has been compared with Showdown, Smogon's damage calculator or
+helpers), `calc.hpp`, scenario tests. Nothing has been compared with Showdown, Smogon's damage calculator or
 ADV-Simulator. birch's search still calls ADV-Simulator's `pkmn_gen3_*`
-functions and must be adapted (plan step 4).
+functions and must be adapted (plan step 3).
 
 **Open:**
 
@@ -444,12 +466,6 @@ functions and must be adapted (plan step 4).
   generator; bounds of `bide_damage` and `future_sight_damage` (u32 for now).
 - The per-`Effect` behaviour (hand-written with the mechanics).
 - A coverage report of the effects, abilities and hold effects `teams/` uses.
-- **Choice: what `Durations` counts for sleep.** Counter steps (the draft:
-  Early Bird adds 2 per attempt, stays right if the ability changes
-  mid-sleep) or move attempts (ability-independent, but `randomize_hidden`
-  would convert using the current ability). The only argument for attempts
-  was imperfect information, which now belongs to the log. Leaning steps; not
-  decided.
 - Trace the battle start (`TryDoEventsBeforeFirstTurn`): switch-in
   abilities and items before turn 1, possibly in speed order with a tie draw.
 - Team parsing enforces only Species Clause; the other Smogon ADV clauses
