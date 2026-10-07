@@ -13,7 +13,8 @@ namespace pkmn::gen3 {
 // resamples the true counter from Durations before each iteration. Every roll
 // is exactly uniform (Random() & 3, & 1 or % 4), so after k ticks with the
 // effect still running, the initial roll N is uniform over the values with
-// N - k >= 1, and the remaining counter is N - k.
+// N - k >= 1, and the remaining counter is N - k. (Durations stores k + 1;
+// see the struct.)
 //
 // Paths: bsc = src/battle_script_commands.c, util = src/battle_util.c,
 // main = src/battle_main.c.
@@ -36,8 +37,8 @@ namespace pkmn::gen3 {
 //                   (bsc:2860)                      from the first use
 //
 // Sleep (util:2006, CANCELER_ASLEEP).
-// - Stored per Pokémon (six slots per side). The counter is in status1, which
-//   persists through switching, and Gen III doesn't reset it.
+// - Stored per Pokémon, by SLOT (six per side). The counter is in status1,
+//   which persists through switching, and Gen III doesn't reset it.
 // - The counter is checked before the move. When it reaches 0 the Pokémon
 //   wakes and acts that same turn, so N gives N - 1 turns of being unable to
 //   move.
@@ -282,7 +283,8 @@ struct Action {
                          // which draw set it doesn't change state.
   Optional secondary;    // the move's secondary effect (bsc:2923)
   uint8_t tri_attack;    // 1 burn, 2 freeze, 3 paralysis (bsc:2601)
-  uint8_t switch_target; // Roar or Whirlwind's team slot, 1-6 (bsc:7346)
+  uint8_t switch_target; // the SLOT Roar or Whirlwind drags in, 2-6
+                         // (bsc:7346)
   uint8_t spite;         // PP removed, 2-5 (bsc:8333)
   uint8_t variable;      // Present, Magnitude or Psywave's outcome, by move
 
@@ -334,29 +336,31 @@ static_assert(sizeof(Actions) == 3 + 2 * 49);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 
-// The public side of each hidden duration: how many steps its counter has
-// visibly taken since it was set (see the findings at the top). The battle
-// holds the true remaining counter; search resamples it from these counts.
-// Whether an effect is active is public and lives in the battle, so a count
-// means nothing while its effect is off. A count resets to 0 when its effect
-// is set or ends.
+// The public side of each hidden duration (see the findings at the top),
+// with libpkmn's convention: 0 means inactive, 1 means the effect has just
+// started (no steps yet), and each step adds 1. Ending resets it to 0. The
+// battle holds the true remaining counter; search resamples it from these
+// counts.
 //
-// After k steps with the effect still on, the original roll N is uniform
-// over [max(lo, k + 1), hi] and the remaining counter is N - k.
+// At a count of c (so c - 1 steps) the original roll N is uniform over
+// [max(lo, c), hi] and the remaining counter is N - (c - 1). Ranges below are
+// the counts an active effect can show.
 struct Durations {
   struct Side {
-    // By team slot: status1 persists through switching, so each Pokémon keeps
-    // its own count. Steps at each move attempt that reaches
-    // CANCELER_ASLEEP: 1, or 2 with Early Bird. Rest's sleep (Status::EXT)
-    // is public and never resampled, but its count is kept the same way.
-    uint8_t sleep[6];  // 0-4 (roll 2-5)
+    // By SLOT, as libpkmn: sleep[0] is always the active Pokémon's. status1
+    // persists through switching, so each Pokémon keeps its own count, and a
+    // switch to SLOT s swaps sleep[0] and sleep[s - 1] as it swaps order.
+    // Steps at each move attempt that reaches CANCELER_ASLEEP: 1, or 2 with
+    // Early Bird. Rest's sleep (Status::EXT) is public and never resampled,
+    // but its count is kept the same way.
+    uint8_t sleep[6];  // 1-5 (roll 2-5)
     // Volatiles on the active Pokémon. A switch clears them, except that
     // Baton Pass keeps confusion and its count.
-    uint8_t confusion; // 0-4 (roll 2-5), steps at CANCELER_CONFUSED
-    uint8_t disable;   // 0-4 (roll 2-5), steps every end of turn
-    uint8_t encore;    // 0-5 (roll 3-6), steps every end of turn
-    uint8_t binding;   // 0-5 (roll 3-6), on the victim's side
-    uint8_t attacking; // Uproar 0-4 (roll 2-5) or Thrash 0-2 (roll 2-3). They
+    uint8_t confusion; // 1-5 (roll 2-5), steps at CANCELER_CONFUSED
+    uint8_t disable;   // 1-5 (roll 2-5), steps every end of turn
+    uint8_t encore;    // 1-6 (roll 3-6), steps every end of turn
+    uint8_t binding;   // 1-6 (roll 3-6), on the victim's side
+    uint8_t attacking; // Uproar 1-5 (roll 2-5) or Thrash 1-3 (roll 2-3). They
                        // can't overlap, and the public locked move says which.
 
     friend constexpr bool operator==(const Side&, const Side&) = default;

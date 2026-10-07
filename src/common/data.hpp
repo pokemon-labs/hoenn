@@ -13,17 +13,19 @@ enum class Player : uint8_t { P1 = 0, P2 = 1 };
 
 constexpr Player foe(Player p) { return Player(uint8_t(p) ^ 1); }
 
-// Identifies a Pokémon for the log: the team slot (1-6) in bits 0-2 and the
-// player in bit 3, as libpkmn's ID.
+// Identifies a Pokémon for the log: its original party position (1-6) in
+// bits 0-2 and the player in bit 3, as libpkmn's ID. The position is
+// order[SLOT - 1], the 1-based index into Side::pokemon. It never changes,
+// unlike the Pokémon's SLOT (see Choice).
 struct ID {
   uint8_t bits;
 
-  static constexpr ID init(Player player, uint8_t slot) {
-    return {uint8_t((uint8_t(player) << 3) | (slot & 7))};
+  static constexpr ID init(Player player, uint8_t position) {
+    return {uint8_t((uint8_t(player) << 3) | (position & 7))};
   }
 
   constexpr Player player() const { return Player((bits >> 3) & 1); }
-  constexpr uint8_t slot() const { return bits & 7; }
+  constexpr uint8_t position() const { return bits & 7; }
 
   friend constexpr bool operator==(ID, ID) = default;
 };
@@ -34,7 +36,13 @@ struct ID {
 //   Pass    0
 //   Move    the move slot, 1-4. 0 is Struggle, or a forced continuation (a
 //           charging move, a rampage, Bide).
-//   Switch  the team slot, 1-6. Teams don't reorder.
+//   Switch  the SLOT to switch in, 2-6.
+//
+// SLOT is order-dependent, as in libpkmn: SLOT 1 is the active Pokémon and
+// SLOT 6 the last. Side::pokemon never moves. Side::order maps SLOTs to it,
+// so the Pokémon in SLOT s is pokemon[order[s - 1] - 1], and the active one
+// is pokemon[order[0] - 1]. Switching to SLOT s swaps order[0] and
+// order[s - 1], so switching to the same SLOT twice is a round trip.
 //
 // Type 3 is representable but invalid: update must return Result::error()
 // for it, never assume it away.
@@ -49,6 +57,7 @@ struct Choice {
   static constexpr Choice pass() { return {0}; }
   static constexpr Choice move(uint8_t slot) { return init(Move, slot); }
   static constexpr Choice swap(uint8_t slot) { return init(Switch, slot); }
+  // `slot` is a move slot (1-4) for move() and a SLOT (2-6) for swap().
 
   constexpr Type type() const { return Type(bits & 3); }
   constexpr uint8_t data() const { return bits >> 2; }
@@ -96,7 +105,7 @@ static_assert(sizeof(Result) == 1 && std::is_trivial_v<Result>);
 
 static_assert(foe(Player::P1) == Player::P2 && foe(Player::P2) == Player::P1);
 static_assert(ID::init(Player::P2, 6).player() == Player::P2);
-static_assert(ID::init(Player::P2, 6).slot() == 6);
+static_assert(ID::init(Player::P2, 6).position() == 6);
 // pkmn_choice_init(type, data) = (data << 2) | type.
 static_assert(Choice::move(4).bits == ((4 << 2) | 1));
 static_assert(Choice::swap(6).type() == Choice::Switch);

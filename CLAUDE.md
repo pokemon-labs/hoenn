@@ -75,7 +75,9 @@ part is the control flow hidden in C:
      bound. Every array index is in range by construction or is checked.
    - Bad input (an illegal choice or a corrupt state) returns
      `Result::Error`. It never crashes and never causes UB.
-   - Every loop has a fixed bound. A hard turn cap ends the battle as a tie.
+   - Every loop has a fixed bound. A hard turn cap ends the battle as a tie:
+     after `turn += 1`, `update` returns `Tie` once the turn reaches 1000
+     (as libpkmn's `gen1/mechanics.zig:1650`).
    - `Battle` is `std::is_trivially_copyable` and is checked with
      `static_assert`s on its size. It holds no pointers, strings or
      containers.
@@ -118,6 +120,16 @@ competitive play.
 
 ## Mechanics references
 
+- **Read Emerald, test against Showdown.** Showdown's ADV very nearly
+  matches the cartridge, and the decomp is far easier to read precisely, so
+  the decomp is what we write mechanics from. Testing against the decomp
+  directly would need a lot of infrastructure first, so tests check behaviour
+  against Showdown instead. Where the two disagree, record it in
+  `src/gen3/README.md`.
+- **Ignore libpkmn's modes.** libpkmn has a `showdown` option that switches
+  between cartridge and Showdown behaviour. That distinction doesn't exist
+  here: take libpkmn's structure and conventions, and the mechanics from the
+  decomp.
 - **The Emerald C decompilation (pokeemerald)** is the authority. The useful
   files are `src/battle_main.c` (turn order), `src/battle_util.c` (end-of-turn
   effects, abilities, items), `src/battle_script_commands.c`, and
@@ -125,8 +137,9 @@ competitive play.
   comment.
 - **ADV-Simulator** (`../ADV-Simulator`) has broad coverage. Use it to see
   what has to be handled, and as a differential oracle in testing.
-- **Don't use Showdown's source.** Use Smogon's rule definitions only for the
-  clauses, which aren't cartridge mechanics.
+- **Don't write mechanics from Showdown's source.** Use Smogon's rule
+  definitions only for the clauses, which aren't cartridge mechanics.
+  Showdown is the test target, not the spec.
 
 Write the mechanics analytically: read the decomp, understand the whole
 mechanic, then write one direct code path for it. Don't grow the code
@@ -147,7 +160,17 @@ layouts behind them are our own, derived from Emerald.
 - **Choice** is one byte, `{type: Pass | Move | Switch, data}`.
   - A move's data is the slot, 1–4. Data 0 means Struggle, or a forced
     continuation such as a charging move, a rampage or Bide.
-  - A switch's data is the team slot. Teams don't reorder.
+  - A switch's data is a SLOT, 2–6.
+- **SLOT is order-dependent, as in libpkmn. Get this right.** SLOT 1 is the
+  active Pokémon and SLOT 6 the last. `Side::pokemon[6]` never moves;
+  `Side::order[6]` holds 1-based indexes into it, by SLOT. So the Pokémon in
+  SLOT `s` is `pokemon[order[s - 1] - 1]`, and the active one is
+  `pokemon[order[0] - 1]`. A switch to SLOT `s` swaps `order[0]` and
+  `order[s - 1]`: one byte pair, not whole `Pokemon` structs. Switching to
+  the same SLOT twice is a round trip. Anything per-Pokémon that Chance or
+  the API exposes is indexed by SLOT (`Durations.sleep`, Roar's
+  `switch_target`). A Pokémon's original party position, `order[s - 1]`, is
+  what the log's `ID` carries. "Move slot" (1–4) is a different thing.
   - Pass's data is 0.
 - **Result** is one byte, `{type: None | Win | Lose | Tie | Error, p1, p2}`.
   `p1` and `p2` are the Choice type each player must make next. A faint
@@ -181,8 +204,10 @@ Uproar. The decomp sets the counters at infliction; take the ranges from it.
 `Chance` keeps the **public** information:
 
 - **`Durations`** counts, for each hidden effect, how many steps its counter
-  has visibly taken since it was set. There are six sleep slots per side,
-  plus confusion, Disable, Encore, binding and attacking.
+  has visibly taken, with libpkmn's convention: 0 is inactive, 1 is just
+  started (no steps yet), and each step adds 1. There are six sleeps per
+  side, by SLOT (`sleep[0]` is always the active Pokémon's, swapped along
+  with `order`), plus confusion, Disable, Encore, binding and attacking.
 - **`Actions`** records which random branch this update took: one `Action`
   per player, plus a shared `Turn` for draws that serve both sides (Quick
   Claw, the two speed ties). `chance.hpp` catalogues every reachable
@@ -244,9 +269,9 @@ rewrite/
   src/common/
     data.hpp                Player, ID, Choice, Result
     rng.hpp                 64-bit PRNG on the in-battle seed
-    options.hpp             Options<Log, Chance, Calc>, null types
+    options.hpp             Options<Log, Chance, Calc>
     rational.hpp            exact probabilities for Chance
-    protocol.hpp            binary log (written last; see "The log comes last")
+    protocol.hpp            binary log: Writer and Log now, messages last
   src/gen3/
     README.md               decisions and deviations, like libpkmn's gen*/README.md
     data.hpp                Battle, Side, Pokemon, ActivePokemon, Volatiles,
@@ -275,7 +300,7 @@ remapped to held items only.
   - `request`: what resumes a turn after an interruption, such as a Baton
     Pass or faint replacement
 - **`Side`** holds:
-  - `pokemon[6]` and `active`
+  - `pokemon[6]` (never reordered), `order[6]` (see SLOT) and `active`
   - `conditions`: Spikes layers, Reflect, Light Screen, Safeguard, Mist,
     Wish and Future Sight turns
   - the Wish HP and Future Sight damage
@@ -286,8 +311,9 @@ remapped to held items only.
 - **`Pokemon`** holds:
   - stats, moves (`{id, pp, pp_ups}`), HP, species, status, types and level
   - the item, the previous item and the Knocked Off flag
-  - the ability, happiness, gender, Hidden Power type and power, and
-    position
+  - the ability, happiness, gender, and Hidden Power type and power. (No
+    `position`: with an `order` array, the index into `pokemon` is the
+    original position.)
 - **`ActivePokemon`** holds:
   - volatiles (u128)
   - the stats, moves, species, types and ability, which Transform, Forecast,
@@ -296,6 +322,68 @@ remapped to held items only.
 
 Don't get clever with unions or bit packing yet. Get it correct and
 reasonably small first.
+
+#### Audit of the draft against the decomp (2026-10-07)
+
+The draft above hasn't been revised yet. These findings apply to it.
+
+Sources checked: `BattlePokemon`, status2 and status3, `DisableStruct`,
+`ProtectStruct`, `SideTimer`, `gWishFutureKnock`, `gBattleStruct`, the
+`gLast*` arrays, `SwitchInClearSetData` (main:3152) and `TurnValuesCleanUp`
+(main:4857).
+
+- **Bug: the toxic counter resets on switch.** The bad-poison residual
+  (util:1533) bumps status1 in `gBattleMons` but never writes it back to the
+  party. Every status1 write-back happens on a status change. Switch-in
+  reloads status1 from the party, so the counter comes back as it was at
+  infliction (0). `Status::toxic` in `gen3/data.hpp` says the opposite; move
+  it to `ActivePokemon`. The sleep counter does persist, because the canceler
+  writes it back (util:2259).
+- **Wrong in the draft:**
+  - **Wish HP.** Wish heals the recipient's max HP / 2 when it lands
+    (`Cmd_trywish`). Store only the counter, plus the wisher for the log.
+  - **The previous item** (Recycle) is per battler position: `usedHeldItems`
+    is set by `Cmd_removeitem` and cleared only at battle start. Put it on
+    `Side`.
+  - **The last move used and the last move that hit** are per battler and
+    cleared on switch-in. Put them on `ActivePokemon`, along with Bide's
+    damage.
+  - **`Pokemon` types.** Switch-in recomputes the types and the ability from
+    the species (`Cmd_switchindataupdate`). Drop the types from `Pokemon`.
+  - **Boosts as i4** contradicts "no bit packing"; use `int8_t[7]`.
+- **Missing:**
+  - Weather's permanent-vs-temporary flag (abilities set permanent weather).
+  - The Future Sight / Doom Desire move, for the log.
+  - On `ActivePokemon`, everything `SwitchInClearSetData` clears:
+    - moves: last, last hit by, last hit type, locked, Choice Band, disabled
+      (with timer), encored (with slot and timer), Mimic's slots
+    - counters: toxic; the hidden confusion, Uproar, Thrash and wrap;
+      Taunt, Perish Song, Lock-On, Yawn, Charge, Rollout, Fury Cutter,
+      Stockpile, Protect uses, Substitute HP, Bide, Truant, `isFirstTurn`,
+      recharge
+    - flags: every status2 and status3 flag, plus Flash Fire, a pending
+      Trace, and who is binding it
+  - Per-turn state that `TurnValuesCleanUp` zeroes: protected, endured, the
+    physical and special damage taken (Counter, Mirror Coat, Focus Punch).
+  - What `request` holds: the phase, and the other player's queued action,
+    already resolved at selection.
+- **PP rule.** PP spent is written back to the party unless the user is
+  transformed or the slot was replaced by Mimic (`Cmd_ppreduce`,
+  `MOVE_IS_PERMANENT`). Transform gives 5 PP per copied move.
+- **Left out on purpose:** `gLastLandedMoves` (AI only), `hpOnSwitchout`,
+  side-timer battler IDs, Follow Me, Helping Hand, Transform's personality,
+  and `gBattleMonForms` (a sprite; Forecast changes only the types).
+- **Size.** About 2 × 365 + 20 ≈ 750 B, a little over the 700 B target.
+  The levers are u16 move IDs, and keeping active moves only while
+  transformed.
+- **Open decisions** (recommended answer first):
+  1. Move the toxic counter to `ActivePokemon`, which shrinks `Status` to
+     1 byte. Yes.
+  2. A per-turn struct inside `Battle`, cleared at turn start, so it survives
+     a Baton Pass request. Yes.
+  3. `request` holds the phase and the queued action. Yes.
+  4. Volatile flags as C++ bitfields, a raw integer with masks, or `bool`s.
+     Bitfields.
 
 ## Tricky mechanics
 
@@ -360,12 +448,14 @@ the decomp yet.
 - **Sleep Clause and Freeze Clause.** These are Smogon rule mods, not
   cartridge mechanics, so take them from the Smogon ADV ruleset, not the
   decomp.
-  - Store a per-Pokémon flag that says whether its sleep was inflicted by the
-    foe (as opposed to self-inflicted by Rest).
+  - Both are always on: every format we play has them. They can be a
+    compile-time constant, with no field in `Battle`.
+  - Sleep Clause needs to know whether a sleep was inflicted by the foe or
+    self-inflicted by Rest. `Status::EXT` already records that.
   - Sleep Clause: a sleep move fails if the foe already has a Pokémon put to
     sleep by the other player. Rest doesn't count. Yawn counts *(verify)*.
-  - Freeze Clause works the same way for freezes.
-  - Both are switchable options at battle start.
+  - Freeze Clause works the same way for freezes. In singles every freeze
+    comes from the foe, so it needs no extra flag.
 
 Add these to the list when they come up: Baton Pass (what passes, and the
 mid-turn request), Pursuit on a switching target, Choice Band locking, Focus
@@ -373,6 +463,45 @@ Punch, Truant, Destiny Bond and Perish Song endgames, Self-Destruct and
 Explosion halving Defense, Struggle, and running out of PP.
 
 ## Plan
+
+**Approach: soften the nut.** Most move effects are variations on a few
+shared structures. Build those first, so each effect becomes a few lines:
+
+1. **The turn frame.** `gBattleMainFunc`'s phases as an explicit table:
+   selection, order, actions, fainted Pokémon, field end of turn, battler
+   end of turn, Wish, Perish Song and Future Sight, then replacements.
+   Settle suspend and resume (`request`) here, once.
+2. **The hit backbone.** `BattleScript_EffectHit`: canceler, accuracy, PP,
+   crit, damage, type calc, adjust, hit, secondary, faint check, `moveend`.
+   Its entry points (`HitFromAccCheck` and so on) become helpers.
+3. **The dispatchers.** `moveend`'s cases, `AbilityBattleEffects`,
+   `ItemBattleEffects`, the attack canceler and the end-of-turn order, each
+   as one ordered list. An ability or item is then one entry.
+4. **The roll helpers.** One per catalogue row: Calc override, RNG, Chance
+   report, as libpkmn's `Rolls`. The hook interface falls out of these.
+5. **The checks.** `Battle::valid()`, asserted after every `update` in debug,
+   plus soak runs.
+
+Two ways to check our work exist before any Showdown infrastructure:
+Smogon's damage calculator for the pure damage functions, and the script
+decoder (strategy step 3). The decoder is worth building early: it groups
+the effects by backbone and gives a checklist of branches.
+
+Readiness (2026-10-07): the data layer is solid. The mechanics are barely
+started: no script path has been traced end to end. There's no turn-phase
+design, no hooks, no build or tests, and no battle builder; scenario tests
+need a crude one early. Suggested order:
+
+1. Settle the layout decisions, then write `data.hpp`.
+2. The build, ASan and a test runner, with a crude battle builder.
+3. The pure calculation functions, checked against the damage calculator.
+4. The turn frame and roll helpers, with null Chance.
+5. Step 1 below: switching and plain damaging moves end to end.
+6. Trace the hit backbone and the dispatchers. Then add effects by the
+   decoder's groups, starting with `teams/`.
+
+Don't rush step 5 because "birch runs" feels like progress. Every later
+mechanic inherits a rough frame.
 
 1. **Skeleton.**
    - Put the libpkmn structure in place:
@@ -397,6 +526,8 @@ Explosion halving Defense, Struggle, and running out of PP.
 3. **Testing.**
    - **Scenario tests** for each tricky mechanic, with the RNG forced through
      Chance and Calc overrides.
+   - **Matching Showdown** is the correctness target for mechanics. How to
+     compare (scenario replays, outcome distributions) isn't designed yet.
    - **Differential runs against ADV-Simulator** through the shared
      `pkmn_gen3_*` API. Compare outcome distributions over the same team
      pairs, not exact streams, because the RNGs differ.
@@ -426,6 +557,37 @@ Explosion halving Defense, Struggle, and running out of PP.
 - `src/common/rng.hpp` has the RNG: SplitMix64 on a u64 seed, with
   `range(n)` and `chance(num, den)` helpers that are loop-free. The header
   maps each decomp `Random()` shape to a helper.
+- `src/common/rational.hpp` ports libpkmn's `Rational(T)`. It reduces lazily, and `T` is
+  `uint64_t`, `u128` or `double`. Chance will use `double`, as libpkmn's C
+  ABI does. Its tests are libpkmn's, run as `static_assert`s and also run
+  under ASan and UBSan. It differs from libpkmn in these ways:
+  - **Errors.** libpkmn returns `error.Overflow`. Here integer `update`,
+    `add` and `mul` return `false`, and `cmp` returns an empty
+    `std::optional`. Only tests use `cmp`, `add` and `mul` (libpkmn's engine
+    never calls them), so that shape stays. `double` never fails, but past 2^53 it drifts instead,
+    as libpkmn's does.
+  - **The coprime check.** libpkmn asserts that `p` and `q` are coprime when
+    both are comptime-known. Here that check is a separate overload,
+    `update<P, Q>()`, which uses a `static_assert`. The runtime
+    `update(p, q)` doesn't check.
+  - **Arguments.** `add`, `mul` and `cmp` take their argument by value, so
+    they reduce a copy, not the caller's rational.
+  - **Bounded gcd.** Every gcd loop has a fixed bound. The `double` gcd
+    converts to `uint64_t` below 2^64. Above that it runs Euclid with an exact
+    remainder built from halving, which works at compile time, where libpkmn
+    uses `@mod`.
+- `src/common/options.hpp` has `Options<Log, Chance, Calc>` and libpkmn's
+  `options(log, chance, calc)` helper. The members are
+  `[[no_unique_address]]`, so null types take no space.
+- `src/common/protocol.hpp` has the log plumbing from libpkmn's
+  `protocol.zig`: `Writer`, `NullWriter`, `Log<W>`, `FixedLog`, `NullLog`
+  and `null_log`. The message methods come last.
+  - The driver owns the buffer, and `Writer` only points into it
+    (`{buffer, len, pos}`). So it lives in `Options`, never in `Battle`.
+  - Each write is all or nothing and returns `false` when the bytes don't
+    fit; that's libpkmn's `error.NoSpaceLeft`. **Open:** what `update` does
+    with a full buffer (libpkmn returns `Result::Error`). Decide when the log
+    is written.
 - `src/gen3/chance.hpp` has:
   - the decomp findings on every hidden duration (rolls, what makes each
     step, Baton Pass, Early Bird, Rest)
@@ -433,8 +595,9 @@ Explosion halving Defense, Struggle, and running out of PP.
     update
   - draft `Actions` (101 B), one struct for both the Chance observation and
     the Calc overrides
-  - draft `Durations` (22 B), counting counter steps, so Early Bird adds 2
-    per attempt (but see the open choice below)
+  - draft `Durations` (22 B), with libpkmn's convention (0 inactive, 1
+    started) and sleep by SLOT. It counts counter steps, so Early Bird adds 2
+    per attempt (but see the open choice below).
 - Testing so far is only `static_assert`s, checked with `-fsyntax-only`
   (`tools/check_data.cpp` and the headers). There's no build system yet.
 
@@ -445,11 +608,10 @@ Explosion halving Defense, Struggle, and running out of PP.
   status3 and disable-struct field.
 - the per-`Effect` behaviour (hand-written with the mechanics, not
   generated) and Hidden Power from IVs
-- `common/rational.hpp`. This is next.
-- `common/options.hpp`: `Options` and the null types. It needs `Rational`
-  and the hook interface: the calls the engine makes into Chance and Calc at
-  each draw. The interface isn't designed yet; it falls out of the
-  `Random()` catalogue.
+- the Chance and Calc hook interface: the calls the engine makes into
+  Chance and Calc at each draw. It falls out of the `Random()` catalogue. The
+  gen3 null Chance and null Calc come with it, in `chance.hpp` and
+  `calc.hpp`. Skipped for now.
 - `Chance` (Actions, Durations, probability) and `randomize_hidden`
 - `Summaries`, on hold
 - a `pkmn.h` stub with the functions birch's `cpp/include/search/mcts.h`
