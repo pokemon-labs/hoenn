@@ -19,6 +19,13 @@ C++ and doesn't chase every saved bit.
    - Debug and test builds run under ASan and UBSan, with `assert` turned on.
      Release builds have no asserts, which makes the guarantees above
      load-bearing.
+   - Use runtime `assert`s liberally in mechanics functions, as libpkmn
+     does. Assert preconditions (a move slot is 1–4, a Pokémon isn't
+     fainted), invariants (HP is in range, `Status::valid()`) and branches
+     that should be unreachable. They document what each function assumes,
+     and soak runs turn them into a check on every step. They are not input
+     validation: anything a caller can get wrong must still return
+     `Result::Error` in release builds.
 2. **Speed.** Search copies and steps the battle millions of times.
    - The target is a battle of roughly 700 B that is copied with `memcpy`.
    - The RNG is a 64-bit seed stored inside the battle, as in Showdown and
