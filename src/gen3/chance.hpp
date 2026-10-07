@@ -237,9 +237,12 @@ namespace pkmn::gen3 {
 // roll normally (specification).
 enum class Optional : uint8_t { None = 0, True = 1, False = 2 };
 
-// One damaging hit. A multi-hit move fills hits[0..n-1]. A confusion
-// self-hit uses hits[0] (damage and focus_band only); Action::confusion says
-// which it is. The two can't happen in the same update.
+// One damaging hit. A multi-hit move fills hits[0..n-1].
+//
+// A confusion self-hit shares hits[0] (damage and focus_band only) with the
+// move's first hit. That's safe: a self-hit replaces the move, so the two
+// never happen in the same update, and Action::confusion == True says which
+// one hits[0] holds. The key stays exact.
 struct Hit {
   Optional crit;       // bsc:1282
   uint8_t damage;      // the roll as a percentage, 85-100 (bsc:1662, 1705)
@@ -263,6 +266,11 @@ struct Action {
   Optional infatuation; // util:2190, True = immobilized
 
   // The move.
+  //
+  // spore, tri_attack and variable are sparse: each picks from a small set
+  // and is rarely filled. They are separate for clarity for now. They could
+  // be combined into one detail byte whose meaning depends on the move or
+  // ability.
   uint8_t move_slot;     // Sleep Talk's pick, 1-4 (bsc:8268)
   Optional protect;      // Protect, Detect or Endure succeeding (bsc:6514)
   Optional hit;          // accuracy (bsc:1176), once per move

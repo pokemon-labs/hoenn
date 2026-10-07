@@ -97,6 +97,15 @@ part is the control flow hidden in C:
    [Tricky mechanics](#tricky-mechanics). Obscure interactions that the
    Smogon ADV teams in `teams/` never produce can wait.
 
+**Data covers the full game; mechanics take the shortcuts.** The scope cut
+in priority 3 applies only to the mechanics in `update`. The data reflects
+the full game (singles): `Battle`, `Actions`, `Durations`, the generated
+tables and the enums all leave room for every move, ability, item and
+random draw. That holds even for ones the competitive pool barely reaches,
+like Spite, Present, Magnitude and Psywave. A mechanic that isn't written
+yet is then a gap in `update`, which is easy to fill later. It isn't a
+missing field that changes the layout and everything built on it.
+
 Fuzz testing matters much less here than in libpkmn. We don't promise
 cartridge-exact behaviour for every input; we promise no crashes and correct
 competitive play.
