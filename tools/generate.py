@@ -171,6 +171,7 @@ static_assert(sizeof(Ability) == 1);
 
 }} // namespace pkmn::gen3
 """)
+    return [pascal(n) for n, _ in abilities]
 
 
 # Moves
@@ -332,6 +333,7 @@ constexpr Move hidden_power(Type type) {{
 
 }} // namespace pkmn::gen3
 """)
+    return enum
 
 
 # Species
@@ -441,6 +443,7 @@ constexpr const SpeciesData &get(Species species) {{
 
 }} // namespace pkmn::gen3
 """)
+    return enum
 
 
 # Items
@@ -518,12 +521,79 @@ constexpr const ItemData &get(Item item) {{ return detail::ITEM_DATA[uint8_t(ite
 
 }} // namespace pkmn::gen3
 """)
+    names = {n for n, _, _ in held}
+    every = []
+    for name, _ in ids[1:]:
+        short = name[len("ITEM_"):]
+        if re.match(r"\d", short) or short.startswith("UNUSED"):
+            continue
+        n = pascal(short)
+        every.append((n, n if n in names else "Mail" if short.endswith("_MAIL") else "Other"))
+    return every
+
+
+# Names, for parsing teams
+
+def show_id(name):
+    """A Showdown ID: lowercase letters and digits only. DoubleEdge -> doubleedge."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def gen_names(abilities, moves, species, items):
+    def array(cname, count, names):
+        rows = "\n".join(f'    "{show_id(n)}", // {n}' for n in names)
+        return f"inline constexpr std::string_view {cname}[{count}] = {{\n    \"\",\n{rows}\n}};"
+
+    types = [TYPE_NAME[n] for n, _ in TYPES]
+    type_rows = "\n".join(f'    "{show_id(n)}", // {n}' for n in types)
+    item_rows = "\n".join(f'    {{"{show_id(n)}", Item::{e}}},' for n, e in items)
+    emit("names.hpp", f"""
+#pragma once
+
+#include <string_view>
+
+#include "abilities.hpp"
+#include "items.hpp"
+#include "moves.hpp"
+#include "species.hpp"
+#include "types.hpp"
+
+// Showdown-style IDs (lowercase letters and digits) of the decomp's names, for
+// parsing teams. Not for the engine. Where Showdown names a thing differently,
+// the parser keeps an alias table; these are the decomp's names.
+namespace pkmn::gen3::names {{
+
+// Indexed by enum value; None is "".
+{array("SPECIES_IDS", "SPECIES", species)}
+
+{array("MOVE_IDS", "MOVES", moves)}
+
+{array("ABILITY_IDS", "ABILITIES", abilities[1:])}
+
+inline constexpr std::string_view TYPE_IDS[TYPES] = {{
+{type_rows}
+}};
+
+struct ItemName {{
+  std::string_view id;
+  Item item;
+}};
+
+// Every item in the decomp (include/constants/items.h), mapped to its Item:
+// itself if it has a hold effect, else Mail or Other.
+inline constexpr ItemName ITEM_IDS[{len(items)}] = {{
+{item_rows}
+}};
+
+}} // namespace pkmn::gen3::names
+""")
 
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     gen_types()
-    gen_abilities()
-    gen_moves()
-    gen_species()
-    gen_items()
+    abilities = gen_abilities()
+    moves = gen_moves()
+    species = gen_species()
+    items = gen_items()
+    gen_names(abilities, moves, species, items)

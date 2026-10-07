@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <initializer_list>
 #include <type_traits>
@@ -9,6 +10,7 @@
 #include "data/abilities.hpp"
 #include "data/items.hpp"
 #include "data/moves.hpp"
+#include "data/natures.hpp"
 #include "data/species.hpp"
 #include "data/types.hpp"
 
@@ -227,6 +229,90 @@ struct Stats {
   uint16_t spd;
 };
 
+// One stat from CALC_STAT (src/pokemon.c:2814), before the nature. The decomp
+// computes in s32; nothing here comes near overflow.
+constexpr uint16_t calc_stat(uint8_t base, uint16_t iv, uint16_t ev,
+                             uint8_t level) {
+  assert(iv <= 31 && ev <= 255 && level >= 1 && level <= 100);
+  return uint16_t((2 * base + iv + ev / 4) * level / 100 + 5);
+}
+
+// Max HP (src/pokemon.c:2844-2852). Shedinja always has 1.
+constexpr uint16_t calc_hp(Species species, uint16_t iv, uint16_t ev,
+                           uint8_t level) {
+  assert(iv <= 31 && ev <= 255 && level >= 1 && level <= 100);
+  if (species == Species::Shedinja) return 1;
+  return uint16_t((2 * get(species).stats.hp + iv + ev / 4) * level / 100 +
+                  level + 10);
+}
+
+// CalculateMonStats (src/pokemon.c:2823). `ivs` (0-31) and `evs` (0-255) are
+// in Stats order. Checking the EV total is the caller's job.
+constexpr Stats calc_stats(Species species, Nature nature, const Stats& ivs,
+                           const Stats& evs, uint8_t level) {
+  assert(species != Species::None && uint16_t(species) < SPECIES);
+  assert(uint8_t(nature) < NATURES);
+  const BaseStats& b = get(species).stats;
+  // apply_nature's index is gNatureStatTable's column: Atk, Def, Spe, SpA, SpD.
+  return {
+      calc_hp(species, ivs.hp, evs.hp, level),
+      apply_nature(nature, 0, calc_stat(b.atk, ivs.atk, evs.atk, level)),
+      apply_nature(nature, 1, calc_stat(b.def, ivs.def, evs.def, level)),
+      apply_nature(nature, 2, calc_stat(b.spe, ivs.spe, evs.spe, level)),
+      apply_nature(nature, 3, calc_stat(b.spa, ivs.spa, evs.spa, level)),
+      apply_nature(nature, 4, calc_stat(b.spd, ivs.spd, evs.spd, level)),
+  };
+}
+
+// Hidden Power's typed move and power from the IVs (Cmd_hiddenpowercalc,
+// bsc:8889). The decomp computes both live at each use from gBattleMons' IVs,
+// which never change in battle, so computing them once at team building is
+// equivalent.
+struct HiddenPower {
+  Move move;     // HiddenPowerFighting..HiddenPowerDark
+  uint8_t power; // 30-70
+};
+
+constexpr HiddenPower hidden_power(const Stats& ivs) {
+  assert(ivs.hp <= 31 && ivs.atk <= 31 && ivs.def <= 31 && ivs.spe <= 31 &&
+         ivs.spa <= 31 && ivs.spd <= 31);
+  // Bit 1 of each IV for the power, bit 0 for the type, in the decomp's order
+  // (HP, Atk, Def, Spe, SpA, SpD), which is Stats order.
+  const unsigned power_bits =
+      ((ivs.hp & 2) >> 1) | ((ivs.atk & 2) << 0) | ((ivs.def & 2) << 1) |
+      ((ivs.spe & 2) << 2) | ((ivs.spa & 2) << 3) | ((ivs.spd & 2) << 4);
+  const unsigned type_bits =
+      ((ivs.hp & 1) << 0) | ((ivs.atk & 1) << 1) | ((ivs.def & 1) << 2) |
+      ((ivs.spe & 1) << 3) | ((ivs.spa & 1) << 4) | ((ivs.spd & 1) << 5);
+  // (NUMBER_OF_MON_TYPES - 3) * bits / 63 + 1, then skip Mystery.
+  unsigned type = 15 * type_bits / 63 + 1;
+  if (type >= uint8_t(Type::Mystery)) type++;
+  return {hidden_power(Type(type)), uint8_t(40 * power_bits / 63 + 30)};
+}
+
+// Checked by hand against the formula and known level 100 stats.
+static_assert(calc_hp(Species::Blissey, 31, 252, 100) == 714);
+static_assert(calc_hp(Species::Shedinja, 31, 252, 100) == 1);
+static_assert(calc_stats(Species::Tyranitar, Nature::Adamant,
+                         {31, 31, 31, 31, 31, 31}, {4, 252, 0, 252, 0, 0},
+                         100).atk == 403);
+static_assert(calc_stats(Species::Skarmory, Nature::Careful,
+                         {31, 0, 31, 31, 31, 31}, {252, 0, 8, 0, 0, 248},
+                         100).atk == 165);
+static_assert(calc_stats(Species::Skarmory, Nature::Careful,
+                         {31, 0, 31, 31, 31, 31}, {252, 0, 8, 0, 0, 248},
+                         100).spa == 104); // (2 * 40 + 31) + 5, then x0.9
+static_assert(calc_stat(100, 31, 0, 50) == 120);
+// All 31s: Dark 70. The usual Showdown spreads (30s in Stats order):
+static_assert(hidden_power(Stats{31, 31, 31, 31, 31, 31}).move == Move::HiddenPowerDark);
+static_assert(hidden_power(Stats{31, 31, 31, 31, 31, 31}).power == 70);
+static_assert(hidden_power(Stats{31, 30, 31, 30, 30, 31}).move == Move::HiddenPowerFire);
+static_assert(hidden_power(Stats{31, 30, 30, 31, 31, 31}).move == Move::HiddenPowerIce);
+static_assert(hidden_power(Stats{31, 30, 31, 31, 30, 31}).move == Move::HiddenPowerGrass);
+static_assert(hidden_power(Stats{31, 30, 30, 31, 31, 31}).power == 70);
+static_assert(hidden_power(Stats{0, 0, 0, 0, 0, 0}).move == Move::HiddenPowerFighting);
+static_assert(hidden_power(Stats{0, 0, 0, 0, 0, 0}).power == 30);
+
 // A move and its PP. `pp_ups` (0-3) is kept for max PP (Leppa Berry, Transform,
 // the PP write-back).
 struct MoveSlot {
@@ -234,6 +320,17 @@ struct MoveSlot {
   uint8_t pp;
   uint8_t pp_ups;
 };
+
+// CalculatePPWithBonus (src/pokemon.c:4650): each PP Up adds a fifth of the
+// base PP. At most 64 (a 40 PP move with 3 PP Ups).
+constexpr uint8_t max_pp(Move move, uint8_t pp_ups) {
+  assert(move != Move::None && uint16_t(move) < MOVES && pp_ups <= 3);
+  const uint8_t base = get(move).pp;
+  return uint8_t(base + base * 20 * pp_ups / 100);
+}
+
+static_assert(max_pp(Move::Spikes, 3) == 32 && max_pp(Move::Spikes, 0) == 20);
+static_assert(max_pp(Move::Growl, 3) == 64 && max_pp(Move::Sketch, 3) == 1);
 
 // A party Pokémon. Never reordered: Side::order maps SLOTs to it.
 //
@@ -499,9 +596,18 @@ struct Battle {
   constexpr Side& side(Player p) { return sides[uint8_t(p)]; }
   constexpr const Side& side(Player p) const { return sides[uint8_t(p)]; }
 
+  // Turn 0 is a battle not yet started, as in libpkmn: the first update
+  // (both players Pass) switches in the leads and moves to turn 1. Until then
+  // neither side has an active Pokémon, and after it both always do.
   constexpr bool valid() const {
-    return sides[0].valid() && sides[1].valid() && turn <= MAX_TURNS &&
-           field.valid() && request.valid();
+    if (!sides[0].valid() || !sides[1].valid() || turn > MAX_TURNS ||
+        !field.valid() || !request.valid()) {
+      return false;
+    }
+    for (const Side& s : sides) {
+      if ((turn == 0) != (s.active.species == Species::None)) return false;
+    }
+    return turn != 0 || request.phase == Phase::None;
   }
 };
 
@@ -523,6 +629,7 @@ static_assert(std::is_trivial_v<Battle> && std::is_standard_layout_v<Battle>);
 // side, everything else zero.
 static_assert([] {
   Battle b{};
+  b.turn = 1;
   for (Side& s : b.sides) {
     for (uint8_t i = 0; i < 6; i++) s.order[i] = uint8_t(i + 1);
     Pokemon& p = s.pokemon[0];
@@ -538,6 +645,25 @@ static_assert([] {
   if (b.valid()) return false;
   b.sides[1].pokemon[0].hp = 35;
   b.sides[0].order[1] = 1;  // not a permutation
+  return !b.valid();
+}());
+// At turn 0 neither side has an active Pokémon yet.
+static_assert([] {
+  Battle b{};
+  for (Side& s : b.sides) {
+    for (uint8_t i = 0; i < 6; i++) s.order[i] = uint8_t(i + 1);
+    Pokemon& p = s.pokemon[0];
+    p.species = Species::Pikachu;
+    p.stats = {35, 55, 30, 90, 50, 40};
+    p.hp = 35;
+    p.level = 50;
+    p.moves[0] = {Move::Tackle, 35, 0};
+  }
+  if (!b.valid()) return false;
+  b.turn = 1;  // started, but no active Pokémon
+  if (b.valid()) return false;
+  b.turn = 0;
+  b.request.phase = Phase::FaintAfterAction;
   return !b.valid();
 }());
 
