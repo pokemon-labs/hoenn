@@ -786,8 +786,15 @@ mechanic inherits a rough frame.
   - `Status`: libpkmn's 1-byte status (hidden sleep counter, `EXT` for Rest
     or bad poison). The Toxic counter is left for `ActivePokemon`, which
     doesn't exist yet.
-  - `Phase` and `Request` (10 B), per [Turn phases](#turn-phases). Neither
-    is placed in a `Battle` yet, so the field order may change.
+  - `Phase` and `Request` (10 B), per [Turn phases](#turn-phases).
+  - A first draft of the battle (2026-10-07): `Pokemon` (42 B),
+    `Volatiles` (35 B), `ActivePokemon` (116 B), `Side` (392 B), `Field`
+    and `Battle` (808 B), each with `valid()`, size asserts and a
+    compile-time test that `valid()` accepts a minimal battle. Unpacked:
+    808 B against the ~700 B target; packing the ~35 `bool`s comes last.
+    Follow-ups: the `Item::KnockedOff` and `Move::Unavailable` sentinels in
+    the generator (values only, no layout change), and the bounds of
+    `bide_damage` and `future_sight_damage` (u32 for now).
 - `src/common/data.hpp` has `Player`, `ID`, `Choice` and `Result`, with
   libpkmn's byte layouts.
 - `src/common/rng.hpp` has the RNG: SplitMix64 on a u64 seed, with
@@ -838,10 +845,8 @@ mechanic inherits a rough frame.
   (`tools/check_data.cpp` and the headers). There's no build system yet.
 
 **Open work, in no fixed order:**
-- the `Battle`, `Side`, `Pokemon` and `ActivePokemon` layout, with the
-  battle-state enums (weather, volatiles, side conditions). Per the "data
-  covers the full game" rule, volatiles need room for every Gen III status2,
-  status3 and disable-struct field.
+- review the `Battle` draft in `gen3/data.hpp`, then check the `Actions`
+  and `Durations` drafts against it.
 - the per-`Effect` behaviour (hand-written with the mechanics, not
   generated) and Hidden Power from IVs
 - the Chance and Calc hook interface: the calls the engine makes into
