@@ -1,6 +1,6 @@
 // Types shared by every generation, as in libpkmn's src/lib/common/data.zig.
-// Choice and Result have libpkmn's byte layouts, so the C ABI's pkmn_choice
-// and pkmn_result are the same bytes and pass through without conversion.
+// Choice and Result keep libpkmn's one-byte layouts. There is no C API, so
+// nothing depends on the exact bits; they're kept because they're small.
 
 #pragma once
 

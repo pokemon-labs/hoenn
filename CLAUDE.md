@@ -5,6 +5,11 @@ libpkmn's design choices (a small POD battle, one `update` per turn, the
 choice/result protocol, and the Chance and Calc options), but it's written in
 C++ and doesn't chase every saved bit.
 
+**It's a header-only C++ library, used directly by a C++ driver (birch).**
+There is no C API and no compiled library: no `pkmn.h`, no `extern "C"`, no
+`pkmn_gen3_*` names. birch adapts its search to this interface, not the
+reverse.
+
 **Be cautious, and don't push ahead.** While a design choice is still open,
 don't offer to write, add or commit the thing it affects. Lay out the open
 choices and their tradeoffs, give a recommendation, and wait for the user to
@@ -122,10 +127,12 @@ competitive play, not cartridge-exact behaviour for every input.
 - **Don't write mechanics from Showdown's source.** Use it for Smogon's
   clauses and for the team format, which aren't cartridge mechanics.
 
-## API (must match libpkmn)
+## Interface (libpkmn's shape)
 
-birch's search (`cpp/include/search/mcts.h`) calls a `pkmn_gen3_*` C API, so
-the function names and signatures are fixed; struct layouts are our own.
+Keep libpkmn's shape, as C++ templates and plain functions. Names and
+signatures are ours. birch's search (`cpp/include/search/mcts.h`) currently
+calls ADV-Simulator's `pkmn_gen3_*` functions; swapping engines means
+changing those call sites in birch.
 
 - **`update(battle, c1, c2, options) -> Result`** runs one turn, or the rest
   of a turn after a mid-turn request. At turn 0 both players pass and
@@ -139,7 +146,7 @@ the function names and signatures are fixed; struct layouts are our own.
   `Side::order[6]` holds 1-based indexes into it, by SLOT, so SLOT `s` is
   `pokemon[order[s - 1] - 1]` (`Side::get(s)`) and SLOT 1 is active. A switch
   to SLOT `s` swaps `order[0]` and `order[s - 1]`. Per-Pokémon data that
-  Chance or the API exposes is indexed by SLOT (`Durations.sleep`, Roar's
+  Chance or the interface exposes is indexed by SLOT (`Durations.sleep`, Roar's
   target). The log's `ID` carries the original party position. "Move slot"
   (1–4) is a different thing.
 - **Result** is one byte, `{type: None | Win | Lose | Tie | Error, p1, p2}`,
@@ -169,7 +176,10 @@ from the decomp) and kept as remaining-turn counters. `Chance` keeps the
 - **`Actions`**: which random branch this update took, one `Action` per
   player plus a shared `Turn` (Quick Claw, speed ties). `chance.hpp`
   catalogues every reachable `Random()` site with its multiplicity.
-- **`probability`**: the rational probability of the branch taken.
+- **`probability`**: the probability of the branch taken, a
+  `Rational<double>`. Decided: double, so no overflow bounds have to be
+  derived for integer fractions; past 2^53 it loses precision instead of
+  failing.
 
 **The observation must determine the branch exactly. No hashing.** Search
 keys chance-node children by `Actions`, so given the battle and both
@@ -196,11 +206,11 @@ effects. Ignores multi-hit; fixed-damage moves return 0 or 16.
 
 ## Layout
 
-Mirrors libpkmn's `src/` tree. Not yet written: `include/pkmn.h`,
-`gen3/mechanics.hpp`, `gen3/calc.hpp`, `gen3/test.cpp`, a build system.
+Mirrors libpkmn's `src/` tree, all headers. Not yet written:
+`gen3/mechanics.hpp`, `gen3/calc.hpp`, `gen3/test.cpp`, a build system (for
+tests and tools only).
 
 ```
-include/pkmn.h        C ABI (pkmn_gen3_*)                          (todo)
 src/common/
   data.hpp            Player, ID, Choice, Result
   rng.hpp             SplitMix64 RNG and its draw helpers
@@ -375,10 +385,10 @@ progress; every later mechanic inherits the frame):
 2. The remaining pure calculation functions (stat stages, crit stages, base
    damage, type application in `ORDER`), checked against Smogon's damage
    calculator. Also check `calc_stats` against ADV-Simulator over `teams/`.
-3. The turn frame and roll helpers, with null Chance and Calc, and the
-   `pkmn.h` stub birch's `mcts.h` calls.
+3. The turn frame and roll helpers, with null Chance and Calc.
 4. Switching and plain damaging moves end to end, including the turn-0
-   start. Done when birch's `mcts.h` builds and runs a search against it.
+   start. Done when birch's search, adapted to this interface, runs against
+   it.
 5. Trace the hit backbone and the dispatchers, then add effects by group,
    starting with what `teams/` uses. The log comes last.
 
@@ -393,7 +403,7 @@ progress; every later mechanic inherits the frame):
   counter restarts.
 - **Matching Showdown** is the target; how to compare (scenario replays,
   outcome distributions) isn't designed.
-- **Differential runs against ADV-Simulator** through the shared API,
+- **Differential runs against ADV-Simulator** from one C++ driver,
   comparing outcome distributions over the same team pairs.
 - **Soak runs** of millions of random self-play games under ASan/UBSan,
   checking invariants (HP in range, PP never negative, `choices()` non-empty

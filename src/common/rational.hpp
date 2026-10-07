@@ -8,8 +8,8 @@
 // can overflow where an eagerly reduced fraction wouldn't. To get the eager
 // behaviour, reduce() after every operation.
 //
-// T is uint64_t, unsigned __int128 or double. Chance uses double, as libpkmn's
-// C ABI does (pkmn_rational is two f64). For integer T, operations return
+// T is uint64_t, unsigned __int128 or double. Chance uses double, so it never
+// needs overflow bounds on the fraction. For integer T, operations return
 // false on overflow, like libpkmn's error.Overflow. For double they always
 // return true: past 2^53 they lose precision instead of failing.
 //
