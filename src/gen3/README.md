@@ -251,6 +251,58 @@ through the roll per hit (`BattleScript_MultiHitLoop`, bs1:612).
 nothing, so the only difference from the decomp is that no crit is drawn;
 following Showdown keeps the log's message order the same as its.
 
+### Hit backbone
+
+`mechanics.hpp`'s `use_move` and `hit` are `HandleAction_UseMove` (util:78)
+and `BattleScript_EffectHit` (bs1:236): the attack canceler
+(`AtkCanceler_UnableToUseMove`, util:1987, then the rest of
+`Cmd_attackcanceler`, bsc:915), accuracy, `ppreduce`, crit, damage, the
+roll, `adjustnormaldamage`'s survival checks, `datahpupdate`, the recoil of
+`Effect::Recoil`, `tryfaintmon` and `moveend`'s cases. Per-action state is a
+`MoveState` on the stack. Only plain hits (`plain_hit()`) and
+`Effect::Recoil` run it; every other effect runs the canceler and uses PP,
+then `moveend` (decided for step 3).
+
+Where it departs from the decomp, or from the draws the decomp makes:
+
+- **Immunity first** (decided, as Showdown): a move with no effect
+  (immunity, Levitate, Wonder Guard) draws neither accuracy nor crit nor the
+  roll. The decomp draws accuracy and crit before `typecalc`, but on a no-
+  effect move no outcome changes anything. Showdown's gen3 `tryMoveHit`
+  draws accuracy before it reports the immunity, which only changes the log
+  message (`-miss` or `-immune`); settle that with the log.
+- **Accuracy uses the decomp's arithmetic** (`ACCURACY_STAGE_RATIOS`, integer
+  percentages, Compound Eyes, Sand Veil, Hustle and BrightPowder floored in
+  that order). Showdown multiplies by 4/3, 5/3 and so on in floating point
+  and chains the modifiers. *(open: compare the two over the stages and
+  modifiers; switch to Showdown's if they differ, as for damage)*
+- **Focus Band draws only on a lethal hit**, and not for False Swipe, which
+  spares the target anyway. The decomp draws whenever the target holds it.
+- **A thawing move (`EFFECT_THAW_HIT`) still draws the 1/5 thaw**, as the
+  decomp: the draw decides whether the user stays frozen if a later canceler
+  case stops the move.
+- **`MOVE_UNAVAILABLE` is `Move::None`** until the generator has a sentinel
+  (CLAUDE.md, "Open"). It's what `gLastMoves` and `gLastLandedMoves` record
+  for a move that was stopped, which matters to Encore, Disable and Mimic.
+- **Not yet** (plan step 4, `TODO` in the code): the per-turn `ProtectStruct`
+  (Protect, Endure, Magic Coat, Snatch, Counter's and Mirror Coat's damage),
+  which would live on `update`'s stack (decision 2); confusion's self-hit
+  (Showdown's gen4 condition calls `getDamage` with a typeless 40-power
+  move; whose arithmetic to follow is open); Bide; Soundproof; Destiny Bond;
+  the absorbing abilities; the moves that hit semi-invulnerable targets;
+  `moveend`'s ability and item dispatchers; Truant's end-of-turn toggle.
+- *(open, an optimization)* When every roll KOs (or every roll breaks the
+  Substitute), the roll can't change state, so it needn't be drawn. Skipping
+  it would shrink search's chance nodes a lot, but it changes what the
+  `Actions` key holds; decide with the birch adaptation.
+
+`faint()` is `cleareffectsonfaint` (status cleared) and `FaintClearSetData`
+(main:3264), run where the HP reaches 0, so a residual between the faint and
+the replacement sees the cleared state. Spikes (`Cmd_switchineffects`,
+bsc:5180) hits every switch-in, faint replacements included; a Pokémon that
+faints to them skips its switch-in abilities (`tryfaintmon_spikes`,
+bs1:3394), and the frame raises another request in the same phase.
+
 ## Teams
 
 `helpers.hpp` builds a battle from `helpers::Pokemon` sets, as libpkmn's

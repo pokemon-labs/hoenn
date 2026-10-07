@@ -235,8 +235,8 @@ effects. Ignores multi-hit; fixed-damage moves return 0 or 16.
 ## Layout
 
 Mirrors libpkmn's `src/` tree, all headers. Partly written:
-`gen3/mechanics.hpp` (the frame) and `gen3/calc.hpp` (overrides only). Not
-yet written: scenario tests.
+`gen3/mechanics.hpp` (the frame and the hit backbone) and `gen3/calc.hpp`
+(overrides only). Scenario tests: only the few in `check_frame`.
 
 **Build** (CMake, tests and tools only): the library is the `INTERFACE`
 target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
@@ -254,7 +254,9 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   pinned Showdown, or its path as the argument).
 - `check_frame`: the turn frame (start, order, Quick Claw and speed-tie rolls
   with Chance and Calc, trapping, faint requests and resuming, the turn cap),
-  then a random self-play soak over the team files.
+  a few step-3 scenarios (a forced plain hit and its probability, PP, an
+  immunity, Focus Band, Struggle, Spikes, a replacement fainting to Spikes,
+  a double KO), then a random self-play soak over the team files.
 
 ```
 CMakeLists.txt, CMakePresets.json
@@ -283,7 +285,7 @@ tools/
   check_data.cpp      static_asserts on the generated tables
   check_teams.cpp     parses teams/adv/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
-  check_frame.cpp     the turn frame, plus a self-play soak
+  check_frame.cpp     the turn frame and step 3, plus a self-play soak
   damage_oracle.cjs   writes damage_cases.inc from Showdown
 ```
 
@@ -353,9 +355,13 @@ The mechanics checklist. **Expand it as we go:** for each item record the
 decomp source, the decision and the covering test. *(verify)* marks
 unchecked claims.
 
-- **Spikes.** Up to 3 layers: 1/8, 1/6, 1/4 of max HP. Flying and Levitate
-  are immune. Applies on every switch-in: voluntary, faint replacement, Baton
-  Pass, Roar/Whirlwind drag-in. Order relative to Intimidate *(verify)*. When
+- **Spikes** (`Cmd_switchineffects`, bsc:5180; `spikes()`, tested in
+  `check_frame`). Up to 3 layers: 1/8, 1/6, 1/4 of max HP. Flying and
+  Levitate are immune. Applies on every switch-in: voluntary, faint
+  replacement, Baton Pass, Roar/Whirlwind drag-in. It comes before the
+  switch-in abilities and items, which a Spikes faint skips
+  (`tryfaintmon_spikes`, bs1:3394); a replacement that faints to it raises
+  another request in the same phase. When
   both sides replace at once, `HandleFaintedMonActions` goes in battler-ID
   order, not speed order *(verify against Showdown)*.
 - **Effect order.**
@@ -459,18 +465,18 @@ feels like progress; every later mechanic inherits the frame.
    against ADV-Simulator over `teams/`. `damage.hpp` follows Showdown's
    arithmetic, takes no `options` and never draws; a zero divisor is
    asserted (only corrupt stats reach it); the dynamic inputs are a `Hit`,
-   which the hit backbone's per-action `State` (on the stack, as libpkmn
-   gen2's) will contain. Details and the decomp comparison in
+   which the hit backbone builds per action (its `MoveState` is on the
+   stack, as libpkmn gen2's `State`). Details and the decomp comparison in
    `src/gen3/README.md`, "Damage".
 2. The turn frame and roll helpers, with null Chance and Calc. **Done**
    for the frame: `update` falls through the phases, `choices`, selection
    (forced moves, Struggle, Encore), the order with the lazy Quick Claw and
-   tie draws, plain switching, faint requests and the turn cap. The stubs
-   are marked `TODO(plan step N)` in `mechanics.hpp`: a move does nothing;
-   no Spikes, switch-in effects, residuals, Future Sight, Perish Song or
-   Baton Pass; fainting itself (`FaintClearSetData`).
+   tie draws, plain switching, faint requests and the turn cap.
 3. **Switching and plain damaging moves end to end**, including the turn-0
-   start. Start from the `TODO(plan step 3)` markers in `mechanics.hpp`.
+   start. **Done** (2026-10-07, branch `step3`): everything in scope below,
+   with the decomp trace and the deviations in `src/gen3/README.md`, "Hit
+   backbone". What it left for step 4 is marked `TODO(plan step 4)` in
+   `mechanics.hpp`. Scenario tests are only the few in `check_frame`.
    - **In scope:**
      - The hit backbone for `Effect::Hit` (`BattleScript_EffectHit`): the
        attack canceler, PP (deducted from both the active and the party
@@ -547,11 +553,17 @@ feels like progress; every later mechanic inherits the frame.
   `chance.hpp`'s per-hit draws are `HitDraws`, since `damage.hpp` owns
   `Hit`.
 
-**Not started:** the hit backbone and every move effect, switch-in effects,
-the residuals, `min_ko_roll`, scenario tests. Only the damage formula has been
+- `gen3/mechanics.hpp`, plan step 3: the hit backbone for plain hits and
+  `Effect::Recoil` (Struggle), the attack canceler, accuracy, PP, crit,
+  the roll, Focus Band, fainting (`faint()`), Spikes on every switch-in, and
+  the battle start traced (its abilities wait for step 4).
+
+**Not started:** every other move effect (they only use PP), switch-in
+abilities and items, the residuals, the ability and item dispatchers,
+`min_ko_roll`, most scenario tests. Only the damage formula has been
 compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
 through the damage cases. birch still runs on ADV-Simulator and must be
-adapted (plan step 3; see Interface).
+adapted (see Interface).
 
 **Open:**
 
