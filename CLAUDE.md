@@ -5,6 +5,58 @@ libpkmn's design choices (a small POD battle, one `update` per turn, the
 choice/result protocol, and the Chance and Calc options), but it's written in
 C++ and doesn't chase every saved bit.
 
+## Strategy: replace Emerald's battle scripts with direct code (candidate)
+
+Emerald drives battles with a bytecode VM. Scripts in
+`data/battle_scripts_*.s` are byte streams of opcodes. `gBattlescriptCurrInstr`
+is the program counter, and `gBattleScriptingCommandsTable` dispatches one
+opcode per frame to a `Cmd_*` handler in `src/battle_script_commands.c`.
+`call` and `return` use a separate fixed stack of script pointers. The VM
+exists so the GBA can pause mid-turn for text and animations. We have no
+frames, so we don't port it.
+
+- **Write each mechanic as ordinary functions, as libpkmn does.** Read a
+  script as the spec for order of operations: which checks run, which state
+  changes happen and when RNG is called, in that sequence. Drop the
+  presentation-only opcodes (`waitmessage`, `waitanimation`, and so on).
+- **A script VM would break the safety rules.** Its state is a program
+  counter and a return stack of pointers, and `Battle` holds no pointers.
+- **Suspend only at real decisions.** These are Baton Pass and faint
+  replacements. `Battle.request` records where `update` resumes. Keep the
+  turn phases explicit and few, so nothing needed to resume lives in a C++
+  stack frame.
+- **Shared tails become helpers.** Scripts jump into each other's middles
+  (`BattleScript_HitFromAccCheck` and the like). Those entry points become
+  functions that several effects call.
+
+**Why the translation is hand work, not codegen.** The scripts themselves
+are easy: 615 labels, explicit branches, matched `call`/`return`. The hard
+part is the control flow hidden in C:
+
+- 313 places in C assign `gBattlescriptCurrInstr` directly. Each of the 247
+  `Cmd_*` handlers chooses its own successor, sometimes a script that the
+  bytecode never names.
+- 91 calls to `BattleScriptPush` from C inject subroutine calls (can't-attack
+  paths, ability and item triggers).
+- Re-entrant state machines: `moveend` (`moveendState`) runs one case, can
+  call out to a script, then resumes at the next case. `gBattleMainFunc`
+  sequences the turn the same way.
+- Global flags used as control signals: `gHitMarker` and `gMoveResultFlags`
+  carry decisions like "move failed" or "skip damage" between distant
+  instructions.
+- `various` is one opcode with 27 subcommands.
+
+**Approach: one mechanic at a time, limited to the competitive pool.**
+
+1. Trace the move effect's script path. Read every `Cmd_*` handler it
+   reaches, and note where each one can send the program counter and which
+   global flags it reads or sets.
+2. Rewrite the path as one direct function that cites the decomp lines.
+3. Optionally (not built yet): a small tool that decodes the script bytes
+   and dumps, per label, every branch target and called script. It would
+   give a checklist and catch missed branches. It can't do the translation,
+   because the semantics live in the C handlers.
+
 ## Priorities, in order
 
 1. **Safety.** Week-long paid RL runs must not die or be quietly corrupted.
