@@ -2,8 +2,8 @@
 // the Quick Claw and speed-tie rolls with Chance and Calc, trapping, faint
 // requests and resuming, the turn cap, and a random self-play soak over the
 // given team files (every update keeps the battle valid; debug asserts the
-// rest). Moves do nothing yet (plan step 3), so every soak game ends in a tie
-// at the turn cap.
+// rest). Also the plain hits, Struggle, fainting and Spikes (plan step 3);
+// every other move only uses PP so far.
 //
 // Usage: check_frame [team files...]
 
@@ -199,15 +199,27 @@ void check_switch() {
   CHECK(o.chance.durations.p1.confusion == 0);
 }
 
+// Snorlax whose only move does nothing yet, for the turn cap.
+const helpers::Pokemon IDLE = {
+    .species = Species::Snorlax,
+    .moves = {Move::Splash},
+    .ability = Ability::Immunity,
+    .nature = Nature::Adamant,
+    .gender = Gender::Male,
+};
+
 void check_faints() {
   Null null{};
   {
-    // A Pokémon fainted mid-turn: replaced at once, then the end of turn.
+    // A Pokémon fainted mid-turn: replaced at once, its move cancelled, then
+    // the end of turn. Quick Attack goes first and KOs a Jolteon at 1 HP.
     Battle b = started({SNORLAX}, {JOLTEON, SNORLAX});
-    b.sides[1].get(1).hp = 0;
-    Result r = update(b, Choice::move(1), Choice::move(1), null);
+    b.sides[1].get(1).hp = 1;
+    const uint16_t hp = b.sides[0].get(1).hp;
+    Result r = update(b, Choice::move(2), Choice::move(1), null);
     CHECK(r == Result::init(Result::None, Choice::Pass, Choice::Switch));
     CHECK(b.request.phase == Phase::FaintAfterAction);
+    CHECK(b.sides[0].get(1).hp == hp); // Thunderbolt was cancelled
     std::array<Choice, MAX_CHOICES> out{};
     CHECK(choices(b, Player::P2, r.p2(), out) == 1 && out[0] == Choice::swap(2));
     r = update(b, Choice::pass(), Choice::swap(2), null);
@@ -218,18 +230,128 @@ void check_faints() {
   {
     // No replacement left: the battle ends.
     Battle b = started({SNORLAX}, {JOLTEON});
-    b.sides[1].get(1).hp = 0;
-    const Result r = update(b, Choice::move(1), Choice::move(1), null);
+    b.sides[1].get(1).hp = 1;
+    const Result r = update(b, Choice::move(2), Choice::move(1), null);
     CHECK(r.type() == Result::Win);
+  }
+  {
+    // The replacement faints to Spikes: another request, same phase.
+    Battle b = started({SNORLAX}, {JOLTEON, SNORLAX, JOLTEON});
+    b.sides[1].get(1).hp = 1;
+    b.sides[1].get(2).hp = 1;
+    b.sides[1].conditions.spikes = 1;
+    Result r = update(b, Choice::move(2), Choice::move(1), null);
+    CHECK(r == Result::init(Result::None, Choice::Pass, Choice::Switch));
+    r = update(b, Choice::pass(), Choice::swap(2), null);
+    CHECK(r == Result::init(Result::None, Choice::Pass, Choice::Switch));
+    CHECK(b.request.phase == Phase::FaintAfterAction);
+    CHECK(b.sides[1].get(1).species == Species::Snorlax);
+    CHECK(b.sides[1].get(1).hp == 0);
+    r = update(b, Choice::pass(), Choice::swap(3), null);
+    CHECK(r == Result::start() && b.turn == 2);
+  }
+}
+
+void check_moves() {
+  {
+    // A plain hit (Quick Attack), forced through Calc: no crit, the 100%
+    // roll. Recorded in Chance with its probability.
+    Battle b = started({SNORLAX}, {SNORLAX});
+    Observed o{};
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    o.calc.overrides.p1.hits[0].damage = 100;
+    const uint16_t hp = b.sides[1].get(1).hp;
+    const uint32_t expected =
+        apply_roll(damage(b, Player::P1, Hit::of(Move::QuickAttack)), 15);
+    // Body Slam's effect isn't written yet: it only uses PP.
+    CHECK(update(b, Choice::move(2), Choice::move(1), o) == Result::start());
+    CHECK(b.sides[1].get(1).hp == hp - expected);
+    CHECK(o.chance.actions.p1.hits[0].crit == Optional::False);
+    CHECK(o.chance.actions.p1.hits[0].damage == 100);
+    // Quick Attack's 100% accuracy draws nothing.
+    CHECK(o.chance.actions.p1.hit == Optional::None);
+    o.chance.probability.reduce();
+    CHECK(o.chance.probability.p == 15 && o.chance.probability.q == 256);
+    // PP on both the active Pokémon and the party, for both players.
+    CHECK(b.sides[0].active.moves[1].pp == b.sides[0].get(1).moves[1].pp);
+    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack, 3) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::BodySlam, 3) - 1);
+    CHECK(b.sides[1].active.last_landed_move == Move::QuickAttack);
+  }
+  {
+    // A Ground move into a Flying type: no effect, no draws, PP used.
+    Battle b = started({DUGTRIO}, {helpers::detail::SKARMORY});
+    Observed o{};
+    const uint16_t hp = b.sides[1].get(1).hp;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[1].get(1).hp == hp);
+    CHECK(o.chance.actions.p1 == Action{});
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Earthquake, 3) - 1);
+  }
+  {
+    // Focus Band, forced: the lethal hit leaves 1 HP.
+    Battle b = started({SNORLAX}, {holding(SNORLAX, Item::FocusBand)});
+    b.sides[1].get(1).hp = 5;
+    Observed o{};
+    o.calc.overrides.p1.hits[0].focus_band = Optional::True;
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[1].get(1).hp == 1);
+    CHECK(o.chance.actions.p1.hits[0].focus_band == Optional::True);
+  }
+  {
+    // Struggle uses no PP and takes a quarter of the damage back. Here the
+    // recoil faints the user as the hit faints the target: both last
+    // Pokémon down in one action is a tie.
+    Battle b = started({SNORLAX}, {IDLE});
+    for (MoveSlot& m : b.sides[0].active.moves) m.pp = 0;
+    std::array<Choice, MAX_CHOICES> out{};
+    CHECK(choices(b, Player::P1, Choice::Move, out) == 1 && out[0] == Choice::move(0));
+    b.sides[0].get(1).hp = 1;
+    b.sides[1].get(1).hp = 1;
+    Null null{};
+    CHECK(update(b, Choice::move(0), Choice::move(1), null).type() == Result::Tie);
+  }
+  {
+    // Struggle's recoil when both survive.
+    Battle b = started({SNORLAX}, {IDLE});
+    for (MoveSlot& m : b.sides[0].active.moves) m.pp = 0;
+    Observed o{};
+    const uint16_t hp1 = b.sides[0].get(1).hp;
+    const uint16_t hp2 = b.sides[1].get(1).hp;
+    update(b, Choice::move(0), Choice::move(1), o);
+    const uint16_t dealt = uint16_t(hp2 - b.sides[1].get(1).hp);
+    CHECK(dealt > 0);
+    CHECK(b.sides[0].get(1).hp == hp1 - (dealt / 4 ? dealt / 4 : 1));
+    // Struggle took no PP from the party either.
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BodySlam, 3));
+  }
+  {
+    // Spikes on a switch: 1/8, 1/6, 1/4 of max HP.
+    for (uint8_t layers = 1; layers <= 3; layers++) {
+      Battle b = started({SNORLAX, JOLTEON}, {IDLE});
+      b.sides[0].conditions.spikes = layers;
+      Null null{};
+      update(b, Choice::swap(2), Choice::move(1), null);
+      const Pokemon& j = b.sides[0].get(1);
+      CHECK(j.hp == j.stats.hp - j.stats.hp / ((5 - layers) * 2));
+    }
+    // Not on a Flying type.
+    Battle b = started({SNORLAX, helpers::detail::SKARMORY}, {IDLE});
+    b.sides[0].conditions.spikes = 3;
+    Null null{};
+    update(b, Choice::swap(2), Choice::move(1), null);
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
   }
 }
 
 void check_turn_cap() {
-  Battle b = started({SNORLAX}, {JOLTEON});
+  Battle b = started({IDLE}, {IDLE});
   Null null{};
   Result r = Result::start();
   int updates = 0;
   while (!r.over() && updates < 2000) {
+    // Splash has 64 PP; refill it so nobody Struggles.
+    for (Side& side : b.sides) side.active.moves[0].pp = side.get(1).moves[0].pp = 64;
     r = update(b, Choice::move(1), Choice::move(1), null);
     updates++;
   }
@@ -258,7 +380,7 @@ void soak(const std::vector<std::vector<helpers::Pokemon>>& teams) {
       CHECK(b.valid());
       updates++;
     }
-    CHECK(r.type() == Result::Tie && b.turn == Battle::MAX_TURNS);
+    CHECK(b.turn <= Battle::MAX_TURNS);
   }
   std::printf("soak: %zu games, %zu updates\n", games, updates);
 }
@@ -271,6 +393,7 @@ int main(int argc, char** argv) {
   check_trapping();
   check_switch();
   check_faints();
+  check_moves();
   check_turn_cap();
 
   std::vector<std::vector<helpers::Pokemon>> teams;

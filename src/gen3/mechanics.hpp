@@ -141,6 +141,132 @@ constexpr Player speed_tie(Battle& battle, bool residual, O& options) {
   return p1 ? Player::P1 : Player::P2;
 }
 
+// A yes/no draw with probability num / den, for player p's action. `forced`
+// is the Calc override (None rolls) and `field` the Actions field to record.
+template <typename O>
+constexpr bool coin(Battle& battle, Optional forced, Optional* field,
+                    uint32_t num, uint32_t den, O& options) {
+  assert(num >= 1 && num < den);
+  assert(forced <= Optional::False);
+  const bool yes = forced != Optional::None ? forced == Optional::True
+                                            : battle.rng.chance(num, den);
+  if constexpr (detail::CHANCE<O>) {
+    record(*field, optional(yes));
+    observe(options, yes ? num : den - num, den);
+  }
+  (void)field;
+  return yes;
+}
+
+// coin() on p's Action field `m`: its Calc override and its record.
+template <typename O>
+constexpr bool coin(Battle& battle, Player p, Optional Action::*m,
+                    uint32_t num, uint32_t den, O& options) {
+  Optional forced = Optional::None;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).*m;
+  Optional* field = nullptr;
+  if constexpr (detail::CHANCE<O>) field = &(options.chance.actions.get(p).*m);
+  return coin(battle, forced, field, num, den, options);
+}
+
+// Thawing at a move attempt: Random() % 5 == 0 (CANCELER_FROZEN, util:2048).
+template <typename O>
+constexpr bool thaw(Battle& battle, Player p, O& options) {
+  return coin(battle, p, &Action::thaw, 1, 5, options);
+}
+
+// Full paralysis: Random() % 4 == 0 (CANCELER_PARALYZED, util:2175).
+template <typename O>
+constexpr bool paralysis(Battle& battle, Player p, O& options) {
+  return coin(battle, p, &Action::paralysis, 1, 4, options);
+}
+
+// Immobilized by love: !(Random() & 1) (CANCELER_IN_LOVE, util:2190).
+template <typename O>
+constexpr bool infatuation(Battle& battle, Player p, O& options) {
+  return coin(battle, p, &Action::infatuation, 1, 2, options);
+}
+
+// The accuracy check: a hit unless Random() % 100 + 1 > calc (bsc:1176).
+// Called only for 0 < calc < 100; outside that the outcome is certain.
+template <typename O>
+constexpr bool hit(Battle& battle, Player p, uint32_t calc, O& options) {
+  assert(calc > 0 && calc < 100);
+  return coin(battle, p, &Action::hit, calc, 100, options);
+}
+
+// A crit on hit `i`: !(Random() % n) with n from the crit stage (bsc:1282).
+template <typename O>
+constexpr bool crit(Battle& battle, Player p, uint8_t i, uint8_t stage,
+                    O& options) {
+  assert(i < 5 && stage < 5);
+  const uint8_t n = CRITICAL_HIT_CHANCE[stage];
+  Optional forced = Optional::None;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].crit;
+  Optional* field = nullptr;
+  if constexpr (detail::CHANCE<O>) field = &options.chance.actions.get(p).hits[i].crit;
+  return coin(battle, forced, field, 1, n, options);
+}
+
+// The defender's Focus Band on hit `i`: Random() % 100 < param (bsc:1677).
+// Called only when the hit would be lethal.
+template <typename O>
+constexpr bool focus_band(Battle& battle, Player p, uint8_t i, uint8_t param,
+                          O& options) {
+  assert(i < 5);
+  Optional forced = Optional::None;
+  if constexpr (detail::CALC<O>) {
+    forced = options.calc.overrides.get(p).hits[i].focus_band;
+  }
+  Optional* field = nullptr;
+  if constexpr (detail::CHANCE<O>) {
+    field = &options.chance.actions.get(p).hits[i].focus_band;
+  }
+  return coin(battle, forced, field, param, 100, options);
+}
+
+// The damage roll on hit `i`: 100 - Random() % 16 percent
+// (ApplyRandomDmgMultiplier, bsc:1641). Returns apply_roll's index, 0-15
+// (85-100%). Actions holds the percentage.
+template <typename O>
+constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
+  assert(i < 5);
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].damage;
+  assert(forced == 0 || (forced >= 85 && forced <= 100));
+  const uint8_t index =
+      forced != 0 ? uint8_t(forced - 85) : uint8_t(battle.rng.range(16));
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).hits[i].damage, uint8_t(85 + index));
+    observe(options, 1, 16);
+  }
+  return index;
+}
+
+// A hidden counter's tick, observed: whether the effect ends now. The battle
+// holds the true counter, so nothing is drawn; this records the outcome, its
+// probability given the public count, and the new count. Callers guard it
+// with `if constexpr (detail::CHANCE<O>)`. `field` is the Action field,
+// `count` the Durations count (0 is untracked: no probability, and it stays
+// 0), `lo`-`hi` the roll's range and `by` the step (2 for Early Bird). A
+// count of c means c - 1 steps were taken, so the roll N is uniform on
+// [max(lo, c), hi] and the effect ends now if N <= c - 1 + by.
+template <typename O>
+constexpr void tick(Optional& field, uint8_t& count, bool ended, uint8_t lo,
+                    uint8_t hi, uint8_t by, O& options) {
+  static_assert(detail::CHANCE<O>);
+  record(field, optional(ended));
+  const uint8_t c = count;
+  if (c == 0) return;
+  const unsigned min = c > lo ? c : lo;
+  assert(min <= hi);
+  const unsigned last = unsigned(c - 1 + by) < hi ? unsigned(c - 1 + by) : hi;
+  const unsigned ends = last >= min ? last - min + 1 : 0;
+  const unsigned total = hi - min + 1;
+  observe(options, ended ? ends : total - ends, total);
+  count = ended ? 0 : uint8_t(c + by);
+}
+
 } // namespace rolls
 
 namespace detail {
@@ -323,10 +449,81 @@ constexpr void turn_cleanup(Battle& battle) {
   }
 }
 
+// p's active Pokémon has just reached 0 HP: cleareffectsonfaint (bsc), which
+// clears its status, then FaintClearSetData (main:3264). The Pokémon stays
+// in the active slot until its replacement switches in, so it keeps its
+// species, stats, moves and ability; its stages, volatiles, disable struct
+// and last-move fields are cleared, its types revert to its species', and
+// the foe loses the state this Pokémon was the source of. The decomp leaves
+// gLockedMoves and gBideDmg, and so does this.
+template <typename O>
+constexpr void faint(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  Pokemon& mon = side.get(1);
+  assert(mon.fainted());
+  mon.status = Status::none();
+
+  ActivePokemon& a = side.active;
+  const ActivePokemon kept = a;
+  a = ActivePokemon{};
+  a.bide_damage = kept.bide_damage;
+  a.stats = kept.stats;
+  for (uint8_t i = 0; i < 4; i++) a.moves[i] = kept.moves[i];
+  a.species = kept.species;
+  a.locked_move = kept.locked_move;
+  a.types[0] = get(a.species).types[0];
+  a.types[1] = get(a.species).types[1];
+  a.ability = kept.ability;
+  a.first_turn = 2;
+
+  ActivePokemon& f = battle.side(foe(player)).active;
+  f.volatiles.escape_prevention = false;
+  f.volatiles.infatuated = false;
+  f.volatiles.wrapped = 0;
+  f.wrapped_move = Move::None;
+  f.last_taken_move = Move::None;
+
+  if constexpr (CHANCE<O>) {
+    Durations::Side& d = options.chance.durations.get(player);
+    d.sleep[0] = 0;
+    d.confusion = 0;
+    d.disable = 0;
+    d.encore = 0;
+    d.binding = 0;
+    d.attacking = 0;
+    options.chance.durations.get(foe(player)).binding = 0;
+  }
+}
+
+// Spikes on a switch-in (Cmd_switchineffects, bsc:5180): max HP /
+// ((5 - layers) * 2), at least 1, so 1/8, 1/6 or 1/4. Flying types and
+// Levitate are immune. Returns whether the Pokémon fainted, in which case
+// tryfaintmon_spikes (bs1:3394) skips its switch-in abilities and items.
+template <typename O>
+constexpr bool spikes(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  ActivePokemon& a = side.active;
+  const uint8_t layers = side.conditions.spikes;
+  if (layers == 0 || has_type(a, Type::Flying) ||
+      a.ability == Ability::Levitate) {
+    return false;
+  }
+  assert(layers <= 3);
+  Pokemon& mon = side.get(1);
+  a.volatiles.destiny_bond = false;
+  uint16_t damage = uint16_t(mon.stats.hp / ((5 - layers) * 2));
+  if (damage == 0) damage = 1;
+  mon.hp = mon.hp > damage ? uint16_t(mon.hp - damage) : 0;
+  if (!mon.fainted()) return false;
+  faint(battle, player, options);
+  return true;
+}
+
 // The Pokémon in SLOT 1 becomes active: Cmd_switchindataupdate (bsc:4621)
 // and SwitchInClearSetData (main:3152), as README decision 4. Then
 // switchineffects (bsc:5180).
-constexpr void switch_in(Battle& battle, Player player) {
+template <typename O>
+constexpr void switch_in(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
   const Pokemon& mon = side.get(1);
   assert(mon.species != Species::None && !mon.fainted());
@@ -341,9 +538,10 @@ constexpr void switch_in(Battle& battle, Player player) {
   a.ability = mon.ability;
   a.first_turn = 2; // main:3220, decision 14
 
-  // TODO(plan step 3): switchineffects: Spikes (bsc:5239), then the switch-in
-  // abilities and items.
+  if (spikes(battle, player, options)) return;
   if (a.ability == Ability::Truant) a.truant = true; // bsc:5258
+  // TODO(plan step 4): the switch-in abilities and items
+  // (ABILITYEFFECT_ON_SWITCHIN, ITEMEFFECT_ON_SWITCH_IN).
 }
 
 // p's active Pokémon leaves for SLOT `slot`: a switch action or a faint
@@ -368,7 +566,7 @@ constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
 
   std::swap(side.order[0], side.order[slot - 1]);
   if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot);
-  switch_in(battle, player);
+  switch_in(battle, player, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,8 +581,8 @@ constexpr bool lost(const Side& side) {
 }
 
 // Cmd_checkteamslost (bsc:3534): both sides out is a draw (B_OUTCOME_DREW
-// is WON | LOST). Who loses when both last Pokémon faint in one action is
-// still to verify against Showdown (CLAUDE.md, "Tricky mechanics").
+// is WON | LOST), whoever fainted first, Explosion included. Showdown agrees
+// for Gen III (CLAUDE.md, plan step 3).
 constexpr Flow outcome(const Battle& battle) {
   const bool l1 = lost(battle.sides[0]);
   const bool l2 = lost(battle.sides[1]);
@@ -397,12 +595,7 @@ constexpr Flow outcome(const Battle& battle) {
 
 // HandleFaintedMonActions (util:1880) at the point `phase` names: the end of
 // the battle, or a replacement request for each side whose active Pokémon
-// fainted.
-//
-// TODO(plan step 3): fainting itself (FaintClearSetData, main:3264, and the
-// status clear) belongs where HP reaches 0. switch_to clears the foe's state
-// only at the replacement, so a residual pass between the two would still
-// see it.
+// fainted. Fainting itself (faint()) happened where the HP reached 0.
 constexpr Flow faints(Battle& battle, Phase phase) {
   if (Flow over = outcome(battle)) return over;
   const bool f1 = battle.sides[0].get(1).fainted();
@@ -433,19 +626,548 @@ constexpr void replace(Battle& battle, Choice c1, Choice c2, O& options) {
 
 // Turn 0, as libpkmn's start: both leads come in and the battle moves to
 // turn 1.
-template <typename O> constexpr Result start(Battle& battle, O&) {
-  switch_in(battle, Player::P1);
-  switch_in(battle, Player::P2);
-  // TODO: TryDoEventsBeforeFirstTurn (main:3841), untraced: switch-in
-  // weather, abilities and items in speed order (CLAUDE.md, "Open").
+//
+// Then TryDoEventsBeforeFirstTurn (main:3841): it orders the battlers by
+// GetWhoStrikesFirst ignoring chosen moves (a speed tie draws), then runs the
+// switch-in weather (none in link battles), the switch-in abilities in that
+// order, Intimidate, Trace and the switch-in items in that order, then
+// TurnValuesCleanUp and the turn's Quick Claw draw. Only the abilities and
+// items depend on the order, so the tie is drawn with them, in step 4.
+template <typename O> constexpr Result start(Battle& battle, O& options) {
+  switch_in(battle, Player::P1, options);
+  switch_in(battle, Player::P2, options);
+  // TODO(plan step 4): the switch-in abilities and items, in speed order.
   turn_cleanup(battle);
   battle.turn = 1;
   return Result::start();
 }
 
-// HandleAction_UseMove (util:78) and the move's script.
-// TODO(plan step 3): the hit backbone. Until then a move does nothing.
-template <typename O> constexpr void use_move(Battle&, Player, O&) {}
+// ---------------------------------------------------------------------------
+// Moves
+// ---------------------------------------------------------------------------
+
+// The decomp's MOVE_UNAVAILABLE (0xFFFF), which gLastMoves and
+// gLastLandedMoves record for a move that was stopped. TODO: a sentinel in
+// the generator (CLAUDE.md, "Open"); until then None stands in, which only
+// matters to Encore, Disable, Mimic and the like (plan step 4).
+inline constexpr Move UNAVAILABLE = Move::None;
+
+// What one move execution tracks: the decomp's per-action globals
+// (gCurrentMove, gCurrMovePos, gMoveResultFlags, gHpDealt) and the
+// gHitMarker bits that this code reads. On the stack, as libpkmn gen2's
+// State; HandleAction_ActionFinished (util:661) clears the hit markers
+// between actions.
+struct MoveState {
+  Move move;         // gCurrentMove, which is also gChosenMove here
+  uint8_t slot;      // gCurrMovePos, 0-3, or NO_SLOT
+  uint8_t result;    // gMoveResultFlags (MoveResult)
+  uint16_t hp_dealt; // gHpDealt: HP the target or its Substitute lost
+  bool self;         // the target is the user (MOVE_TARGET_USER)
+  bool no_pp;        // HITMARKER_NO_PPDEDUCT (Struggle)
+  bool obeys;        // HITMARKER_OBEYS: passed the attack canceler
+  bool attackstring; // HITMARKER_ATTACKSTRING_PRINTED
+  bool unable;       // HITMARKER_UNABLE_TO_USE_MOVE
+  bool damaged;      // TARGET_TURN_DAMAGED: the target's own HP took damage
+
+  static constexpr uint8_t NO_SLOT = 4;
+};
+
+constexpr bool physical(Type type) { return type < Type::Mystery; }
+
+// AtkCanceler_UnableToUseMove (util:1987), then the rest of
+// Cmd_attackcanceler (bsc:915). Returns whether the move goes ahead; if not,
+// the caller goes to moveend, as every canceling script does. The cases run
+// in the decomp's order, and the first that stops the move ends the check.
+template <typename O>
+constexpr bool cancel(Battle& battle, Player player, MoveState& m,
+                      O& options) {
+  Side& side = battle.side(player);
+  Pokemon& mon = side.get(1);
+  ActivePokemon& a = side.active;
+  const ActivePokemon& f = battle.side(foe(player)).active;
+  Volatiles& v = a.volatiles;
+  // A faint ends the actions, so the attacker is never fainted here.
+  assert(!mon.fainted());
+
+  // CANCELER_FLAGS
+  v.destiny_bond = false;
+  v.grudge = false;
+
+  // CANCELER_ASLEEP. Uproar wakes it outright (UproarWakeUpCheck, bsc:6801),
+  // unless it has Soundproof; that's public, so Durations just resets.
+  // Otherwise the counter ticks, and it still can't move unless it woke up
+  // or uses Snore or Sleep Talk.
+  if (mon.status.asleep()) {
+    const bool uproar = (battle.sides[0].active.volatiles.uproar != 0 ||
+                         battle.sides[1].active.volatiles.uproar != 0) &&
+                        a.ability != Ability::Soundproof;
+    if (uproar) {
+      mon.status = Status::none();
+      v.nightmare = false;
+      if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+    } else {
+      const uint8_t by = a.ability == Ability::EarlyBird ? 2 : 1;
+      const bool rest = mon.status.self_inflicted();
+      const bool woke = !mon.status.tick_sleep(by);
+      if constexpr (CHANCE<O>) {
+        // Rest's counter is always 3 (Status::REST_SLEEP).
+        rolls::tick(options.chance.actions.get(player).sleep,
+                    options.chance.durations.get(player).sleep[0], woke,
+                    rest ? Status::REST_SLEEP : Status::MIN_SLEEP,
+                    rest ? Status::REST_SLEEP : Status::MAX_SLEEP, by,
+                    options);
+      }
+      if (woke) {
+        v.nightmare = false;
+      } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
+        m.unable = true;
+        return false;
+      }
+    }
+  }
+
+  // CANCELER_FROZEN: it thaws with 1/5. A thawing move (EFFECT_THAW_HIT)
+  // that stays frozen goes on, and CANCELER_THAW thaws it below if nothing
+  // else stops the move first. A frozen Pokémon that can't move prints no
+  // attack string (HITMARKER_NO_ATTACKSTRING).
+  const bool thaw_hit = get(m.move).effect == Effect::ThawHit;
+  if (mon.status.frozen()) {
+    if (rolls::thaw(battle, player, options)) {
+      mon.status = Status::none();
+    } else if (!thaw_hit) {
+      return false;
+    }
+  }
+
+  // CANCELER_TRUANT. The counter toggles at the end of each turn
+  // (ABILITYEFFECT_ENDTURN, util:2640). TODO(plan step 4): that toggle.
+  if (a.ability == Ability::Truant && a.truant) {
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    m.result |= MoveResult::MISSED;
+    return false;
+  }
+
+  // CANCELER_RECHARGE
+  if (v.recharge) {
+    v.recharge = false;
+    a.recharge_timer = 0;
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
+  // CANCELER_FLINCH
+  if (v.flinched) {
+    v.flinched = false;
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
+  // CANCELER_DISABLED
+  if (a.disabled_move != Move::None && a.disabled_move == m.move) {
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
+  // CANCELER_TAUNTED
+  if (a.taunt != 0 && get(m.move).bp == 0) {
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
+  // CANCELER_IMPRISONED: GetImprisonedMovesCount, the foe Imprisoned and
+  // knows the move.
+  if (f.volatiles.imprisoned_others) {
+    bool imprisoned = false;
+    for (const MoveSlot& fm : f.moves) imprisoned |= fm.id == m.move;
+    if (imprisoned) {
+      a.cancel_multi_turn_moves();
+      m.unable = true;
+      return false;
+    }
+  }
+
+  // CANCELER_CONFUSED. TODO(plan step 4): the tick, the 1/2 self-hit and its
+  // damage (Showdown's gen4 confusion condition calls getDamage with a
+  // typeless 40-power move; decide whose arithmetic to follow). Nothing in
+  // step 3 confuses.
+  assert(v.confusion == 0 && "confusion isn't implemented");
+
+  // CANCELER_PARALYZED. The decomp's own CancelMultiTurnMoves is commented
+  // out, but the script it jumps to runs cancelmultiturnmoves (bs1:3773).
+  if (mon.status.paralyzed() && rolls::paralysis(battle, player, options)) {
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
+  // CANCELER_IN_LOVE
+  if (v.infatuated && rolls::infatuation(battle, player, options)) {
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
+  // CANCELER_BIDE. TODO(plan step 4). Nothing in step 3 starts Bide.
+  assert(v.bide == 0 && "Bide isn't implemented");
+
+  // CANCELER_THAW
+  if (mon.status.frozen()) {
+    assert(thaw_hit);
+    mon.status = Status::none();
+  }
+
+  // TODO(plan step 4): ABILITYEFFECT_MOVES_BLOCK (Soundproof).
+
+  // No PP left (BattleScript_NoPPForMove, bs1:3556): only if the PP went
+  // to 0 after selection, by Spite or Pressure from a faster foe.
+  if (m.slot != MoveState::NO_SLOT && a.moves[m.slot].pp == 0 &&
+      m.move != Move::Struggle && !v.multiple_turns) {
+    m.attackstring = true;
+    m.result |= MoveResult::MISSED;
+    return false;
+  }
+
+  m.obeys = true;
+  // TODO(plan step 4): Magic Coat, Snatch and Protect, which need the
+  // per-turn ProtectStruct (README decision 2).
+  return true;
+}
+
+// The accuracy check without its draw (Cmd_accuracycheck, bsc:1099, and
+// AccuracyCalcHelper, bsc:1054): 0 for a certain miss, 100 or more for a
+// certain hit, otherwise the hit chance in percent. The decomp's arithmetic
+// (ACCURACY_STAGE_RATIOS and integer percentages), not Showdown's
+// (README, "Accuracy").
+constexpr uint32_t accuracy(const Battle& battle, Player player,
+                            const MoveState& m) {
+  const Side& side = battle.side(player);
+  const ActivePokemon& a = side.active;
+  const Side& foe_side = battle.side(foe(player));
+  const ActivePokemon& f = foe_side.active;
+  const MoveData& data = get(m.move);
+  const Weather weather = effective_weather(battle);
+
+  // Lock-On and Mind Reader: the only possible locker in singles is the
+  // attacker.
+  if (f.volatiles.lock_on != 0) return 100;
+  // Semi-invulnerable targets. Surf hits Dive (HITMARKER_IGNORE_UNDERWATER,
+  // bs1:239). TODO(plan step 4): the moves that set IGNORE_ON_AIR and
+  // IGNORE_UNDERGROUND (Gust, Twister, Thunder, Sky Uppercut, Earthquake,
+  // Magnitude).
+  if (f.volatiles.on_air || f.volatiles.underground) return 0;
+  if (f.volatiles.underwater && m.move != Move::Surf) return 0;
+  if ((weather == Weather::Rain && data.effect == Effect::Thunder) ||
+      data.effect == Effect::AlwaysHit || data.effect == Effect::VitalThrow) {
+    return 100;
+  }
+
+  int stage = f.volatiles.foresight ? a.boosts.acc : a.boosts.acc - f.boosts.eva;
+  stage = stage < -6 ? -6 : stage > 6 ? 6 : stage;
+  uint32_t acc = data.accuracy;
+  if (weather == Weather::Sun && data.effect == Effect::Thunder) acc = 50;
+  const Fraction& r = ACCURACY_STAGE_RATIOS[unsigned(stage + 6)];
+  uint32_t calc = r.num * acc / r.den;
+
+  if (a.ability == Ability::CompoundEyes) calc = calc * 130 / 100;
+  if (f.ability == Ability::SandVeil && weather == Weather::Sandstorm) {
+    calc = calc * 80 / 100;
+  }
+  if (a.ability == Ability::Hustle && physical(data.type)) calc = calc * 80 / 100;
+  const ItemData item = item_data(foe_side.get(1).item);
+  if (item.effect == HoldEffect::EvasionUp) calc = calc * (100 - item.param) / 100;
+  return calc;
+}
+
+// Cmd_ppreduce (bsc:1205): one PP, or two into Pressure, unless the move
+// uses none (Struggle). A move that isn't Mimic's or Transform's
+// (MOVE_IS_PERMANENT) writes the PP back to the party.
+constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m) {
+  if (m.no_pp || m.slot == MoveState::NO_SLOT) return;
+  Side& side = battle.side(player);
+  ActivePokemon& a = side.active;
+  MoveSlot& ms = a.moves[m.slot];
+  if (ms.pp == 0) return;
+  const uint8_t deduct =
+      1 + (!m.self && battle.side(foe(player)).active.ability == Ability::Pressure);
+  ms.pp = ms.pp > deduct ? uint8_t(ms.pp - deduct) : 0;
+  if (!a.volatiles.transformed && !(a.mimicked & (1 << m.slot))) {
+    side.get(1).moves[m.slot].pp = ms.pp;
+  }
+}
+
+// Cmd_datahpupdate (bsc:1844) on p's target, for a move's damage: a
+// Substitute takes it if there is one, otherwise the Pokémon does, and the
+// damage counts toward its Bide. Returns gHpDealt.
+//
+// TODO(plan step 4): the per-turn physical and special damage that Counter
+// and Mirror Coat read (ProtectStruct, README decision 2).
+constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
+                             MoveState& m) {
+  Side& side = battle.side(target);
+  ActivePokemon& a = side.active;
+  if (a.volatiles.substitute && a.substitute_hp != 0) {
+    const uint8_t dealt =
+        a.substitute_hp >= damage ? uint8_t(damage) : a.substitute_hp;
+    a.substitute_hp = uint8_t(a.substitute_hp - dealt);
+    return dealt;
+  }
+  a.bide_damage = a.bide_damage > UINT32_MAX - damage ? UINT32_MAX
+                                                      : a.bide_damage + damage;
+  Pokemon& mon = side.get(1);
+  const uint16_t dealt = mon.hp > damage ? uint16_t(damage) : mon.hp;
+  mon.hp = uint16_t(mon.hp - dealt);
+  m.damaged = true;
+  return dealt;
+}
+
+// Cmd_moveend (bsc:4210) with moveendall: the cases in the decomp's order.
+template <typename O>
+constexpr void moveend(Battle& battle, Player player, const MoveState& m,
+                       O&) {
+  Side& side = battle.side(player);
+  ActivePokemon& a = side.active;
+  Side& target_side = m.self ? side : battle.side(foe(player));
+  ActivePokemon& t = target_side.active;
+  const Pokemon& target = target_side.get(1);
+  const MoveData& data = get(m.move);
+  const bool no_effect = m.result & MoveResult::NO_EFFECT;
+  // TODO(plan step 4): the dynamic type (Hidden Power, Weather Ball).
+  const Type type = data.type;
+
+  // MOVEEND_RAGE
+  if (!m.self && t.volatiles.rage && !target.fainted() && !no_effect &&
+      m.damaged && data.bp != 0 && t.boosts.atk < 6) {
+    t.boosts.atk++;
+  }
+
+  // MOVEEND_DEFROST: a Fire move's special damage thaws the target.
+  if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
+      !physical(type) && !no_effect && type == Type::Fire) {
+    target_side.get(1).status = Status::none();
+  }
+
+  // TODO(plan step 4): MOVEEND_SYNCHRONIZE_TARGET, ON_DAMAGE_ABILITIES,
+  // IMMUNITY_ABILITIES and SYNCHRONIZE_ATTACKER (AbilityBattleEffects).
+
+  // MOVEEND_CHOICE_MOVE. A Baton Pass that worked doesn't lock, and skips
+  // the check that the locked move is still known.
+  bool skip = false;
+  if (m.obeys && holds(side, HoldEffect::ChoiceBand) &&
+      m.move != Move::Struggle && a.choice_move == Move::None) {
+    skip = m.move == Move::BatonPass && !(m.result & MoveResult::FAILED);
+    if (!skip) a.choice_move = m.move;
+  }
+  if (!skip) {
+    bool known = false;
+    for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
+    if (!known) a.choice_move = Move::None;
+  }
+
+  // TODO(plan step 4): MOVEEND_CHANGED_ITEMS (Trick, Thief, Covet).
+
+  // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends the
+  // attacker's semi-invulnerable turn.
+  if (no_effect || m.unable) {
+    a.volatiles.on_air = false;
+    a.volatiles.underground = false;
+    a.volatiles.underwater = false;
+  }
+
+  // TODO(plan step 4): MOVEEND_ITEM_EFFECTS_ALL and KINGSROCK_SHELLBELL
+  // (ItemBattleEffects).
+
+  // MOVEEND_SUBSTITUTE
+  for (Side& s : battle.sides) {
+    if (s.active.substitute_hp == 0) s.active.volatiles.substitute = false;
+  }
+
+  // MOVEEND_UPDATE_LAST_MOVES
+  if (m.attackstring) a.last_printed_move = m.move;
+  if (data.effect != Effect::BatonPass) {
+    a.last_move = m.obeys ? m.move : UNAVAILABLE;
+    a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
+    if (m.obeys && !no_effect) {
+      t.last_landed_move = m.move;
+      t.last_hit_type = type;
+    } else {
+      t.last_landed_move = UNAVAILABLE;
+    }
+  }
+
+  // MOVEEND_MIRROR_MOVE
+  if ((data.flags & Flag::MirrorMoveAffected) && m.obeys && !m.self &&
+      !target.fainted() && !no_effect) {
+    t.last_taken_move = m.move;
+  }
+}
+
+// The effects whose script is BattleScript_EffectHit with the table's power,
+// and Effect::Recoil, which sets MOVE_EFFECT_RECOIL_25 first (bs1:897).
+// Quick Attack and Vital Throw differ only in priority (the table); Pursuit
+// only when the target switches (TODO(plan step 4)).
+constexpr bool plain_hit(Effect effect) {
+  switch (effect) {
+  case Effect::Hit:
+  case Effect::AlwaysHit:
+  case Effect::HighCritical:
+  case Effect::VitalThrow:
+  case Effect::FalseSwipe:
+  case Effect::QuickAttack:
+  case Effect::Pursuit:
+  case Effect::Recoil:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Every move with one of those effects has a power to hit with.
+static_assert([] {
+  for (uint16_t i = 1; i < MOVES; i++) {
+    const MoveData& data = get(Move(i));
+    if (plain_hit(data.effect) && data.bp == 0) return false;
+  }
+  return true;
+}());
+
+// BattleScript_EffectHit (bs1:236), from the attack canceler on.
+template <typename O>
+constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+
+  Side& side = battle.side(player);
+  const Player defender = foe(player);
+  Side& foe_side = battle.side(defender);
+  Pokemon& target = foe_side.get(1);
+  const MoveData& data = get(m.move);
+  Hit h = Hit::of(m.move);
+
+  // typecalc's immunities first, as Showdown (decided; README "Damage"). A
+  // move with no effect draws neither accuracy nor crit: the decomp draws
+  // them, but no outcome changes anything.
+  m.result |= matchup(battle, player, h);
+  const bool affects = !(m.result & MoveResult::NO_EFFECT);
+  if (affects) {
+    const uint32_t calc = accuracy(battle, player, m);
+    const bool hits =
+        calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options));
+    if (!hits) {
+      // BattleScript_PrintMoveMissed (bs1:273)
+      m.result |= MoveResult::MISSED;
+      m.attackstring = true;
+      pp_reduce(battle, player, m);
+      return moveend(battle, player, m, options);
+    }
+  }
+  // TODO(plan step 4): what JumpIfMoveFailed does after a hit (bsc:1009):
+  // Destiny Bond's setup and the absorbing abilities (Volt Absorb, Water
+  // Absorb, Flash Fire).
+
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+
+  if (affects) {
+    // critcalc, damagecalc, typecalc, then adjustnormaldamage: the roll,
+    // then whatever lets the target survive at 1 HP (not behind a
+    // Substitute). Focus Band is drawn only when the hit would be lethal,
+    // and not for False Swipe, which spares the target anyway.
+    if (can_crit(battle, player)) {
+      h.crit = rolls::crit(battle, player, 0,
+                           crit_stage(battle, player, m.move), options);
+    }
+    uint32_t d = apply_roll(damage(battle, player, h),
+                            rolls::damage(battle, player, 0, options));
+    if (!foe_side.active.volatiles.substitute && target.hp <= d) {
+      const ItemData item = item_data(target.item);
+      bool survives = data.effect == Effect::FalseSwipe;
+      if (!survives && item.effect == HoldEffect::FocusBand) {
+        survives = rolls::focus_band(battle, player, 0, item.param, options);
+      }
+      // TODO(plan step 4): Endure (ProtectStruct).
+      if (survives) d = target.hp - 1u;
+    }
+    // datahpupdate
+    m.hp_dealt = hp_update(battle, defender, d, m);
+  }
+
+  // seteffectwithchance: Effect::Recoil's certain MOVE_EFFECT_RECOIL_25, a
+  // quarter of the HP dealt, at least 1 (bsc:2636). Rock Head prevents it
+  // except for Struggle (BattleScript_MoveEffectRecoil, bs1:3938). The recoil
+  // script faints the user before the target's tryfaintmon below.
+  Pokemon& user = side.get(1);
+  if (data.effect == Effect::Recoil && affects &&
+      (m.move == Move::Struggle || side.active.ability != Ability::RockHead)) {
+    uint16_t recoil = uint16_t(m.hp_dealt / 4);
+    if (recoil == 0) recoil = 1;
+    user.hp = user.hp > recoil ? uint16_t(user.hp - recoil) : 0;
+    if (user.fainted()) faint(battle, player, options);
+  }
+
+  // tryfaintmon
+  if (target.fainted()) faint(battle, defender, options);
+  moveend(battle, player, m, options);
+}
+
+// HandleAction_UseMove (util:78): which move and slot the action uses, then
+// its script. Struggle uses no PP. A forced move is the locked move. Encore
+// applies even when it began after selection: the encored move replaces the
+// chosen one, unless it was overwritten, which ends the Encore.
+template <typename O>
+constexpr void use_move(Battle& battle, Player player, O& options) {
+  const Request& r = battle.request;
+  const uint8_t i = index(player);
+  ActivePokemon& a = battle.side(player).active;
+  const uint8_t data = r.choice[i].data();
+
+  MoveState m{};
+  m.slot = MoveState::NO_SLOT;
+  if (data == 0 && r.move[i] == Move::Struggle) {
+    m.move = Move::Struggle;
+    m.no_pp = true;
+  } else if (forced(a)) {
+    // gCurrMovePos keeps the slot chosen when the lock began *(verify)*.
+    m.move = a.locked_move;
+    for (uint8_t s = 0; s < 4; s++) {
+      if (a.moves[s].id == m.move) {
+        m.slot = s;
+        break;
+      }
+    }
+  } else if (a.encored_move != Move::None &&
+             a.moves[a.encored_slot].id == a.encored_move) {
+    m.move = a.encored_move;
+    m.slot = a.encored_slot;
+  } else if (a.encored_move != Move::None) {
+    m.slot = a.encored_slot;
+    m.move = a.moves[m.slot].id;
+    a.encored_move = Move::None;
+    a.encored_slot = 0;
+    a.encore_timer = 0;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).encore = 0;
+  } else {
+    assert(data >= 1 && data <= 4);
+    m.slot = uint8_t(data - 1);
+    m.move = a.moves[m.slot].id;
+  }
+  assert(m.move != Move::None);
+  m.self = get(m.move).target == Target::User;
+
+  if (plain_hit(get(m.move).effect)) return hit(battle, player, m, options);
+
+  // TODO(plan step 4): every other effect. Until then the move only uses
+  // its PP (decided): the attack canceler, attackstring and ppreduce, then
+  // moveend.
+  if (cancel(battle, player, m, options)) {
+    m.attackstring = true;
+    pp_reduce(battle, player, m);
+  }
+  moveend(battle, player, m, options);
+}
 
 // RunTurnActionsFunctions (main:4937) from action `from` (0, or after a
 // Baton Pass the next one). Each action ends in HandleAction_TryFinish
@@ -620,19 +1342,35 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
     [[fallthrough]];
   }
   case Phase::FaintAfterAction:
-    if (phase == Phase::FaintAfterAction) replace(battle, c1, c2, options);
+    if (phase == Phase::FaintAfterAction) {
+      replace(battle, c1, c2, options);
+      // A replacement can faint to Spikes: replace it before going on.
+      if ((f = faints(battle, phase))) return checked(battle, *f);
+    }
     if ((f = end_of_turn(battle, options))) return checked(battle, *f);
     [[fallthrough]];
   case Phase::FaintAfterResiduals:
-    if (phase == Phase::FaintAfterResiduals) replace(battle, c1, c2, options);
+    if (phase == Phase::FaintAfterResiduals) {
+      replace(battle, c1, c2, options);
+      // A replacement can faint to Spikes: replace it before going on.
+      if ((f = faints(battle, phase))) return checked(battle, *f);
+    }
     if ((f = future_sight(battle, options))) return checked(battle, *f);
     [[fallthrough]];
   case Phase::FaintAfterFutureSight:
-    if (phase == Phase::FaintAfterFutureSight) replace(battle, c1, c2, options);
+    if (phase == Phase::FaintAfterFutureSight) {
+      replace(battle, c1, c2, options);
+      // A replacement can faint to Spikes: replace it before going on.
+      if ((f = faints(battle, phase))) return checked(battle, *f);
+    }
     if ((f = perish_song(battle, options))) return checked(battle, *f);
     [[fallthrough]];
   case Phase::FaintAfterPerish:
-    if (phase == Phase::FaintAfterPerish) replace(battle, c1, c2, options);
+    if (phase == Phase::FaintAfterPerish) {
+      replace(battle, c1, c2, options);
+      // A replacement can faint to Spikes: replace it before going on.
+      if ((f = faints(battle, phase))) return checked(battle, *f);
+    }
     return checked(battle, next_turn(battle));
   }
   assert(false && "invalid phase");
