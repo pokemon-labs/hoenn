@@ -134,9 +134,16 @@ competitive play, not cartridge-exact behaviour for every input.
 ## Interface (libpkmn's shape)
 
 Keep libpkmn's shape, as C++ templates and plain functions. Names and
-signatures are ours. birch's search (`cpp/include/search/mcts.h`) currently
-calls ADV-Simulator's `pkmn_gen3_*` functions; swapping engines means
-changing those call sites in birch.
+signatures are ours. birch still runs on ADV-Simulator, in two ways (both
+under `../cpp/include/`):
+- **Its C-style API** (`pkmn_gen3_*`): `search/mcts.h`, `search/data.h`,
+  `search/poke-engine-evaluate.h`, `gen3/parse.h`, `util/`. Search calls
+  update, choices, reseed and `randomize_hidden`. It keys chance nodes on the
+  raw `Actions` bytes (`Obs`, sized `PKMN_GEN3_CHANCE_ACTIONS_SIZE`), and its
+  damage-roll clamping writes override bytes 0 and 8.
+- **Its C++ `::Battle` object API** (`get_stats()`, `team.active()`...):
+  the encoders in `encode/`, `nn/`, `py/` and `train/`. These read
+  ADV-Simulator's durations as 12 bytes per player; ours are 11.
 
 - **`update(battle, c1, c2, options) -> Result`** runs one turn, or the rest
   of a turn after a mid-turn request. At turn 0 both players pass and
@@ -426,30 +433,32 @@ Self-Destruct and Explosion halving Defense, Struggle, running out of PP.
 ## Plan
 
 **Soften the nut:** build the shared structures first, so each effect
-becomes a few lines.
+becomes a few lines. These are structures, not steps:
 
-1. **The turn frame:** the phases above as an explicit table, with suspend
-   and resume settled once.
-2. **The hit backbone:** `BattleScript_EffectHit` (canceler, accuracy, PP,
-   crit, damage, type calc, adjust, hit, secondary, faint check, `moveend`),
-   with its entry points as helpers.
-3. **The dispatchers:** `moveend`'s cases, `AbilityBattleEffects`,
-   `ItemBattleEffects`, the attack canceler and the end-of-turn order, each
-   one ordered list.
-4. **The roll helpers:** one per catalogue row (Calc override, RNG, Chance
-   report), as libpkmn's `Rolls` (see "Chance", Hooks).
-5. **The checks:** `Battle::valid()` asserted after every `update` in debug,
-   plus soak runs.
+- **The turn frame:** the phases above as an explicit table, with suspend
+  and resume settled once.
+- **The hit backbone:** `BattleScript_EffectHit` (canceler, accuracy, PP,
+  crit, damage, type calc, adjust, hit, secondary, faint check, `moveend`),
+  with its entry points as helpers.
+- **The dispatchers:** `moveend`'s cases, `AbilityBattleEffects`,
+  `ItemBattleEffects`, the attack canceler and the end-of-turn order, each
+  one ordered list.
+- **The roll helpers:** one per catalogue row (Calc override, RNG, Chance
+  report), as libpkmn's `Rolls` (see "Chance", Hooks).
+- **The checks:** `Battle::valid()` asserted after every `update` in debug,
+  plus soak runs.
 
-**Next steps, in order** (don't rush step 3 because "birch runs" feels like
-progress; every later mechanic inherits the frame):
+**Plan steps, in order.** "Step N of the plan" and the `TODO(plan step N)`
+markers in the code mean this list. Don't rush step 3 because "birch runs"
+feels like progress; every later mechanic inherits the frame.
 
 1. The pure calculation functions. **Done** except checking `calc_stats`
    against ADV-Simulator over `teams/`. `damage.hpp` follows Showdown's
    arithmetic, takes no `options` and never draws; a zero divisor is
-   asserted (only corrupt stats reach it); the dynamic inputs are a `Hit`, which plan step 2's
-   per-action `State` (on the stack, as libpkmn gen2's) contains. Details
-   and the decomp comparison in `src/gen3/README.md`, "Damage".
+   asserted (only corrupt stats reach it); the dynamic inputs are a `Hit`,
+   which the hit backbone's per-action `State` (on the stack, as libpkmn
+   gen2's) will contain. Details and the decomp comparison in
+   `src/gen3/README.md`, "Damage".
 2. The turn frame and roll helpers, with null Chance and Calc. **Done**
    for the frame: `update` falls through the phases, `choices`, selection
    (forced moves, Struggle, Encore), the order with the lazy Quick Claw and
@@ -457,9 +466,32 @@ progress; every later mechanic inherits the frame):
    are marked `TODO(plan step N)` in `mechanics.hpp`: a move does nothing;
    no Spikes, switch-in effects, residuals, Future Sight, Perish Song or
    Baton Pass; fainting itself (`FaintClearSetData`).
-3. Switching and plain damaging moves end to end, including the turn-0
+3. **Switching and plain damaging moves end to end**, including the turn-0
    start. Done when birch's search, adapted to this interface, runs against
-   it.
+   it. Start from the `TODO(plan step 3)` markers in `mechanics.hpp`.
+   - **In scope:**
+     - The hit backbone for `Effect::Hit` (`BattleScript_EffectHit`): the
+       attack canceler, PP (deducted from both the active and the party
+       copy), accuracy, crit, damage via `damage.hpp`, the roll, the hit,
+       the faint check, the `moveend` cases a plain hit reaches.
+     - Struggle, which `choices()` already offers (recoil, no PP).
+     - Roll helpers for accuracy, crit and the damage roll.
+     - Fainting (`FaintClearSetData`, main:3264). Spikes on every switch-in.
+     - The turn-0 start: trace `TryDoEventsBeforeFirstTurn` (main:3841).
+     - Scenario tests for what this reaches; Spikes layers can be set by
+       hand before the move exists.
+   - **Settle with the user before writing** (the working rule):
+     - What a not-yet-written effect does until step 4: a no-op that still
+       uses PP, a plain hit at its table power, or an assert.
+     - Crit before the immunity check, as the decomp does, or after, as
+       Showdown does (README "Damage", last paragraph).
+     - Switch-in abilities (Intimidate, Sand Stream, Drizzle, Trace) now or
+       in step 4, given that the weather residuals are step 4.
+     - Scope of the birch adaptation (see Interface): only search with a
+       non-NN evaluator, or the encoders too. Also the `Obs` key and
+       clamping offsets, and the Durations layout.
+     - Who loses when both last Pokémon faint in one action (Struggle
+       recoil can do it). Verify against Showdown.
 4. Trace the hit backbone and the dispatchers, then add effects by group,
    starting with what `teams/` uses. The log comes last.
 
@@ -505,15 +537,15 @@ progress; every later mechanic inherits the frame):
 - The build: CMake presets for debug (ASan/UBSan) and release, with
   `headers`, `check_data`, `check_damage`, `check_teams` and `check_frame`
   passing in both, under g++ and clang.
-- `gen3/mechanics.hpp`: the turn frame (plan step 2; see Next steps).
+- `gen3/mechanics.hpp`: the turn frame (plan step 2; see Plan steps).
   `chance.hpp`'s per-hit draws are `HitDraws`, since `damage.hpp` owns
   `Hit`.
 
 **Not started:** the hit backbone and every move effect, switch-in effects,
 the residuals, `min_ko_roll`, scenario tests. Only the damage formula has been
 compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
-through the damage cases. birch's search still calls ADV-Simulator's `pkmn_gen3_*`
-functions and must be adapted (plan step 3).
+through the damage cases. birch still runs on ADV-Simulator and must be
+adapted (plan step 3; see Interface).
 
 **Open:**
 
