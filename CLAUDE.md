@@ -5,6 +5,12 @@ libpkmn's design choices (a small POD battle, one `update` per turn, the
 choice/result protocol, and the Chance and Calc options), but it's written in
 C++ and doesn't chase every saved bit.
 
+**Be cautious, and don't push ahead.** While a design choice is still open,
+don't offer to write, add or commit the thing it affects. Lay out the open
+choices and their tradeoffs, give a recommendation, and wait for the user to
+decide. Help the user be careful: point out assumptions and unverified
+claims rather than smoothing over them.
+
 **Singles only.** The engine is for 1v1 singles battles (Smogon ADV OU).
 Doubles get no consideration: skip the decomp's doubles-only branches
 (ally targeting, spread damage, `gBattlersCount > 2`, Follow Me, Helping
@@ -129,9 +135,10 @@ Tests check the result; they don't drive the design.
 
 ## API (must match libpkmn)
 
-birch's search (`cpp/include/search/mcts.h`) already calls the `pkmn_gen3_*`
-C API that ADV-Simulator's `src/pkmn/gen3.hpp` provides. This engine exposes
-the same API, so it can be swapped in.
+birch's search (`cpp/include/search/mcts.h`) calls a `pkmn_gen3_*` C API.
+This engine provides the functions it calls, so it can be swapped in. Only
+the function names and signatures are fixed; the struct sizes and byte
+layouts behind them are our own, derived from Emerald.
 
 - **`update(battle, c1, c2, options) -> Result`** runs one turn, or the rest
   of a turn after a mid-turn request.
@@ -140,8 +147,7 @@ the same API, so it can be swapped in.
 - **Choice** is one byte, `{type: Pass | Move | Switch, data}`.
   - A move's data is the slot, 1–4. Data 0 means Struggle, or a forced
     continuation such as a charging move, a rampage or Bide.
-  - A switch's data is the team slot. Teams don't reorder, as in
-    ADV-Simulator's API.
+  - A switch's data is the team slot. Teams don't reorder.
   - Pass's data is 0.
 - **Result** is one byte, `{type: None | Win | Lose | Tie | Error, p1, p2}`.
   `p1` and `p2` are the Choice type each player must make next. A faint
@@ -149,8 +155,23 @@ the same API, so it can be swapped in.
   replacement is a mid-turn `Switch`.
 - **Options** take the form `{log, chance, calc}`. Each is either a real type
   or a null type.
+- **The log comes last.** Search always runs with the null log, so the log
+  isn't needed for the skeleton or the mechanics. We will support it, as the
+  last simulator code we write, after the mechanics (plan step 2). It is the
+  source of public information for imperfect-information use: what a player
+  actually sees, as on Showdown. Until then, keep the `Log` template
+  parameter and the null type so adding it later changes no signatures.
 
 ### Chance: hidden state lives in the battle, observations live outside it
+
+**Chance assumes perfect information** (open teams: both players know every
+species, move, item, ability and stat). "Public" below means public in that
+setting. So `Actions` can record outcomes the cartridge never shows, such as
+a Focus Band that didn't activate or a contact ability that didn't proc,
+because both players already know the item or ability. Don't design Chance
+for imperfect information. Imperfect-information public signals will come
+from the log, and `Durations` is the perfect-information version of the
+bookkeeping a log reader would do.
 
 As in libpkmn, the battle stores the **true hidden state**. A sleep's length
 is rolled when the sleep is inflicted and kept as a remaining-turns counter.
@@ -159,14 +180,13 @@ Uproar. The decomp sets the counters at infliction; take the ranges from it.
 
 `Chance` keeps the **public** information:
 
-- **`Durations`** says how many turns each hidden effect has visibly lasted
-  for each side. There are six sleep slots per side, plus confusion,
-  Disable, Encore, binding and attacking.
-- **`Actions`** has fixed per-player slots that record which random branch
-  this update took. It covers the damage roll, hit, crit, secondary effect,
-  speed tie, Quick Claw, full paralysis, confusion self-hit, infatuation,
-  multi-hit count, the move-slot draw (Sleep Talk), the Roar target, ability
-  and item procs, and observations of hidden durations ending or continuing.
+- **`Durations`** counts, for each hidden effect, how many steps its counter
+  has visibly taken since it was set. There are six sleep slots per side,
+  plus confusion, Disable, Encore, binding and attacking.
+- **`Actions`** records which random branch this update took: one `Action`
+  per player, plus a shared `Turn` for draws that serve both sides (Quick
+  Claw, the two speed ties). `chance.hpp` catalogues every reachable
+  `Random()` site, with its multiplicity, and maps it to a field.
 - **`probability`** is the rational probability of the branch taken.
 
 **The observation must determine the branch exactly. No hashing.** Search
@@ -198,9 +218,12 @@ and it pushes probability bookkeeping into the engine.
 
 Calc follows libpkmn's `calc.zig`:
 
-- **Overrides** force the damage roll (85–100) and crit for each side. The
-  forced values show up in `Actions`.
-- **`Summaries`** report the base and final damage of each attack.
+- **Overrides** are an `Actions`: the same struct Chance observes. A nonzero
+  field forces that branch; 0 rolls normally. Anything worth observing is
+  worth forcing, and the reverse. Hidden rolls are in neither; to fix a
+  sleep length, set the counter in the battle.
+- **`Summaries`** (libpkmn: per-player base and final damage, and whether
+  HP capped it, so equivalent damage rolls can be merged) are on hold.
 
 ### Extra: the minimum KO roll
 
@@ -223,7 +246,7 @@ rewrite/
     rng.hpp                 64-bit PRNG on the in-battle seed
     options.hpp             Options<Log, Chance, Calc>, null types
     rational.hpp            exact probabilities for Chance
-    protocol.hpp            optional binary log (off in hot builds)
+    protocol.hpp            binary log (written last; see "The log comes last")
   src/gen3/
     README.md               decisions and deviations, like libpkmn's gen*/README.md
     data.hpp                Battle, Side, Pokemon, ActivePokemon, Volatiles,
@@ -233,14 +256,14 @@ rewrite/
     mechanics.hpp           update(), choices(), turn order, moves, residuals
     helpers.hpp             building a battle from teams, for tests and tools
     chance.hpp              Actions, Durations, Chance
-    calc.hpp                Overrides, Summaries, min_ko_roll
+    calc.hpp                Overrides, min_ko_roll (Summaries on hold)
     test.cpp                scenario tests
-  tools/                    data generators (from the decomp or ADV-Sim tables)
+  tools/                    data generators (from the decomp)
 ```
 
 ### Data layout (draft)
 
-This starts from libpkmn's Gen II layout and adds what ADV-Simulator tracks.
+This starts from libpkmn's Gen II layout and adds what Gen III needs.
 Moves and species are 16 bits. Items and abilities are 8 bits; items are
 remapped to held items only.
 
@@ -292,8 +315,12 @@ the decomp yet.
   - Turn order:
     - switches before moves
     - then priority
-    - then Quick Claw
+    - then Quick Claw. One u16 per turn (`gRandomTurnNumber`) serves both
+      sides, so two holders activate together.
     - then speed, with a random tiebreak
+  - End-of-turn order calls `GetWhoStrikesFirst` again (`ENDTURN_ORDER`), so
+    a speed tie is re-rolled independently there, and Quick Claw applies to
+    it too.
   - `GetWhoStrikesFirst` and `SetActionsAndBattlersTurnOrder` are in
     `battle_main.c`.
   - End-of-turn effects come in two passes:
@@ -320,8 +347,8 @@ the decomp yet.
   - The pick is a `move_slot` chance action.
   - The called move doesn't use PP.
   - It fails if no move can be called.
-  - Interactions with Choice Band and Encore: ADV-Sim's `ef95175` stops
-    Encore from redirecting the called move.
+  - Interactions with Choice Band and Encore: Encore shouldn't redirect the
+    called move *(verify)*.
   - It is only usable while asleep. The sleep counter keeps ticking.
 - **Roar and Whirlwind.** Priority −6.
   - The replacement is a random non-fainted bench Pokémon. It is a chance
@@ -362,9 +389,10 @@ Explosion halving Defense, Struggle, and running out of PP.
 2. **Mechanics.**
    - Work in this order:
      1. Fill in turn order, damage, status, residuals and switching from the
-        decomp, using ADV-Sim to check coverage.
+        decomp.
      2. Add every move, ability and item that appears in `teams/`.
      3. Add the rest of the competitive pool.
+     4. Last, the log (`protocol.hpp`).
    - Each mechanic is one analytical code path with a decomp citation.
 3. **Testing.**
    - **Scenario tests** for each tricky mechanic, with the RNG forced through
@@ -378,7 +406,7 @@ Explosion halving Defense, Struggle, and running out of PP.
      is respected.
    - **A benchmark** against ADV-Simulator's 19k iterations/s.
 
-## Status and caveats (2026-10-06)
+## Status and caveats (2026-10-07)
 
 **Done:**
 - `pokeemerald/` is a depth-1 clone of pret/pokeemerald. It sits on the local
@@ -390,31 +418,60 @@ Explosion halving Defense, Struggle, and running out of PP.
   `src/gen3/README.md` lists the weird cases: the Hidden Power split, the
   Deoxys forms, species order, Struggle, type-effectiveness order, and the
   `Mail`/`Other` items.
-- `tools/check_data.cpp` has compile-time spot checks. Nothing else is tested,
-  and there's no build system yet.
 - `src/gen3/data.hpp` has `Status`: a 2-byte struct holding libpkmn's
   status byte (hidden sleep counter, `EXT` for Rest or bad poison) and the
   Toxic counter, which persists through switching.
-- `src/gen3/chance.hpp` is only a comment so far: the decomp findings on
-  every hidden duration (rolls, what makes each tick, Baton Pass, Early
-  Bird, Rest). Durations itself is on hold.
+- `src/common/data.hpp` has `Player`, `ID`, `Choice` and `Result`, with
+  libpkmn's byte layouts.
+- `src/common/rng.hpp` has the RNG: SplitMix64 on a u64 seed, with
+  `range(n)` and `chance(num, den)` helpers that are loop-free. The header
+  maps each decomp `Random()` shape to a helper.
+- `src/gen3/chance.hpp` has:
+  - the decomp findings on every hidden duration (rolls, what makes each
+    step, Baton Pass, Early Bird, Rest)
+  - a catalogue of every reachable `Random()` site with its multiplicity per
+    update
+  - draft `Actions` (101 B), one struct for both the Chance observation and
+    the Calc overrides
+  - draft `Durations` (22 B), counting counter steps, so Early Bird adds 2
+    per attempt (but see the open choice below)
+- Testing so far is only `static_assert`s, checked with `-fsyntax-only`
+  (`tools/check_data.cpp` and the headers). There's no build system yet.
 
 **Open work, in no fixed order:**
-- the battle-state enums (weather, volatiles, side
-  conditions; on hold), the per-`Effect` behaviour (hand-written with the
-  mechanics, not generated) and Hidden Power from IVs.
-- `common/`: `Player`, `ID`, `Choice`, `Result`, `Options` and the null types
-- the RNG: a u64 seed, with draw helpers that mirror the decomp's
-  `Random() % n` and `& mask` shapes so Chance probabilities come out exact
-- `rational.hpp`
-- a `pkmn.h` stub matching what birch's `cpp/include/search/mcts.h` calls
+- the `Battle`, `Side`, `Pokemon` and `ActivePokemon` layout, with the
+  battle-state enums (weather, volatiles, side conditions). Per the "data
+  covers the full game" rule, volatiles need room for every Gen III status2,
+  status3 and disable-struct field.
+- the per-`Effect` behaviour (hand-written with the mechanics, not
+  generated) and Hidden Power from IVs
+- `common/rational.hpp`. This is next.
+- `common/options.hpp`: `Options` and the null types. It needs `Rational`
+  and the hook interface: the calls the engine makes into Chance and Calc at
+  each draw. The interface isn't designed yet; it falls out of the
+  `Random()` catalogue.
+- `Chance` (Actions, Durations, probability) and `randomize_hidden`
+- `Summaries`, on hold
+- a `pkmn.h` stub with the functions birch's `cpp/include/search/mcts.h`
+  calls
 - pure calculation functions: stats, stat stages, crit stages, base damage,
   type application in `ORDER`
-- a coverage report that parses `teams/` into our enums, counts the effects,
-  abilities and hold effects in use, and diffs the tables against ADV-Sim's
-- the build: release and ASan/UBSan presets. The generator stays a
-  one-off dev tool, not part of the build.
-- the `Actions`, `Durations` and `Summaries` shapes
+- a coverage report that parses `teams/` into our enums and counts the
+  effects, abilities and hold effects in use
+- the build: release and ASan/UBSan presets, plus a target that runs the
+  tests. The generator stays a one-off dev tool, not part of the build.
+- **Open choice: what Durations counts for sleep.**
+  - *Counter steps* (the draft): Early Bird adds 2 per attempt.
+    `randomize_hidden` needs nothing else, and it stays right when Skill
+    Swap or Trace changes the ability mid-sleep.
+  - *Move attempts*: a count that doesn't depend on the ability. But
+    `randomize_hidden` would have to convert attempts to steps from the
+    current ability, which is wrong if the ability changed mid-sleep.
+  - The only argument for attempts was imperfect information, which now
+    belongs to the log. That favours keeping steps. Not decided.
+- **Still unverified:** whether Sleep Talk's called move re-runs the attack
+  canceler (a second sleep step). The Actions and Durations drafts haven't
+  been checked against the `Battle` layout yet.
 
 **Caveats:**
 - **Deoxys forms.** The Attack and Defense stats are hard-coded in the

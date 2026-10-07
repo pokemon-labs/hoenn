@@ -5,11 +5,11 @@
 
 namespace pkmn::gen3 {
 
-// TODO: Durations. These are findings from the decomp (pokeemerald, branch
-// battle-only); nothing below is implemented yet.
+// Durations. These are findings from the decomp (pokeemerald, branch
+// battle-only); the struct follows the Actions catalogue below.
 //
-// Durations keeps the *public* side of each hidden duration: how many times
-// the counter has visibly ticked. The battle keeps the true counter. Search
+// Durations keeps the *public* side of each hidden duration: how many steps
+// the counter has visibly taken. The battle keeps the true counter. Search
 // resamples the true counter from Durations before each iteration. Every roll
 // is exactly uniform (Random() & 3, & 1 or % 4), so after k ticks with the
 // effect still running, the initial roll N is uniform over the values with
@@ -41,10 +41,10 @@ namespace pkmn::gen3 {
 // - The counter is checked before the move. When it reaches 0 the Pokémon
 //   wakes and acts that same turn, so N gives N - 1 turns of being unable to
 //   move.
-// - Early Bird takes 2 per tick (wakes at attempt ceil(N / 2)). Dodrio,
-//   Natu/Xatu, Ledian and the Seedot line may or may not have it, so the
-//   ability can be hidden. Resampling the ability and the sleep counter has
-//   to stay jointly consistent with what was seen.
+// - Early Bird takes 2 per tick (wakes at attempt ceil(N / 2)). Durations
+//   counts counter steps, not attempts, so an Early Bird attempt adds 2 and
+//   the posterior above holds unchanged. This relies on perfect information:
+//   the battle's ability is the true one.
 // - Rest sets 3 (Cmd_trysetrest, bsc:6779). That's public, so a sleep with
 //   Status::EXT is never resampled.
 // - No tick on turns the Pokémon doesn't attempt a move: it switches, faints
@@ -333,5 +333,43 @@ static_assert(sizeof(Action) == 49);
 static_assert(sizeof(Actions) == 3 + 2 * 49);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
+
+// The public side of each hidden duration: how many steps its counter has
+// visibly taken since it was set (see the findings at the top). The battle
+// holds the true remaining counter; search resamples it from these counts.
+// Whether an effect is active is public and lives in the battle, so a count
+// means nothing while its effect is off. A count resets to 0 when its effect
+// is set or ends.
+//
+// After k steps with the effect still on, the original roll N is uniform
+// over [max(lo, k + 1), hi] and the remaining counter is N - k.
+struct Durations {
+  struct Side {
+    // By team slot: status1 persists through switching, so each Pokémon keeps
+    // its own count. Steps at each move attempt that reaches
+    // CANCELER_ASLEEP: 1, or 2 with Early Bird. Rest's sleep (Status::EXT)
+    // is public and never resampled, but its count is kept the same way.
+    uint8_t sleep[6];  // 0-4 (roll 2-5)
+    // Volatiles on the active Pokémon. A switch clears them, except that
+    // Baton Pass keeps confusion and its count.
+    uint8_t confusion; // 0-4 (roll 2-5), steps at CANCELER_CONFUSED
+    uint8_t disable;   // 0-4 (roll 2-5), steps every end of turn
+    uint8_t encore;    // 0-5 (roll 3-6), steps every end of turn
+    uint8_t binding;   // 0-5 (roll 3-6), on the victim's side
+    uint8_t attacking; // Uproar 0-4 (roll 2-5) or Thrash 0-2 (roll 2-3). They
+                       // can't overlap, and the public locked move says which.
+
+    friend constexpr bool operator==(const Side&, const Side&) = default;
+  };
+
+  Side p1;
+  Side p2;
+
+  friend constexpr bool operator==(const Durations&, const Durations&) = default;
+};
+
+static_assert(sizeof(Durations) == 22);
+static_assert(std::is_trivial_v<Durations> &&
+              std::is_standard_layout_v<Durations>);
 
 } // namespace pkmn::gen3

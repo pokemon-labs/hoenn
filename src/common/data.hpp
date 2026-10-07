@@ -1,7 +1,6 @@
 // Types shared by every generation, as in libpkmn's src/lib/common/data.zig.
-// The byte layouts of Choice and Result are the C ABI's pkmn_choice and
-// pkmn_result (ADV-Simulator's src/pkmn/gen3.hpp), so the C wrapper passes
-// them through without conversion.
+// Choice and Result have libpkmn's byte layouts, so the C ABI's pkmn_choice
+// and pkmn_result are the same bytes and pass through without conversion.
 
 #pragma once
 
