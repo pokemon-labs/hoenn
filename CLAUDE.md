@@ -422,11 +422,18 @@ progress; every later mechanic inherits the frame):
   including the turn-0 rule; `calc_stats`, `hidden_power`, `max_pp`.
 - `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (101 B) and
   `Durations` (22 B).
-- `gen3/helpers.hpp` and `gen3/showdown.hpp`: all 327 teams in `teams/adv/`
-  parse and build except one, which Showdown's validator also rejects (a
-  Hidden Power label its IVs don't produce).
-- Checking is `static_assert`s plus hand-built ASan/UBSan runs of
-  `tools/check_teams.cpp`. No build system yet.
+- `gen3/helpers.hpp` and `gen3/showdown.hpp`: 326 of the 327 teams in
+  `teams/adv/` parse and build. The other, which Showdown's validator also
+  rejects, has a Hidden Power label its IVs don't produce.
+- Decided: header-only C++ library with no C API; Chance's probability is a
+  `double`.
+
+**Not started:** the mechanics (`update`, `choices`, the turn frame, the roll
+helpers), `calc.hpp`, the build system and tests. Checking so far is
+`static_assert`s plus hand-built ASan/UBSan runs of `tools/check_teams.cpp`,
+and nothing has been compared with Showdown, Smogon's damage calculator or
+ADV-Simulator. birch's search still calls ADV-Simulator's `pkmn_gen3_*`
+functions and must be adapted (plan step 4).
 
 **Open:**
 
@@ -443,6 +450,8 @@ progress; every later mechanic inherits the frame):
   would convert using the current ability). The only argument for attempts
   was imperfect information, which now belongs to the log. Leaning steps; not
   decided.
+- Trace the battle start (`TryDoEventsBeforeFirstTurn`): switch-in
+  abilities and items before turn 1, possibly in speed order with a tie draw.
 - Team parsing enforces only Species Clause; the other Smogon ADV clauses
   aren't checked.
 
