@@ -122,3 +122,29 @@ Statements marked *(verify)* haven't been checked against the decomp yet.
   - Sleep Talk also filters with `CheckMoveLimitations`, ignoring PP: Disable,
     Torment, Taunt, Imprison and the Choice lock. That check is mechanics,
     not data.
+
+## Mechanics
+
+Where the decomp and Showdown disagree, or the decomp has a branch we don't
+take, it's recorded here. Where the decomp branches on link battles, the
+default is the link path, as Showdown aims to match Emerald link battles;
+entries here are the exceptions.
+
+- **Knock Off: the non-link path.** An exception to the default (link
+  battles; see CLAUDE.md, "Mechanics references"). Showdown departs from the
+  link path here, and we match Showdown. A knocked-off Pokémon holds
+  `Item::KnockedOff` for the rest of the battle and can never gain an item.
+  - The cartridge in link battles differs. Knock Off clears the battle copy
+    of the item and sets `knockedOffMons` (bsc:2880–2884). Thief/Covet
+    (bsc:2757–2766) and Trick (`Cmd_tryswapitems`, bsc:9206–9216) check that
+    bit only outside `BATTLE_TYPE_LINK` and friends. So in a link battle a
+    knocked-off Pokémon can steal or Trick for an item, which is also written
+    to the party (bsc:2786). Nothing clears the bit in battle, and switch-in
+    clears the item whenever it's set (bsc:4641–4645), so the gained item is
+    lost again at the next switch-in. (That last step is inferred from the
+    bit never being cleared.)
+  - Showdown 0.11.10: Knock Off marks the item `knockedOff`
+    (`data/mods/gen4/moves.ts:875`, inherited by gen3), and `setItem` refuses
+    a knocked-off Pokémon (`sim/pokemon.ts:1811`). Its hint: "In Gens 3-4,
+    Knock Off only makes the target's item unusable; it cannot obtain a new
+    item."

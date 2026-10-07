@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "../common/data.hpp"
+#include "data/moves.hpp"
+
 namespace pkmn::gen3 {
 
 // A Pokémon's major status: the decomp's status1 (include/constants/battle.h),
@@ -17,9 +20,13 @@ namespace pkmn::gen3 {
 //   bit 7     EXT: with SLP, the sleep is self-inflicted (Rest). With PSN, the
 //             poison is Toxic's bad poison.
 //
-// `toxic` is the bad poison counter (STATUS1_TOXIC_COUNTER, 0-15). Like the
-// status, it persists through switching. It lives here so that every write of
-// the status also resets it, as status1 does in the decomp.
+// The bad poison counter (STATUS1_TOXIC_COUNTER) doesn't live here, although
+// the decomp keeps it in status1. The residual (util:1538) bumps it only in
+// gBattleMons, and no write-back to the party happens while it is raised, so
+// every switch-in (Baton Pass included) reloads it as 0. It belongs on the
+// active Pokémon. Every status write in the decomp also clears the counter
+// (Rest sets status1 outright; cures clear STATUS1_TOXIC_COUNTER), so code
+// that changes the active Pokémon's status must reset it too.
 //
 // The sleep counter is hidden information: the battle stores the true value,
 // and Chance's Durations records how many ticks of it were seen. Encoders for
@@ -33,7 +40,6 @@ namespace pkmn::gen3 {
 // `Status{}` or Status::none().
 struct Status {
   uint8_t bits;
-  uint8_t toxic;
 
   static constexpr uint8_t SLP = 0b0000'0111;
   static constexpr uint8_t PSN = 1 << 3;
@@ -48,21 +54,19 @@ struct Status {
   static constexpr uint8_t MAX_SLEEP = 5;
   // Cmd_trysetrest.
   static constexpr uint8_t REST_SLEEP = 3;
-  // ENDTURN_BAD_POISON caps the counter at 15.
-  static constexpr uint8_t MAX_TOXIC = 15;
 
-  static constexpr Status none() { return {0, 0}; }
+  static constexpr Status none() { return {0}; }
   // A sleep with `turns` (1-5) on the counter, inflicted by the foe.
-  static constexpr Status slp(uint8_t turns) { return {uint8_t(turns & SLP), 0}; }
+  static constexpr Status slp(uint8_t turns) { return {uint8_t(turns & SLP)}; }
   // A self-inflicted sleep (Rest).
   static constexpr Status slf(uint8_t turns) {
-    return {uint8_t(EXT | (turns & SLP)), 0};
+    return {uint8_t(EXT | (turns & SLP))};
   }
-  static constexpr Status psn() { return {PSN, 0}; }
-  static constexpr Status tox() { return {TOX, 0}; }
-  static constexpr Status brn() { return {BRN, 0}; }
-  static constexpr Status frz() { return {FRZ, 0}; }
-  static constexpr Status par() { return {PAR, 0}; }
+  static constexpr Status psn() { return {PSN}; }
+  static constexpr Status tox() { return {TOX}; }
+  static constexpr Status brn() { return {BRN}; }
+  static constexpr Status frz() { return {FRZ}; }
+  static constexpr Status par() { return {PAR}; }
 
   constexpr uint8_t sleep() const { return bits & SLP; }
   constexpr bool asleep() const { return sleep() != 0; }
@@ -85,24 +89,15 @@ struct Status {
     return true;
   }
 
-  // The bad poison residual: bumps the counter (capped) and returns the
-  // multiplier on max HP / 16.
-  constexpr uint8_t tick_toxic() {
-    if (toxic < MAX_TOXIC) toxic++;
-    return toxic;
-  }
-
   // A well-formed status: at most one condition, EXT only with SLP or PSN,
-  // sleep within range, and a counter only while badly poisoned. Use this to
-  // reject corrupt input with Result::Error.
+  // and sleep within range. Use this to reject corrupt input with
+  // Result::Error.
   constexpr bool valid() const {
     const uint8_t s = sleep();
     const uint8_t rest = bits & uint8_t(~(SLP | EXT));
     if (s > MAX_SLEEP) return false;
-    if (toxic > MAX_TOXIC) return false;
-    if (s != 0) return rest == 0 && toxic == 0;
+    if (s != 0) return rest == 0;
     if (bits & EXT) return rest == PSN;
-    if (toxic != 0) return false;
     return rest == 0 || rest == PSN || rest == BRN || rest == FRZ ||
            rest == PAR;
   }
@@ -110,7 +105,7 @@ struct Status {
   friend constexpr bool operator==(Status, Status) = default;
 };
 
-static_assert(sizeof(Status) == 2);
+static_assert(sizeof(Status) == 1);
 static_assert(std::is_trivial_v<Status> && std::is_standard_layout_v<Status>);
 
 static_assert(Status::slf(Status::REST_SLEEP).bits == 0b1000'0011);
@@ -128,7 +123,73 @@ static_assert([] {
   return s.tick_sleep(1) && !s.tick_sleep(1);
 }());
 static_assert(Status::slf(3).valid() && Status::tox().valid() && Status{}.valid());
-static_assert(!Status{Status::EXT, 0}.valid() && !Status{Status::PSN | Status::BRN, 0}.valid());
-static_assert(!Status{6, 0}.valid() && !Status{Status::PSN, 1}.valid());
+static_assert(!Status{Status::EXT}.valid() && !Status{Status::PSN | Status::BRN}.valid());
+static_assert(!Status{6}.valid() && Status{Status::PSN}.valid());
+
+// Where update resumes after returning a mid-turn request: every point in
+// gBattleMainFunc's turn where a Pokémon can faint, plus Baton Pass. See
+// "Turn phases" in CLAUDE.md.
+//
+//   None                   no request: the next update starts a turn
+//   BatonPass              the Baton Pass user's side picks the recipient;
+//                          resume by finishing its switch-in, then at action
+//                          Request::next
+//   FaintAfterAction       replace; resume at end of turn. The replacement's
+//                          cancelallactions (bsc:5850) cancelled the rest.
+//   FaintAfterResiduals    replace; resume at Future Sight
+//   FaintAfterFutureSight  replace; resume at Perish Song
+//   FaintAfterPerish       replace; resume at the next turn
+enum class Phase : uint8_t {
+  None,
+  BatonPass,
+  FaintAfterAction,
+  FaintAfterResiduals,
+  FaintAfterFutureSight,
+  FaintAfterPerish,
+};
+
+// What survives a mid-turn request: only what update can't recompute when it
+// resumes. Indexed by Player.
+//
+// `first` acts first. The order is decided once at selection, after the Quick
+// Claw and speed-tie draws, which must not be drawn again on resume.
+//
+// `choice` and `move` are each player's queued action as resolved at
+// selection (gChosenMoveByBattler): Encore, Choice Band and Struggle are
+// applied then. `move` is Move::None for a switch or a pass.
+//
+// `next` is the index into the turn order (0 or 1, or 2 for end of turn) of
+// the action to run after a Baton Pass. It is 0 in every other phase: a faint
+// replacement cancels the rest of the actions, and residual faints don't
+// interrupt the residual passes, so nothing else needs a position.
+//
+// No default member initializers, so the struct stays trivial.
+struct Request {
+  Move move[2];
+  Choice choice[2];
+  Phase phase;
+  Player first;
+  uint8_t next;
+
+  static constexpr uint8_t END_OF_ACTIONS = 2;
+
+  // A well-formed request. Use this to reject corrupt input with
+  // Result::Error.
+  constexpr bool valid() const {
+    if (phase > Phase::FaintAfterPerish) return false;
+    if (first != Player::P1 && first != Player::P2) return false;
+    if (!choice[0].valid() || !choice[1].valid()) return false;
+    if (phase == Phase::BatonPass) return next == 1 || next == END_OF_ACTIONS;
+    return next == 0;
+  }
+};
+
+static_assert(sizeof(Request) == 10); // 9 bytes and 1 of padding
+static_assert(std::is_trivial_v<Request> && std::is_standard_layout_v<Request>);
+static_assert(Request{}.valid());
+static_assert(!Request{{}, {}, Phase::BatonPass, Player::P1, 0}.valid());
+static_assert(Request{{}, {}, Phase::BatonPass, Player::P2, 2}.valid());
+static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1}.valid());
+static_assert(!Request{{}, {}, Phase(6), Player::P1, 0}.valid());
 
 } // namespace pkmn::gen3

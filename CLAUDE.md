@@ -115,7 +115,7 @@ yet is then a gap in `update`, which is easy to fill later. It isn't a
 missing field that changes the layout and everything built on it.
 
 Fuzz testing matters much less here than in libpkmn. We don't promise
-cartridge-exact behaviour for every input; we promise no crashes and correct
+cartridge-exact or showdown-exact behaviour for every input; we promise no crashes and correct
 competitive play.
 
 ## Mechanics references
@@ -126,6 +126,13 @@ competitive play.
   directly would need a lot of infrastructure first, so tests check behaviour
   against Showdown instead. Where the two disagree, record it in
   `src/gen3/README.md`.
+- **Link battles are the default branch.** Showdown's ADV aims to match
+  Emerald link battles, so where the decomp branches on `BATTLE_TYPE_LINK`
+  (or Frontier and the like), take the link path. Where Showdown departs
+  from it anyway, match Showdown, since it's the target, and record the
+  exception in `src/gen3/README.md`. An exception doesn't change the
+  default: decide each branch on its own. Known exceptions: Knock Off
+  (decision 8).
 - **Ignore libpkmn's modes.** libpkmn has a `showdown` option that switches
   between cartridge and Showdown behaviour. That distinction doesn't exist
   here: take libpkmn's structure and conventions, and the mechanics from the
@@ -338,7 +345,11 @@ Sources checked: `BattlePokemon`, status2 and status3, `DisableStruct`,
   reloads status1 from the party, so the counter comes back as it was at
   infliction (0). `Status::toxic` in `gen3/data.hpp` says the opposite; move
   it to `ActivePokemon`. The sleep counter does persist, because the canceler
-  writes it back (util:2259).
+  writes it back (util:2259). Checked (2026-10-07): no `REQUEST_STATUS_BATTLE`
+  write-back fires on a raised counter while the Pokémon is still badly
+  poisoned, and Baton Pass doesn't pass it either: `Cmd_switchindataupdate`
+  (bsc:4621) reloads status1 from the party on every switch-in, and Baton
+  Pass restores only the stat stages and status2.
 - **Wrong in the draft:**
   - **Wish HP.** Wish heals the recipient's max HP / 2 when it lands
     (`Cmd_trywish`). Store only the counter, plus the wisher for the log.
@@ -349,7 +360,8 @@ Sources checked: `BattlePokemon`, status2 and status3, `DisableStruct`,
     cleared on switch-in. Put them on `ActivePokemon`, along with Bide's
     damage.
   - **`Pokemon` types.** Switch-in recomputes the types and the ability from
-    the species (`Cmd_switchindataupdate`). Drop the types from `Pokemon`.
+    the species (`Cmd_switchindataupdate`). Superseded: types stay on
+    `Pokemon` and switch-in copies them (decision 7).
   - **Boosts as i4** contradicts "no bit packing"; use `int8_t[7]`.
 - **Missing:**
   - Weather's permanent-vs-temporary flag (abilities set permanent weather).
@@ -366,7 +378,7 @@ Sources checked: `BattlePokemon`, status2 and status3, `DisableStruct`,
   - Per-turn state that `TurnValuesCleanUp` zeroes: protected, endured, the
     physical and special damage taken (Counter, Mirror Coat, Focus Punch).
   - What `request` holds: the phase, and the other player's queued action,
-    already resolved at selection.
+    already resolved at selection. See [Turn phases](#turn-phases).
 - **PP rule.** PP spent is written back to the party unless the user is
   transformed or the slot was replaced by Mimic (`Cmd_ppreduce`,
   `MOVE_IS_PERMANENT`). Transform gives 5 PP per copied move.
@@ -376,14 +388,178 @@ Sources checked: `BattlePokemon`, status2 and status3, `DisableStruct`,
 - **Size.** About 2 × 365 + 20 ≈ 750 B, a little over the 700 B target.
   The levers are u16 move IDs, and keeping active moves only while
   transformed.
-- **Open decisions** (recommended answer first):
-  1. Move the toxic counter to `ActivePokemon`, which shrinks `Status` to
-     1 byte. Yes.
-  2. A per-turn struct inside `Battle`, cleared at turn start, so it survives
-     a Baton Pass request. Yes.
-  3. `request` holds the phase and the queued action. Yes.
-  4. Volatile flags as C++ bitfields, a raw integer with masks, or `bool`s.
-     Bitfields.
+- **Decided (2026-10-07):**
+  1. The toxic counter moves to `ActivePokemon`, which shrinks `Status` to
+     1 byte. It restarts at 0 on every switch-in, Baton Pass included.
+  2. **No per-turn struct in `Battle`.** The rule was to keep only what must
+     survive a mid-turn resume, and nothing in `ProtectStruct` or
+     `SpecialStatus` does. Per-turn state is a local in `update`, zeroed at
+     turn start and again on resuming from a request.
+     - `SpecialStatus` is per action: `SpecialStatusesClear` (main:4894)
+       runs after every action.
+     - `ProtectStruct` is per turn (`TurnValuesCleanUp(FALSE)`, main:4871).
+       Its cross-action fields (`protected`, `endured`, Magic Coat's
+       `bounceMove`, Snatch's `stealMove`, the damage taken that Counter,
+       Mirror Coat, Focus Punch and Revenge read) are set and read within
+       the actions phase of one `update`.
+     - Why nothing crosses a request: the faint phases resume at end of turn
+       or later, which reads none of it (`protected`/`endured` are cleared
+       on entry, main:4866). A Baton Pass that moves second also resumes
+       at end of turn. One that moves first resumes before the foe has
+       acted, so nothing the foe reads has been set; the passer's own flags
+       (inherited by the recipient, since `SwitchInClearSetData` doesn't
+       touch `ProtectStruct`) can't matter, because its action was Baton
+       Pass.
+     - The argument rests on two conditions: requests only at action
+       boundaries or at Baton Pass, and residuals never reading per-turn
+       state. Guard it: every per-turn field is read through an accessor
+       that asserts the phase is the actions phase.
+     - Switch-in still clears what the decomp clears for a mid-actions
+       switch-in. `FaintClearSetData` (main:3264) clears most
+       `ProtectStruct` flags but not the damage taken; a normal switch and
+       Baton Pass clear none.
+  3. `request` holds the phase and the queued actions, per
+     [Turn phases](#turn-phases).
+  4. Switch-in works like libpkmn's: copy stats, species, moves, ability
+     (and types, if `Pokemon` stores them) from `pokemon[]` and zero the
+     rest of `ActivePokemon`. Nothing is recomputed from in-battle state, which
+     matches the decomp's rule that switch-in discards Transform, Trace, Skill
+     Swap, Forecast and Color Change. Whether `Pokemon` stores types or the
+     species table supplies them is a layout detail; both match.
+  5. Baton Pass's switch-in is its own function: it runs the normal
+     switch-in, then restores what passes (see Baton Pass in
+     [Tricky mechanics](#tricky-mechanics)).
+  6. Volatile flags are named fields in one `Volatiles` struct on
+     `ActivePokemon`, not one integer with masks. Plain `bool` per flag and
+     `uint8_t` per small counter that the decomp packs into status2 and
+     status3 (confusion, Uproar, rampage, wrap, Yawn, Lock-On). Wider
+     volatile data (Substitute HP, Bide damage, disabled and encored moves)
+     are ordinary fields beside it, as in libpkmn.
+     - Why: about 274 decomp uses touch a single flag and translate one line
+       to one line. Only 8 combine flags: the trapped check
+       (`WRAPPED | ESCAPE_PREVENTION`, five places), the semi-invulnerable
+       check, and Baton Pass's keep-list (main:3175–3176), which lives in
+       its own function anyway.
+     - Name each field after its decomp constant and cite it:
+       `bool rooted; // STATUS3_ROOTED`. Searching for the constant finds
+       the field.
+     - Multi-flag checks become helpers written once: `trapped()`,
+       `semi_invulnerable()`.
+     - `valid()` checks each counter's range.
+     - Packing comes last: then each member gets a bit width (`bool rooted :
+       1;`), which changes no code that uses it. So never take a pointer or
+       reference to a `Volatiles` member. Bitfield layout is up to the
+       compiler, so check first whether birch reads raw `Battle` bytes (an
+       encoder reading by offset); unverified.
+  7. Types live on `Pokemon`, and switch-in copies them (decision 4).
+     Equivalent to the decomp, which recomputes them from the species.
+  8. The held item lives on `Pokemon`. Knock Off sets it to the sentinel
+     `Item::KnockedOff` (no hold effect, so it's inert), and there is no
+     Knocked Off flag. This takes the decomp's non-link path, an exception
+     to the link-path default, because it matches Showdown: a knocked-off
+     Pokémon can never gain an item, so nothing overwrites the sentinel. In link battles the cartridge lets Thief,
+     Covet and Trick give it one, and clears it again at switch-in; we don't
+     model that. See `src/gen3/README.md`.
+     - Only identity checks (`item == Item::None`) must handle the sentinel;
+       hold effects go through `get(item).effect`. Before relying on that,
+       grep the decomp for every `.item == ITEM_NONE` / `!= ITEM_NONE` to
+       confirm only Thief, Covet, Trick and Knock Off care (Recycle?).
+     - Needs `KnockedOff` added to `Item` in `tools/generate.py`, after
+       `Other`.
+  9. **Battler-ID fields become victim-side state owned by the foe.** In
+     singles the other battler is always the foe, so no field stores a
+     battler. What the IDs did is done by clearing at the right switch: the
+     foe's normal switch-out and its Baton Pass each clear a fixed subset.
+     | Decomp | Becomes | Cleared when the foe… |
+     |---|---|---|
+     | `STATUS2_INFATUATED_WITH(b)` | `bool infatuated` | switches out, Baton Pass included (main:3197) |
+     | `STATUS3_LEECHSEED_BATTLER` | dropped; the drain heals the foe's active Pokémon if alive (util:1507) | (never) |
+     | `battlerPreventingEscape` | dropped; `bool escape_prevention` stays | switches out normally, not on Baton Pass (main:3164) |
+     | `wrappedBy` | dropped; `wrapped_move` kept for the log | switches out, Baton Pass included (main:3199) |
+     | `battlerWithSureHit` | dropped; `uint8_t lock_on` (0–2) on the target | switches out normally; on Baton Pass the lock resets to 2 (main:3166, 3178–3186) |
+     - Lock-On (and Mind Reader): `Cmd_setalwayshitflag` (bsc:8134) sets
+       the counter to 2 on the target; `ENDTURN_LOCK_ON` (util:1734)
+       decrements it; while nonzero, the foe's moves skip the accuracy roll
+       (bsc:1056) and OHKO moves skip it too, level check kept
+       (bsc:7523–7533). So it lasts through the user's next turn.
+  10. **Write-only fields are dropped:** every `*StartValue` in
+      `DisableStruct` (Disable, Encore, Perish Song, Rollout, Charge) and
+      `tauntTimer2`. Their only uses are writes (bsc:8008, 8040, 8524,
+      8550, 9104, 9161) and Baton Pass's copy of the Perish Song one
+      (main:3215). `Durations` does the "how far along" bookkeeping.
+      Checked: a grep of all of `src/` and `include/` finds only these
+      writes.
+  11. **Multi-turn state mirrors the decomp, unmerged:** `bool
+      multiple_turns` (`STATUS2_MULTIPLETURNS`), `Move locked_move`
+      (`gLockedMoves`), and separate counters for Thrash (`LOCK_CONFUSE`),
+      Uproar, Bide, Rollout and Fury Cutter, plus the semi-invulnerable
+      flags. `cancel_multi_turn_moves()` clears them together, as
+      `CancelMultiTurnMoves` does. Recharge stays separate
+      (`STATUS2_RECHARGE` and `rechargeTimer`).
+  12. **Hidden counters** are the ones in `Durations` (`chance.hpp`):
+      confusion, Disable, Encore, binding, and Uproar or Thrash. Uproar and
+      Thrash stay two fields in the battle; `Durations::attacking` covers
+      both, and the locked move says which. Everything else (Bide, Rollout,
+      Taunt, Yawn, Perish Song, Lock-On, Charge, recharge, Stockpile, Fury
+      Cutter) is fixed-length and public. `Durations` doesn't change.
+  13. **Also dropped:** `STATUS2_UNUSED`, the `DisableStruct` fillers,
+      `transformedMonPersonality`, and:
+      - `truantSwitchInHack`: only the Battle Arena judgments set it
+        (bsc:6413–6431), so for us switch-in always sets
+        `truantCounter = 1` (bsc:5258–5263). `bool truant_counter` stays;
+        the end-of-turn abilities flip it (util:2640).
+      - `STATUS3_INTIMIDATE_POKES` and `STATUS3_TRACE`: queued events, not
+        conditions of the Pokémon. Switch-in sets them (util:2545–2566) and
+        a later pass fires them (`ABILITYEFFECT_INTIMIDATE1`/`TRACE`). We
+        implement Intimidate and Trace directly in the switch-in code
+        instead. Still to trace when we do: where the pass fires after a
+        Baton Pass or a Roar drag-in, and whether Trace can stay pending
+        across turns when it has no valid target.
+  14. **`isFirstTurn` stays a `uint8_t`, 0–2.** Switch-in sets 2
+      (main:3220); `TurnValuesCleanUp(FALSE)` at the end of each turn
+      decrements it (main:4875). Fake Out works while it's nonzero
+      (bsc:6790); Speed Boost works while it isn't 2 (util:2629). A `bool`
+      can't express both.
+  - *(verify against Showdown)* A Truant replacement after a residual faint
+    arrives after the end-of-turn abilities, so its counter is still 1 and it
+    loafs on its first turn.
+- **Packing comes last.** Natural alignment and compiler padding for now
+  (`Request` is 10 B with 1 of padding). Revisit padding, explicit filler and
+  `has_unique_object_representations_v` once the layout is settled.
+
+#### Turn phases
+
+From `gBattleMainFunc` (`battle_main.c`). A turn runs:
+
+1. Selection. `gRandomTurnNumber` (Quick Claw) is drawn at the end of the
+   previous turn (main:4013) and before the first.
+2. Order (`SetActionsAndBattlersTurnOrder`), then Focus Punch setup.
+3. The actions (`RunTurnActionsFunctions`). Each action's script ends in
+   `end`, which sets `B_ACTION_TRY_FINISH` (bsc:3957), which runs
+   `HandleFaintedMonActions` (util:638) before the next action.
+4. `BattleTurnPassed` (main:3956): `DoFieldEndTurnEffects`, then
+   `DoBattlerEndTurnEffects`, then `HandleFaintedMonActions`, then
+   `HandleWishPerishSongOnTurnEnd` (Future Sight, then Perish Song). After
+   each Future Sight or Perish Song event `BattleTurnPassed` re-enters, so
+   faint replacement runs between them.
+
+Every place `update` can suspend is a place a Pokémon can faint, plus Baton
+Pass:
+
+| Phase | Who chooses | Resume at |
+|---|---|---|
+| `BatonPass` | user's side `Switch`, other `Pass` | finish Baton Pass's switch-in, then the remaining action |
+| `FaintAfterAction` | either side or both | end of turn (the remaining action was cancelled) |
+| `FaintAfterResiduals` | either side or both | Future Sight |
+| `FaintAfterFutureSight` | either side or both | Perish Song |
+| `FaintAfterPerish` | either side or both | the next turn |
+
+`request` holds the phase, the index of the next action (only `BatonPass`
+needs it), who moves first (decided once at selection, after the Quick Claw
+and speed-tie draws, which must not be redrawn), and each player's queued
+action resolved at selection (the choice and the move ID, since Encore,
+Choice Band and Struggle are resolved then, as `gChosenMoveByBattler`). No
+end-of-turn position: residual faints don't interrupt the residual passes.
 
 ## Tricky mechanics
 
@@ -397,8 +573,9 @@ the decomp yet.
   - Spikes apply on every switch-in: a voluntary switch, a faint
     replacement, Baton Pass, and a Roar or Whirlwind drag-in.
   - Order relative to switch-in abilities such as Intimidate *(verify)*.
-  - When both sides replace at once, the speed order decides who switches in
-    first.
+  - When both sides replace at once, `HandleFaintedMonActions` loops in
+    battler-ID order (util, its case 4), not speed order *(verify against
+    Showdown)*.
 - **Effect order.**
   - Turn order:
     - switches before moves
@@ -412,23 +589,63 @@ the decomp yet.
   - `GetWhoStrikesFirst` and `SetActionsAndBattlersTurnOrder` are in
     `battle_main.c`.
   - End-of-turn effects come in two passes:
-    - `DoFieldEndTurnEffects`: screens, Mist, Safeguard, Wish, weather
-      damage and so on
+    - `DoFieldEndTurnEffects`: screens, Mist, Safeguard, Wish
+      (`ENDTURN_WISH`, util:1173), weather damage and so on
     - `DoBattlerEndTurnEffects`: Ingrain, Leftovers, Leech Seed, poison,
       burn, Nightmare, Curse, binding, Uproar, rampage, Disable, Encore,
       Taunt, Yawn and so on, in speed order
-  - Then Future Sight, then Perish Song *(verify the exact sequence)*.
+  - Then faint replacement, then Future Sight, then Perish Song
+    (`HandleWishPerishSongOnTurnEnd`), each followed by faint replacement.
+    See [Turn phases](#turn-phases).
   - Encode the order once, as a table or a switch, not spread across move
     handlers.
-- **The turn ending on a KO.** If a Pokémon faints before it acts, its
-  queued move is skipped.
-  - End-of-turn residuals still run.
-  - The replacement comes after the end of the turn, through the result
-    protocol: `Switch` for the fainted side and `Pass` for the other.
-  - When both sides faint, both switch.
-  - The battle ends when one side has no Pokémon left, or in a tie if both
-    sides run out at once *(verify the tie and Self-Destruct rules against
-    Smogon ADV)*.
+- **A faint "ends the turn".** A cornerstone ADV mechanic (Gen IV
+  differs). When a Pokémon faints during the actions, it is replaced at once,
+  and every action still queued that turn is cancelled.
+  - Mechanism: `BattleScript_FaintedMonSendOutNew` (bs1:2883) ends with
+    `cancelallactions` in singles. `Cmd_cancelallactions` (bsc:5850) sets
+    every queued action to `B_ACTION_CANCEL_PARTNER`, which equals
+    `B_ACTION_FINISHED` (`battle.h:39–40`), so they do nothing.
+  - So if the faster Pokémon explodes, or a Pokémon switched in dies to
+    Spikes, the foe's move never happens: heals and setup can be denied.
+  - The replacement arrives before end of turn, so it takes that turn's
+    residuals (sandstorm, Leftovers and so on).
+  - In the result protocol: `Switch` for the fainted side and `Pass` for the
+    other, or `Switch` for both.
+  - *(verify)* A double KO in link battles goes through
+    `BattleScript_LinkHandleFaintedMonMultiple` (via `checkteamslost`,
+    bsc:3582), which has no `cancelallactions`. If both faint on the first
+    action, it's untraced whether the replacement then uses the fainted
+    Pokémon's queued move. `HandleAction_UseMove` checks only the absent
+    flags copied at turn start. Needs a Showdown scenario test.
+- **Residual faints.** A Pokémon that faints during end of turn is replaced
+  only after both residual passes finish, so the replacement skips that
+  turn's residuals (no sandstorm, no Leftovers). Future Sight and Perish Song
+  still come after it.
+- **The battle ends mid-residuals.** `checkteamslost` sets `gBattleOutcome`
+  as soon as a side has no Pokémon left (bsc:3564–3577). The weather loop
+  exits on it (bs1:3219), and `BattleTurnPassed` runs the residual passes
+  only while `gBattleOutcome == 0` (main:3961). So if both last Pokémon
+  would die to residuals, the faster one dies first and the battle ends: the
+  slower side wins, not a tie.
+  - Audit every other way a battle ends the same way: Explosion,
+    Self-Destruct, Destiny Bond, recoil, Perish Song *(verify the tie rules
+    against Showdown and Smogon ADV)*.
+- **Baton Pass.** Its switch-in is its own function (main:3158–3217,
+  bsc:4648).
+  - Passes: stat stages; status2 confusion (with its hidden counter), Focus
+    Energy, Substitute, escape prevention, Curse; status3 Leech Seed,
+    Lock-On (a lock *on* the passer stays on the recipient), Perish Song,
+    Ingrain, Mud Sport, Water Sport; and from the disable struct, the
+    Substitute HP and the Perish Song timer. (The decomp also copies the
+    battler-ID and start-value fields, which we drop; decisions 9 and 10.)
+  - Doesn't pass: the Toxic counter, the rest of the disable struct, the
+    last-move fields.
+  - Lock-On is stored on the target. If the passer had locked on to the foe,
+    the foe's lock resets to 2 (main:3178–3186), so the recipient inherits a
+    fresh lock that covers its next turn too. *(verify against Showdown)*
+  - Baton Pass doesn't cancel the foe's queued action, so its request resumes
+    at the remaining action.
 - **Sleep Talk.** It picks a random usable move other than itself. The
   decomp's ban list covers two-turn moves, Focus Punch, Bide, Uproar,
   Metronome, Assist, Mirror Move and so on *(verify the exact list)*.
@@ -457,8 +674,7 @@ the decomp yet.
   - Freeze Clause works the same way for freezes. In singles every freeze
     comes from the foe, so it needs no extra flag.
 
-Add these to the list when they come up: Baton Pass (what passes, and the
-mid-turn request), Pursuit on a switching target, Choice Band locking, Focus
+Add these to the list when they come up: Pursuit on a switching target, Choice Band locking, Focus
 Punch, Truant, Destiny Bond and Perish Song endgames, Self-Destruct and
 Explosion halving Defense, Struggle, and running out of PP.
 
@@ -467,10 +683,9 @@ Explosion halving Defense, Struggle, and running out of PP.
 **Approach: soften the nut.** Most move effects are variations on a few
 shared structures. Build those first, so each effect becomes a few lines:
 
-1. **The turn frame.** `gBattleMainFunc`'s phases as an explicit table:
-   selection, order, actions, fainted Pokémon, field end of turn, battler
-   end of turn, Wish, Perish Song and Future Sight, then replacements.
-   Settle suspend and resume (`request`) here, once.
+1. **The turn frame.** `gBattleMainFunc`'s phases as an explicit table; see
+   [Turn phases](#turn-phases). Settle suspend and resume (`request`) here,
+   once.
 2. **The hit backbone.** `BattleScript_EffectHit`: canceler, accuracy, PP,
    crit, damage, type calc, adjust, hit, secondary, faint check, `moveend`.
    Its entry points (`HitFromAccCheck` and so on) become helpers.
@@ -525,7 +740,23 @@ mechanic inherits a rough frame.
    - Each mechanic is one analytical code path with a decomp citation.
 3. **Testing.**
    - **Scenario tests** for each tricky mechanic, with the RNG forced through
-     Chance and Calc overrides.
+     Chance and Calc overrides. Named cases, waiting on the build (each
+     checked against Showdown):
+     - *Explosion ends the turn*: a faster Explosion user faints, and the
+       surviving foe's queued move (a heal or setup) never happens.
+     - *Spikes sac*: a Pokémon switched in dies to Spikes, and the foe's
+       queued attack is cancelled.
+     - *Mid-turn replacement takes residuals*: a Pokémon KO'd by an attack is
+       replaced before end of turn, and the replacement takes sandstorm and
+       gets Leftovers.
+     - *Residual faint skips the replacement's residuals*: a Pokémon dies to
+       sandstorm, and its replacement takes no residuals that turn.
+     - *The battle ends mid-residuals*: both last Pokémon would die to
+       residuals; the faster dies first and its side loses (not a tie).
+     - *Double KO on the first action*: both faint (Explosion), both replace;
+       does the second replacement act? Also the replacement order.
+     - *Baton Pass resumes*: after the pass, the foe's queued move still hits
+       the recipient; the Toxic counter restarts at 0.
    - **Matching Showdown** is the correctness target for mechanics. How to
      compare (scenario replays, outcome distributions) isn't designed yet.
    - **Differential runs against ADV-Simulator** through the shared
@@ -549,9 +780,12 @@ mechanic inherits a rough frame.
   `src/gen3/README.md` lists the weird cases: the Hidden Power split, the
   Deoxys forms, species order, Struggle, type-effectiveness order, and the
   `Mail`/`Other` items.
-- `src/gen3/data.hpp` has `Status`: a 2-byte struct holding libpkmn's
-  status byte (hidden sleep counter, `EXT` for Rest or bad poison) and the
-  Toxic counter, which persists through switching.
+- `src/gen3/data.hpp` has:
+  - `Status`: libpkmn's 1-byte status (hidden sleep counter, `EXT` for Rest
+    or bad poison). The Toxic counter is left for `ActivePokemon`, which
+    doesn't exist yet.
+  - `Phase` and `Request` (10 B), per [Turn phases](#turn-phases). Neither
+    is placed in a `Battle` yet, so the field order may change.
 - `src/common/data.hpp` has `Player`, `ID`, `Choice` and `Result`, with
   libpkmn's byte layouts.
 - `src/common/rng.hpp` has the RNG: SplitMix64 on a u64 seed, with
