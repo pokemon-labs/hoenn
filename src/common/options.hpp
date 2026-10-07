@@ -16,6 +16,10 @@
 namespace pkmn {
 
 template <typename Log, typename Chance, typename Calc> struct Options {
+  using LogType = Log;
+  using ChanceType = Chance;
+  using CalcType = Calc;
+
   [[no_unique_address]] Log log;
   [[no_unique_address]] Chance chance;
   [[no_unique_address]] Calc calc;

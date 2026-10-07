@@ -1,7 +1,13 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <type_traits>
+
+#include "../common/data.hpp"
+#include "../common/rational.hpp"
+#include "../common/rng.hpp"
+#include "data.hpp"
 
 namespace pkmn::gen3 {
 
@@ -234,17 +240,13 @@ namespace pkmn::gen3 {
 // So the most per player in one update is one move execution with up to five
 // hits, one confusion self-hit instead of the move, and one Future Sight hit.
 
-// libpkmn's Optional(bool). None means no draw happened (observation) or
-// roll normally (specification).
-enum class Optional : uint8_t { None = 0, True = 1, False = 2 };
-
 // One damaging hit. A multi-hit move fills hits[0..n-1].
 //
 // A confusion self-hit shares hits[0] (damage and focus_band only) with the
 // move's first hit. That's safe: a self-hit replaces the move, so the two
 // never happen in the same update, and Action::confusion == True says which
 // one hits[0] holds. The key stays exact.
-struct Hit {
+struct HitDraws {
   Optional crit;       // bsc:1282
   uint8_t damage;      // the roll as a percentage, 85-100 (bsc:1662, 1705)
   Optional focus_band; // the defender's; drawn only on a lethal hit
@@ -254,7 +256,7 @@ struct Hit {
                        // a mid-loop burn changes later damage, and a mid-loop
                        // sleep ends the loop.
 
-  friend constexpr bool operator==(const Hit&, const Hit&) = default;
+  friend constexpr bool operator==(const HitDraws&, const HitDraws&) = default;
 };
 
 // The draws that belong to one player's action in an update. Every field is
@@ -276,7 +278,7 @@ struct Action {
   Optional protect;      // Protect, Detect or Endure succeeding (bsc:6514)
   Optional hit;          // accuracy (bsc:1176), once per move
   uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147)
-  Hit hits[5];
+  HitDraws hits[5];
   uint8_t spore;         // Effect Spore's status: 1 sleep, 2 poison,
                          // 3 paralysis
   Optional kings_rock;   // True = flinched. A flinch is set at most once and
@@ -291,7 +293,7 @@ struct Action {
   // End of turn.
   Optional future_hit; // Future Sight or Doom Desire's accuracy, on the
                        // user's side
-  Hit future;          // crit stays None: future attacks don't crit
+  HitDraws future;       // crit stays None: future attacks don't crit
   Optional shed_skin;  // util:2607
   uint8_t starf;       // the stat Starf Berry raises, 1-7 (util:3462)
 
@@ -327,10 +329,15 @@ struct Actions {
   Action p1;
   Action p2;
 
+  constexpr Action& get(Player p) { return p == Player::P1 ? p1 : p2; }
+  constexpr const Action& get(Player p) const {
+    return p == Player::P1 ? p1 : p2;
+  }
+
   friend constexpr bool operator==(const Actions&, const Actions&) = default;
 };
 
-static_assert(sizeof(Hit) == 4);
+static_assert(sizeof(HitDraws) == 4);
 static_assert(sizeof(Action) == 49);
 static_assert(sizeof(Actions) == 3 + 2 * 49);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
@@ -369,11 +376,142 @@ struct Durations {
   Side p1;
   Side p2;
 
+  constexpr Side& get(Player p) { return p == Player::P1 ? p1 : p2; }
+  constexpr const Side& get(Player p) const {
+    return p == Player::P1 ? p1 : p2;
+  }
+
+  // A normal switch or a faint replacement on p's side to SLOT `slot`, as
+  // libpkmn's Chance.switched: the sleep counts swap with the SLOTs, the
+  // active Pokémon's volatile counts clear, and so does the foe's binding,
+  // since p was the binder (main:3199). Baton Pass keeps confusion and needs
+  // its own version.
+  constexpr void switched(Player p, uint8_t slot) {
+    assert(slot >= 2 && slot <= 6);
+    Side& d = get(p);
+    const uint8_t out = d.sleep[0];
+    d.sleep[0] = d.sleep[slot - 1];
+    d.sleep[slot - 1] = out;
+    d.confusion = 0;
+    d.disable = 0;
+    d.encore = 0;
+    d.binding = 0;
+    d.attacking = 0;
+    get(foe(p)).binding = 0;
+  }
+
   friend constexpr bool operator==(const Durations&, const Durations&) = default;
 };
 
 static_assert(sizeof(Durations) == 22);
 static_assert(std::is_trivial_v<Durations> &&
               std::is_standard_layout_v<Durations>);
+
+// Chance, as libpkmn's Chance(Rational): the probability of the branch an
+// update took, the branch itself (Actions) and the public durations.
+//
+// update() resets `probability` and `actions` when it starts; `durations`
+// carry over between updates, so the caller keeps one Chance per battle (and
+// copies it along with the battle). The roll helpers in mechanics.hpp write
+// these fields directly behind `if constexpr (enabled)` (CLAUDE.md, "Chance",
+// Hooks); there are no per-site methods.
+template <typename R = Rational<double>> struct Chance {
+  static constexpr bool enabled = true;
+
+  R probability;
+  Actions actions;
+  Durations durations;
+
+  constexpr void reset() {
+    probability.reset();
+    actions = {};
+  }
+};
+
+// Search's default: no observation, no cost.
+struct NullChance {
+  static constexpr bool enabled = false;
+};
+
+static_assert(std::is_empty_v<NullChance>);
+
+namespace detail {
+// The remaining counter of a hidden effect seen at count c (c - 1 steps
+// taken) whose roll is uniform on [lo, hi]: the roll is uniform on
+// [max(lo, c), hi], and the counter is the roll minus the steps.
+constexpr uint8_t resample(RNG& rng, uint8_t c, uint8_t lo, uint8_t hi) {
+  assert(c >= 1 && c <= hi && lo <= hi);
+  const uint8_t min = c > lo ? c : lo;
+  const uint8_t roll = uint8_t(min + rng.range(uint32_t(hi - min + 1)));
+  return uint8_t(roll - (c - 1));
+}
+} // namespace detail
+
+// Resamples every true hidden counter from its public count, as Oak's
+// randomize_hidden_variables, drawing from the battle's RNG. Search calls it
+// on a copy of the root before each iteration. A counter whose effect isn't
+// active in the battle, or whose count is 0 (untracked), is left alone, and
+// Rest's sleep (Status::EXT) is public. The ranges are the table at the top.
+constexpr void randomize_hidden(Battle& battle, const Durations& durations) {
+  for (const Player p : {Player::P1, Player::P2}) {
+    Side& side = battle.side(p);
+    const Durations::Side& d = durations.get(p);
+    for (uint8_t s = 1; s <= 6; s++) {
+      Pokemon& mon = side.get(s);
+      const uint8_t c = d.sleep[s - 1];
+      if (c != 0 && mon.status.asleep() && !mon.status.self_inflicted()) {
+        mon.status = Status::slp(detail::resample(
+            battle.rng, c, Status::MIN_SLEEP, Status::MAX_SLEEP));
+      }
+    }
+    if (battle.turn == 0) continue;
+    ActivePokemon& a = side.active;
+    Volatiles& v = a.volatiles;
+    if (d.confusion != 0 && v.confusion != 0) {
+      v.confusion = detail::resample(battle.rng, d.confusion, 2, 5);
+    }
+    if (d.disable != 0 && a.disable_timer != 0) {
+      a.disable_timer = detail::resample(battle.rng, d.disable, 2, 5);
+    }
+    if (d.encore != 0 && a.encore_timer != 0) {
+      a.encore_timer = detail::resample(battle.rng, d.encore, 3, 6);
+    }
+    if (d.binding != 0 && v.wrapped != 0) {
+      v.wrapped = detail::resample(battle.rng, d.binding, 3, 6);
+    }
+    if (d.attacking != 0) {
+      assert(v.uproar == 0 || v.thrash == 0);
+      if (v.uproar != 0) {
+        v.uproar = detail::resample(battle.rng, d.attacking, 2, 5);
+      } else if (v.thrash != 0) {
+        v.thrash = detail::resample(battle.rng, d.attacking, 2, 3);
+      }
+    }
+  }
+}
+
+static_assert([] {
+  // Seen asleep at count 4 (three steps): the roll was 4 or 5, so 1 or 2
+  // turns remain.
+  RNG rng{1};
+  for (int i = 0; i < 100; i++) {
+    const uint8_t r = detail::resample(rng, 4, 2, 5);
+    if (r < 1 || r > 2) return false;
+  }
+  // Just started: the full range.
+  bool seen[7] = {};
+  for (int i = 0; i < 200; i++) seen[detail::resample(rng, 1, 3, 6)] = true;
+  return !seen[2] && seen[3] && seen[4] && seen[5] && seen[6];
+}());
+static_assert([] {
+  Durations d{};
+  d.p1.sleep[0] = 3;
+  d.p1.sleep[3] = 1;
+  d.p1.confusion = 2;
+  d.p2.binding = 4;
+  d.switched(Player::P1, 4);
+  return d.p1.sleep[0] == 1 && d.p1.sleep[3] == 3 && d.p1.confusion == 0 &&
+         d.p2.binding == 0;
+}());
 
 } // namespace pkmn::gen3

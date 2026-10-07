@@ -49,6 +49,10 @@ add_executable(check_damage tools/check_damage.cpp)
 target_link_libraries(check_damage PRIVATE pkmn_gen3 pkmn_warnings)
 add_test(NAME check_damage COMMAND check_damage)
 
+# The turn frame. The soak half runs over the team corpus when it's there.
+add_executable(check_frame tools/check_frame.cpp)
+target_link_libraries(check_frame PRIVATE pkmn_gen3 pkmn_warnings)
+
 # The team corpus lives in birch, beside this repo.
 set(PKMN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../teams/adv
     CACHE PATH "Showdown export teams for check_teams")
@@ -61,6 +65,8 @@ if(PKMN_TEAM_FILES)
   # too (team-validator.ts, "its IVs are for Hidden Power").
   add_test(NAME check_teams COMMAND check_teams
            --expect "[gen3ou] Johnald Teamdump/Leer Mence" ${PKMN_TEAM_FILES})
+  add_test(NAME check_frame COMMAND check_frame ${PKMN_TEAM_FILES})
 else()
+  add_test(NAME check_frame COMMAND check_frame)
   message(WARNING "No teams in ${PKMN_TEAMS_DIR}; check_teams won't run")
 endif()

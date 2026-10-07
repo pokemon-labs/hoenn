@@ -227,8 +227,9 @@ effects. Ignores multi-hit; fixed-damage moves return 0 or 16.
 
 ## Layout
 
-Mirrors libpkmn's `src/` tree, all headers. Not yet written:
-`gen3/mechanics.hpp`, `gen3/calc.hpp`, scenario tests.
+Mirrors libpkmn's `src/` tree, all headers. Partly written:
+`gen3/mechanics.hpp` (the frame) and `gen3/calc.hpp` (overrides only). Not
+yet written: scenario tests.
 
 **Build** (CMake, tests and tools only): the library is the `INTERFACE`
 target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
@@ -244,11 +245,14 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   `tools/damage_cases.inc`. Regenerate it with `node
   tools/damage_oracle.cjs > tools/damage_cases.inc` (needs ADV-Simulator's
   pinned Showdown, or its path as the argument).
+- `check_frame`: the turn frame (start, order, Quick Claw and speed-tie rolls
+  with Chance and Calc, trapping, faint requests and resuming, the turn cap),
+  then a random self-play soak over the team files.
 
 ```
 CMakeLists.txt, CMakePresets.json
 src/common/
-  data.hpp            Player, ID, Choice, Result
+  data.hpp            Player, ID, Optional, Choice, Result
   rng.hpp             SplitMix64 RNG and its draw helpers
   options.hpp         Options<Log, Chance, Calc>
   rational.hpp        exact probabilities (libpkmn's Rational)
@@ -260,17 +264,19 @@ src/gen3/
                       size asserts; calc_stats, hidden_power, max_pp
   data/               generated tables (tools/generate.py), plus the
                       hand-written natures.hpp and tables.hpp
-  chance.hpp          Random() catalogue, draft Actions and Durations
+  chance.hpp          Random() catalogue, draft Actions and Durations,
+                      Chance and NullChance, randomize_hidden
   helpers.hpp         helpers::Pokemon -> Battle at turn 0 (libpkmn helpers)
   showdown.hpp        Showdown export parser -> helpers::Pokemon
   damage.hpp          Hit, crit_stage, can_crit, matchup, damage, apply_roll
-  mechanics.hpp       update(), choices()                          (todo)
-  calc.hpp            overrides, min_ko_roll                       (todo)
+  mechanics.hpp       update(), choices(), the roll helpers   (the frame)
+  calc.hpp            Calc and NullCalc; min_ko_roll                (todo)
 tools/
   generate.py         one-off data generator from pokeemerald/
   check_data.cpp      static_asserts on the generated tables
   check_teams.cpp     parses teams/adv/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
+  check_frame.cpp     the turn frame, plus a self-play soak
   damage_oracle.cjs   writes damage_cases.inc from Showdown
 ```
 
@@ -351,7 +357,9 @@ unchecked claims.
     matters: the first switch-in's Intimidate hits the foe that's leaving.
   - Quick Claw is drawn lazily, at the first read where it can change the
     order, and kept in `Request` (the padding byte) so the end-of-turn order
-    reuses it across a request (decided).
+    reuses it across a request (decided). Two holders share the one draw, so
+    both proccing is a speed tie. *(verify against Showdown, which may roll
+    per holder)*
   - End of turn re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`, util:1209):
     an independent speed-tie draw, the same Quick Claw value, and the
     chosen moves' priority (`ignoreChosenMoves` is FALSE). *(verify)* Which
@@ -442,7 +450,13 @@ progress; every later mechanic inherits the frame):
    asserted (only corrupt stats reach it); the dynamic inputs are a `Hit`, which plan step 2's
    per-action `State` (on the stack, as libpkmn gen2's) contains. Details
    and the decomp comparison in `src/gen3/README.md`, "Damage".
-2. The turn frame and roll helpers, with null Chance and Calc.
+2. The turn frame and roll helpers, with null Chance and Calc. **Done**
+   for the frame: `update` falls through the phases, `choices`, selection
+   (forced moves, Struggle, Encore), the order with the lazy Quick Claw and
+   tie draws, plain switching, faint requests and the turn cap. The stubs
+   are marked `TODO(plan step N)` in `mechanics.hpp`: a move does nothing;
+   no Spikes, switch-in effects, residuals, Future Sight, Perish Song or
+   Baton Pass; fainting itself (`FaintClearSetData`).
 3. Switching and plain damaging moves end to end, including the turn-0
    start. Done when birch's search, adapted to this interface, runs against
    it.
@@ -489,11 +503,14 @@ progress; every later mechanic inherits the frame):
   crits), covering every modifier it applies.
 
 - The build: CMake presets for debug (ASan/UBSan) and release, with
-  `headers`, `check_data`, `check_damage` and `check_teams` passing in both,
-  under g++ and clang.
+  `headers`, `check_data`, `check_damage`, `check_teams` and `check_frame`
+  passing in both, under g++ and clang.
+- `gen3/mechanics.hpp`: the turn frame (plan step 2; see Next steps).
+  `chance.hpp`'s per-hit draws are `HitDraws`, since `damage.hpp` owns
+  `Hit`.
 
-**Not started:** the mechanics (`update`, `choices`, the turn frame, the roll
-helpers), `calc.hpp`, scenario tests. Only the damage formula has been
+**Not started:** the hit backbone and every move effect, switch-in effects,
+the residuals, `min_ko_roll`, scenario tests. Only the damage formula has been
 compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
 through the damage cases. birch's search still calls ADV-Simulator's `pkmn_gen3_*`
 functions and must be adapted (plan step 3).

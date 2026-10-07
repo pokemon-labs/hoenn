@@ -11,6 +11,12 @@ namespace pkmn {
 
 enum class Player : uint8_t { P1 = 0, P2 = 1 };
 
+// libpkmn's Optional(bool), for Chance's observations and Calc's overrides.
+// None means no draw happened (observation) or roll normally (override).
+enum class Optional : uint8_t { None = 0, True = 1, False = 2 };
+
+constexpr Optional optional(bool b) { return b ? Optional::True : Optional::False; }
+
 constexpr Player foe(Player p) { return Player(uint8_t(p) ^ 1); }
 
 // Identifies a Pokémon for the log: its original party position (1-6) in

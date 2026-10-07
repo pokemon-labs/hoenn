@@ -170,6 +170,11 @@ enum class Phase : uint8_t {
 // replacement cancels the rest of the actions, and residual faints don't
 // interrupt the residual passes, so nothing else needs a position.
 //
+// `quick_claw` is the turn's Quick Claw draw (gRandomTurnNumber, main:4013),
+// None until it's drawn. It's drawn at the first read where it can change the
+// order, and the end-of-turn order reads it again (main:4653, util:1209),
+// possibly after a request, so it lives here.
+//
 // No default member initializers, so the struct stays trivial.
 struct Request {
   Move move[2];
@@ -177,6 +182,7 @@ struct Request {
   Phase phase;
   Player first;
   uint8_t next;
+  Optional quick_claw;
 
   static constexpr uint8_t END_OF_ACTIONS = 2;
 
@@ -185,18 +191,26 @@ struct Request {
     if (phase > Phase::FaintAfterPerish) return false;
     if (first != Player::P1 && first != Player::P2) return false;
     if (!choice[0].valid() || !choice[1].valid()) return false;
+    if (quick_claw > Optional::False) return false;
     if (phase == Phase::BatonPass) return next == 1 || next == END_OF_ACTIONS;
     return next == 0;
   }
 };
 
-static_assert(sizeof(Request) == 10); // 9 bytes and 1 of padding
+static_assert(sizeof(Request) == 10);
 static_assert(std::is_trivial_v<Request> && std::is_standard_layout_v<Request>);
 static_assert(Request{}.valid());
-static_assert(!Request{{}, {}, Phase::BatonPass, Player::P1, 0}.valid());
-static_assert(Request{{}, {}, Phase::BatonPass, Player::P2, 2}.valid());
-static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1}.valid());
-static_assert(!Request{{}, {}, Phase(6), Player::P1, 0}.valid());
+static_assert(!Request{{}, {}, Phase::BatonPass, Player::P1, 0, Optional::None}.valid());
+static_assert(Request{{}, {}, Phase::BatonPass, Player::P2, 2, Optional::None}.valid());
+static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1, Optional::None}.valid());
+static_assert(!Request{{}, {}, Phase(6), Player::P1, 0, Optional::None}.valid());
+static_assert(!Request{{}, {}, Phase::None, Player::P1, 0, Optional(3)}.valid());
+// The frame (mechanics.hpp) falls through the phases in this order.
+static_assert(Phase::None < Phase::BatonPass &&
+              Phase::BatonPass < Phase::FaintAfterAction &&
+              Phase::FaintAfterAction < Phase::FaintAfterResiduals &&
+              Phase::FaintAfterResiduals < Phase::FaintAfterFutureSight &&
+              Phase::FaintAfterFutureSight < Phase::FaintAfterPerish);
 
 // ---------------------------------------------------------------------------
 // The battle. Draft (2026-10-07): the numbered decisions cited below and the
@@ -494,6 +508,21 @@ struct ActivePokemon {
   bool truant;              // truantCounter
 
   static constexpr uint8_t MAX_TOXIC = 15;
+
+  // CancelMultiTurnMoves (util:877), decision 11. locked_move stays: the
+  // decomp leaves gLockedMoves, and nothing reads it without
+  // multiple_turns or recharge.
+  constexpr void cancel_multi_turn_moves() {
+    volatiles.multiple_turns = false;
+    volatiles.thrash = 0;
+    volatiles.uproar = 0;
+    volatiles.bide = 0;
+    volatiles.on_air = false;
+    volatiles.underground = false;
+    volatiles.underwater = false;
+    rollout = 0;
+    fury_cutter = 0;
+  }
 
   constexpr bool valid() const {
     if (!detail::valid(species) || !detail::valid(types[0]) ||
