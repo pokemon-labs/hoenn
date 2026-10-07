@@ -382,9 +382,11 @@ Sources checked: `BattlePokemon`, status2 and status3, `DisableStruct`,
 - **PP rule.** PP spent is written back to the party unless the user is
   transformed or the slot was replaced by Mimic (`Cmd_ppreduce`,
   `MOVE_IS_PERMANENT`). Transform gives 5 PP per copied move.
-- **Left out on purpose:** `gLastLandedMoves` (AI only), `hpOnSwitchout`,
+- **Left out on purpose:** `hpOnSwitchout`,
   side-timer battler IDs, Follow Me, Helping Hand, Transform's personality,
   and `gBattleMonForms` (a sprite; Forecast changes only the types).
+  (`gLastLandedMoves` was listed here as AI-only; it isn't: Conversion 2
+  reads it. See the field map in `src/gen3/README.md`.)
 - **Size.** About 2 × 365 + 20 ≈ 750 B, a little over the 700 B target.
   The levers are u16 move IDs, and keeping active moves only while
   transformed.

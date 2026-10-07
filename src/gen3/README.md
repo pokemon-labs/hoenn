@@ -148,3 +148,125 @@ entries here are the exceptions.
     a knocked-off Pokémon (`sim/pokemon.ts:1811`). Its hint: "In Gens 3-4,
     Knock Off only makes the target's item unusable; it cannot obtain a new
     item."
+
+## `ActivePokemon` field map
+
+Every per-battler field the decomp clears on switch-in (`SwitchInClearSetData`,
+main:3152; `FaintClearSetData`, main:3264) and where it goes. This is the
+checklist `ActivePokemon` is written from; the decisions behind it are in
+CLAUDE.md ("Decided", 2 and 6–14). **BP**: Baton Pass keeps it (main:3173–3217).
+**Hidden**: the true value is hidden information, observed through `Durations`.
+Counter ranges are the values the field can hold; "set" is what infliction
+writes.
+
+### Copied from `Pokemon` at switch-in
+
+`BattlePokemon` (`include/pokemon.h:260`). Transform, Trace, Skill Swap,
+Forecast, Color Change, Conversion and Mimic change these; switch-in discards
+the changes.
+
+| Decomp | Field | Type | Notes |
+|---|---|---|---|
+| `attack`…`spDefense` | `stats` | 5 × u16 | Transform copies the target's |
+| `species` | `species` | `Species` | Transform |
+| `types[2]` | `types` | 2 × `Type` | Forecast, Color Change, Conversion (1 and 2), Transform |
+| `ability` | `ability` | `Ability` | Trace, Skill Swap, Transform |
+| `moves[4]`, `pp[4]` | `moves` | 4 × {`Move`, u8 pp} | Transform (5 PP each), Mimic. PP rule in CLAUDE.md |
+| `statStages[1..7]` | `boosts` | 7 × i8, −6..6 | **BP**. Index 0 (HP) is unused |
+
+### status2
+
+| Decomp | Field | Type | BP | Hidden | Notes |
+|---|---|---|---|---|---|
+| `CONFUSION` (3 bits) | `confusion` | u8 0–5 | **BP** | yes | set 2–5 (bsc:2541); steps at the canceler (util:2145) |
+| `FLINCHED` | `flinched` | bool | | | cleared at turn start |
+| `UPROAR` (3 bits) | `uproar` | u8 0–5 | | yes | set 2–5 (bsc:2573); steps at end of turn (util:1647) |
+| `UNUSED` | — | | | | dropped |
+| `BIDE` (2 bits) | `bide` | u8 0–2 | | | set 2 (bsc:7126) |
+| `LOCK_CONFUSE` (2 bits) | `thrash` | u8 0–3 | | yes | set 2–3 (bsc:2860); steps at end of turn (util:1673) |
+| `MULTIPLETURNS` | `multiple_turns` | bool | | | with `locked_move`; `cancel_multi_turn_moves()` |
+| `WRAPPED` (3 bits) | `wrapped` | u8 0–6 | | yes | set 3–6 (bsc:2618); steps at end of turn (util:1591). Wrapper is the foe |
+| `INFATUATION` (4 bits) | `infatuated` | bool | | | cleared on any foe switch-out |
+| `FOCUS_ENERGY` | `focus_energy` | bool | **BP** | | |
+| `TRANSFORMED` | `transformed` | bool | | | blocks the PP write-back and Sketch |
+| `RECHARGE` | `recharge` | bool | | | with `recharge_timer` |
+| `RAGE` | `rage` | bool | | | cleared at turn start unless Rage was chosen (main, `TryClearRageStatuses`) |
+| `SUBSTITUTE` | `substitute` | bool | **BP** | | with `substitute_hp` |
+| `DESTINY_BOND` | `destiny_bond` | bool | | | |
+| `ESCAPE_PREVENTION` | `escape_prevention` | bool | **BP** | | cleared when the foe switches out normally, not on its Baton Pass |
+| `NIGHTMARE` | `nightmare` | bool | | | |
+| `CURSED` | `cursed` | bool | **BP** | | |
+| `FORESIGHT` | `foresight` | bool | | | |
+| `DEFENSE_CURL` | `defense_curl` | bool | | | |
+| `TORMENT` | `torment` | bool | | | |
+
+### status3
+
+| Decomp | Field | Type | BP | Notes |
+|---|---|---|---|---|
+| `LEECHSEED_BATTLER` | — | | | dropped: the drain heals the foe's active Pokémon (util:1507) |
+| `LEECHSEED` | `leech_seed` | bool | **BP** | |
+| `ALWAYS_HITS` (2 bits) | `lock_on` | u8 0–2 | **BP** | on the target; set 2 (bsc:8137), steps at end of turn (util:1736). Reset to 2 when the Lock-On user Baton Passes |
+| `PERISH_SONG` | `perish_song` | bool | **BP** | with `perish_song_timer` |
+| `ON_AIR`, `UNDERGROUND`, `UNDERWATER` | `on_air`, `underground`, `underwater` | bool | | `semi_invulnerable()` |
+| `MINIMIZED` | `minimized` | bool | | |
+| `CHARGED_UP` | `charged_up` | bool | | with `charge_timer` |
+| `ROOTED` | `rooted` | bool | **BP** | Ingrain |
+| `YAWN` (2 bits) | `yawn` | u8 0–2 | | set 2 (bsc:9361); steps at end of turn (util:1752) |
+| `IMPRISONED_OTHERS` | `imprisoned_others` | bool | | |
+| `GRUDGE` | `grudge` | bool | | |
+| `CANT_SCORE_A_CRIT` | — | | | dropped: read (bsc:1280) but never set |
+| `MUDSPORT`, `WATERSPORT` | `mud_sport`, `water_sport` | bool | **BP** | on the user, not the field, in Gen III |
+| `INTIMIDATE_POKES`, `TRACE` | — | | | dropped: implemented directly in switch-in |
+
+### `DisableStruct` (`include/battle.h:70`)
+
+| Decomp | Field | Type | BP | Hidden | Notes |
+|---|---|---|---|---|---|
+| `transformedMonPersonality` | — | | | | dropped |
+| `disabledMove`, `disableTimer` | `disabled_move`, `disable_timer` | `Move`, u8 0–5 | | yes | set 2–5 (bsc:8007) |
+| `encoredMove`, `encoredMovePos`, `encoreTimer` | `encored_move`, `encored_slot`, `encore_timer` | `Move`, u8 0–3, u8 0–6 | | yes | set 3–6 (bsc:8039) |
+| `protectUses` | `protect_uses` | u8 | | | ++ on success (bsc:6526); reset unless the last resulting move was Protect, Detect or Endure (bsc:6506). Unbounded in the decomp: saturate, and clamp the rate index |
+| `stockpileCounter` | `stockpile` | u8 0–3 | | | |
+| `substituteHP` | `substitute_hp` | u8 | **BP** | | max HP / 4 ≤ 178, fits |
+| `perishSongTimer` | `perish_song_timer` | u8 0–3 | **BP** | | |
+| `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | capped at 5 (bsc:8591) |
+| `rolloutTimer` | `rollout` | u8 0–5 | | | set 5 (bsc:8549) |
+| `chargeTimer` | `charge_timer` | u8 0–2 | | | set 2 (bsc:9103) |
+| `tauntTimer` | `taunt` | u8 0–2 | | | set 2 (bsc:9160) |
+| `battlerPreventingEscape`, `battlerWithSureHit` | — | | | | dropped (decision 9) |
+| `isFirstTurn` | `first_turn` | u8 0–2 | | | decision 14 |
+| `truantCounter` | `truant` | bool | | | switch-in sets 1; flips at end of turn |
+| `truantSwitchInHack` | — | | | | dropped (Battle Arena only) |
+| `mimickedMoves` | `mimicked` | u4 mask | | | slots Mimic replaced; blocks the PP write-back |
+| `rechargeTimer` | `recharge_timer` | u8 0–2 | | | set 2 (bsc:2730) |
+| every `*StartValue`, `tauntTimer2`, fillers | — | | | | dropped (write-only) |
+
+### Other per-battler globals cleared on switch-in
+
+| Decomp | Field | Type | Read by |
+|---|---|---|---|
+| `gLockedMoves` | `locked_move` | `Move` | forced selection (util:109) |
+| `gBattleStruct->choicedMove` | `choice_move` | `Move` | Choice Band lock (util:981–1119) |
+| `gBattleStruct->wrappedMove` | `wrapped_move` | `Move` | the wrap residual's message (util:1595–1612), so the log |
+| `gLastMoves` | `last_move` | `Move` | Disable, Encore, Spite, Mimic (bsc:7848–8337) |
+| `gLastLandedMoves` | `last_landed_move` | `Move` | Conversion 2 (bsc:8076) |
+| `gLastHitByType` | `last_hit_type` | `Type` | Conversion 2 (bsc:8096) |
+| `gLastHitBy` | — | | dropped: Conversion 2 reads it only to find the foe (bsc:8082) |
+| `gLastResultingMoves` | `last_resulting_move` | `Move` | Protect's consecutive-use reset (bsc:6506) |
+| `gLastPrintedMoves` | `last_printed_move` | `Move` | Sketch (bsc:8148) |
+| `lastTakenMove`, `lastTakenMoveFrom` | `last_taken_move` | `Move` | Mirror Move (bsc:6640–6662). `lastTakenMoveFrom` is per attacker; in singles it collapses *(verify they're always set together)* |
+| `gBideDmg`, `gBideTarget` | `bide_damage` | u32 | Bide (util:2218, bsc:1912). The target is the foe. Accumulates raw damage *(verify a bound before narrowing)* |
+| `RESOURCE_FLAG_FLASH_FIRE` | `flash_fire` | bool | util:2692–2700 |
+
+### Open points from the map
+
+- **`MOVE_UNAVAILABLE` (0xFFFF)** is a distinct value in the last-move
+  fields: Mirror Move, Sketch and Conversion 2 treat it like `MOVE_NONE`, but
+  it's written in different cases. `Move` needs a sentinel for it, like
+  `Item::KnockedOff`, or each field needs to show it never matters.
+- **Five "last move" fields.** They differ in when they're written
+  (attempted, landed, resulting, printed, taken). Keep all five until each
+  writer is traced; merging any two needs proof that they never differ.
+- **Correction to the audit:** `gLastLandedMoves` isn't AI-only; Conversion 2
+  reads it.
