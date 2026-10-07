@@ -98,8 +98,7 @@ struct Status {
   }
 
   // A well-formed status: at most one condition, EXT only with SLP or PSN,
-  // and sleep within range. Use this to reject corrupt input with
-  // Result::Error.
+  // and sleep within range. Asserted in debug builds.
   constexpr bool valid() const {
     const uint8_t s = sleep();
     const uint8_t rest = bits & uint8_t(~(SLP | EXT));
@@ -181,8 +180,7 @@ struct Request {
 
   static constexpr uint8_t END_OF_ACTIONS = 2;
 
-  // A well-formed request. Use this to reject corrupt input with
-  // Result::Error.
+  // A well-formed request. Asserted in debug builds.
   constexpr bool valid() const {
     if (phase > Phase::FaintAfterPerish) return false;
     if (first != Player::P1 && first != Player::P2) return false;

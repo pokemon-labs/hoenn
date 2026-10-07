@@ -154,6 +154,12 @@ entries here are the exceptions.
     Knock Off only makes the target's item unusable; it cannot obtain a new
     item."
 
+- **Two switches go in speed order, as Showdown** (decided 2026-10-07). The
+  decomp doesn't sort switches: `SetActionsAndBattlersTurnOrder` queues them
+  in battler-ID order and only compares speed between moves (main:4756).
+  We use the speed comparison and tie draw that moves use. It matters
+  because the first switch-in's Intimidate hits the foe that's about to leave.
+
 ### Damage
 
 `damage.hpp`, written 2026-10-07. Decided:
@@ -171,8 +177,10 @@ entries here are the exceptions.
   `calc.hpp` (so `min_ko_roll` reuses it without side effects). Its functions
   read a `const Battle&` and take no `options`: they never draw. The draws
   are roll helpers in `mechanics.hpp`, as libpkmn's `Rolls`.
-- **A zero divisor returns `Result::Error`** (a Def or SpD of 0–3 at −6, or
-  a corrupt stat of 0); Showdown would compute `Infinity` and truncate.
+- **A zero divisor is asserted, not checked.** It needs a Def or SpD of 0–3,
+  which no valid Pokémon has (the lowest is 4, which is still 1 at −6), so
+  it's corrupt state (CLAUDE.md, "Safety"). Showdown would compute `Infinity`
+  and truncate.
 - **The dynamic inputs are a `Hit`** (move, power, type, crit). The hit
   backbone's per-action `State` (a local, as libpkmn gen2's, never in
   `Battle`) holds one. The caller resolves power and type, as Showdown's

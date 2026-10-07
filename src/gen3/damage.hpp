@@ -15,9 +15,8 @@
 // calc.hpp's min_ko_roll runs the same path without side effects.
 //
 // Preconditions: battle.valid(), and both sides have an active Pokémon. The
-// functions assert them; update validates input before calling. A zero
-// divisor is the one input-dependent failure checked in release: damage()
-// returns 0 and the caller returns Result::Error.
+// functions assert them; as everywhere, release doesn't check (CLAUDE.md,
+// "Safety").
 
 #pragma once
 
@@ -228,8 +227,9 @@ constexpr uint8_t matchup(const Battle& battle, Player player, const Hit& hit) {
 // modifyDamage up to the randomizer). Precondition: matchup() set none of
 // NO_EFFECT.
 //
-// Returns 0 if a divisor is zero (a Def or SpD of 0-3 at -6, or a corrupt
-// stat of 0); the caller returns Result::Error.
+// The divisor is never zero for a valid Pokémon: the lowest Def or SpD at
+// any level is 4 (Chansey's base 5 Def, 0 IV, 0 EV, -Def nature), which is 1
+// at -6. A stat of 0-3 is corrupt state, so it's asserted, not checked.
 constexpr uint32_t damage(const Battle& battle, Player player, const Hit& hit) {
   using namespace detail;
   assert(battle.valid());
@@ -365,7 +365,7 @@ constexpr uint32_t damage(const Battle& battle, Player player, const Hit& hit) {
   def = modify(def, m);
   // Self-Destruct and Explosion halve Def, at least 1.
   if (effect == Effect::Explosion && physical) def = def / 2 > 0 ? def / 2 : 1;
-  if (def == 0) return 0;
+  assert(def != 0);
 
   uint64_t d = (2u * attacker_mon.level / 5 + 2) * power * atk / def / 50;
 

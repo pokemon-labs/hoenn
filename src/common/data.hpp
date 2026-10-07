@@ -44,8 +44,8 @@ struct ID {
 // is pokemon[order[0] - 1]. Switching to SLOT s swaps order[0] and
 // order[s - 1], so switching to the same SLOT twice is a round trip.
 //
-// Type 3 is representable but invalid: update must return Result::error()
-// for it, never assume it away.
+// Type 3 is representable but invalid. As with any choice not listed by
+// choices(), update asserts against it in debug and doesn't check in release.
 struct Choice {
   enum Type : uint8_t { Pass = 0, Move = 1, Switch = 2 };
 

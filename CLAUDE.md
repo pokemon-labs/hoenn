@@ -72,20 +72,22 @@ result, they don't drive the design.
 ## Priorities, in order
 
 1. **Safety.** Week-long paid RL runs must not die or be quietly corrupted.
-   - `update` never throws, allocates or recurses without a bound. Every
-     array index is in range by construction or checked.
-   - Bad input (an illegal choice or corrupt state) returns `Result::Error`,
-     never a crash or UB.
+   - `update` never throws, allocates or recurses without a bound. Given
+     valid input, every array index is in range by construction.
+   - **Don't hold it wrong, as libpkmn** (decided). The caller passes only
+     choices from `choices()` and only battles that are `valid()`. Debug
+     asserts both; release checks neither, so bad input is UB there and
+     correct input pays nothing for checks. `update` doesn't return
+     `Result::Error` for bad input.
    - Every loop has a fixed bound. After `turn += 1`, `update` returns `Tie`
      once the turn reaches 1000 (libpkmn `gen1/mechanics.zig:1650`).
    - `Battle` is trivially copyable, with `static_assert`s on its size, and
      holds no pointers, strings or containers.
-   - Debug and test builds run under ASan and UBSan with `assert` on. Release
-     builds have no asserts, so the guarantees above are load-bearing.
+   - Debug and test builds run under ASan and UBSan with `assert` on, and
+     that's where misuse and engine bugs are caught. Release builds have no
+     asserts.
    - Assert liberally in mechanics, as libpkmn does: preconditions,
-     invariants (`valid()`), unreachable branches. Asserts are not input
-     validation: anything a caller can get wrong must still return
-     `Result::Error` in release.
+     invariants (`valid()`), unreachable branches, the input checks above.
 2. **Speed.** Search copies and steps the battle millions of times.
    - A battle of roughly 700 B, copied with `memcpy`.
    - A 64-bit RNG seed inside the battle (SplitMix64, `common/rng.hpp`).
@@ -152,7 +154,9 @@ changing those call sites in birch.
   target). The log's `ID` carries the original party position. "Move slot"
   (1–4) is a different thing.
 - **Result** is one byte, `{type: None | Win | Lose | Tie | Error, p1, p2}`,
-  where `p1` and `p2` are the Choice type each player must make next. A faint
+  where `p1` and `p2` are the Choice type each player must make next.
+  `Error` isn't for bad input (see "Safety"); it's kept for a full log
+  buffer (open, below). A faint
   replacement is `Switch` for one side and `Pass` for the other; a Baton Pass
   replacement is a mid-turn `Switch`.
 - **Options** are `{log, chance, calc}`, each a real or a null type.
@@ -183,6 +187,20 @@ from the decomp) and kept as remaining-turn counters. `Chance` keeps the
   `Rational<double>`. Decided: double, so no overflow bounds have to be
   derived for integer fractions; past 2^53 it loses precision instead of
   failing.
+
+**No RNG frame fidelity** (decided). The engine has to be good enough for RL
+in OU, not frame-exact, so there's no libpkmn pending/commit: draw whenever
+it's convenient, but a draw goes in `Actions` and `probability` only when its
+outcome can matter (Quick Claw with no holder, Static on a paralyzed target).
+
+**Hooks** (decided): one roll helper per catalogue row, in `mechanics.hpp`
+(libpkmn's `Rolls`), does the Calc override, the RNG draw and the Chance
+record, all in one place. It touches `actions`, `durations` and
+`probability` directly under `if constexpr (Chance::enabled)`. The null
+types are only `{ static constexpr bool enabled = false; }`. Writing an
+`Actions` field that's already set asserts. `randomize_hidden` (resampling
+the hidden counters from `Durations`, which birch's search calls) lives in
+`chance.hpp`.
 
 **The observation must determine the branch exactly. No hashing.** Search
 keys chance-node children by `Actions`, so given the battle and both
@@ -299,9 +317,19 @@ A turn runs:
 `Request` holds the phase, the next action (Baton Pass only), who moves first
 (decided once at selection, after the Quick Claw and speed-tie draws, which
 must not be redrawn) and each player's queued action resolved at selection
-(Encore, Choice Band and Struggle applied, as `gChosenMoveByBattler`).
-Residual faints don't interrupt the residual passes. Per-turn state isn't in
-`Battle` (README decision 2).
+(Encore, Choice Band and Struggle applied, as `gChosenMoveByBattler`), and
+the turn's Quick Claw draw. Residual faints don't interrupt the residual
+passes. Per-turn state isn't in `Battle` (README decision 2).
+
+**The frame is one `switch (request.phase)`** (decided), whose cases fall
+through in turn order, so the order is written once: `None` (select, order,
+Focus Punch, actions from 0), `BatonPass` (finish the switch-in, actions from
+`request.next`), `FaintAfterAction` (end of turn), `FaintAfterResiduals`
+(Future Sight), `FaintAfterFutureSight` (Perish Song), `FaintAfterPerish`
+(next turn). A resumed case first does its replacement. This relies on
+`Phase` being declared in that order: `static_assert` it. Internal steps
+return `std::optional<Result>`: empty continues, a value (a request or the
+end of the battle) is returned.
 
 ## Tricky mechanics
 
@@ -318,8 +346,17 @@ unchecked claims.
   - Turn order: switches, then priority, then Quick Claw (one u16 per turn,
     `gRandomTurnNumber`, serves both sides), then speed with a random tie.
     `GetWhoStrikesFirst` and `SetActionsAndBattlersTurnOrder` (main).
-  - End of turn re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`): an
-    independent speed-tie draw, Quick Claw included.
+  - Two switches go in speed order with a random tie, as Showdown (decided;
+    the decomp uses battler-ID order, so record it in the README). The order
+    matters: the first switch-in's Intimidate hits the foe that's leaving.
+  - Quick Claw is drawn lazily, at the first read where it can change the
+    order, and kept in `Request` (the padding byte) so the end-of-turn order
+    reuses it across a request (decided).
+  - End of turn re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`, util:1209):
+    an independent speed-tie draw, the same Quick Claw value, and the
+    chosen moves' priority (`ignoreChosenMoves` is FALSE). *(verify)* Which
+    move it reads after a mid-turn replacement: `moves[chosenMovePosition]`
+    of whoever is active.
   - `DoFieldEndTurnEffects`: screens, Mist, Safeguard, Wish (util:1173),
     weather and so on. `DoBattlerEndTurnEffects`, in speed order: Ingrain,
     Leftovers, Leech Seed, poison, burn, Nightmare, Curse, binding, Uproar,
@@ -392,8 +429,7 @@ becomes a few lines.
    `ItemBattleEffects`, the attack canceler and the end-of-turn order, each
    one ordered list.
 4. **The roll helpers:** one per catalogue row (Calc override, RNG, Chance
-   report), as libpkmn's `Rolls`. The Chance/Calc hook interface falls out of
-   these.
+   report), as libpkmn's `Rolls` (see "Chance", Hooks).
 5. **The checks:** `Battle::valid()` asserted after every `update` in debug,
    plus soak runs.
 
@@ -402,8 +438,8 @@ progress; every later mechanic inherits the frame):
 
 1. The pure calculation functions. **Done** except checking `calc_stats`
    against ADV-Simulator over `teams/`. `damage.hpp` follows Showdown's
-   arithmetic, takes no `options` and never draws; a zero divisor returns
-   `Result::Error`; the dynamic inputs are a `Hit`, which plan step 2's
+   arithmetic, takes no `options` and never draws; a zero divisor is
+   asserted (only corrupt stats reach it); the dynamic inputs are a `Hit`, which plan step 2's
    per-action `State` (on the stack, as libpkmn gen2's) contains. Details
    and the decomp comparison in `src/gen3/README.md`, "Damage".
 2. The turn frame and roll helpers, with null Chance and Calc.
@@ -465,8 +501,6 @@ functions and must be adapted (plan step 3).
 **Open:**
 
 - Check the `Actions` and `Durations` drafts against the `Battle` layout.
-- The Chance/Calc hook interface and the null Chance and Calc (falls out of
-  the roll helpers).
 - `Item::KnockedOff` and a `Move` sentinel for `MOVE_UNAVAILABLE` in the
   generator; bounds of `bide_damage` and `future_sight_damage` (u32 for now).
 - The per-`Effect` behaviour (hand-written with the mechanics).

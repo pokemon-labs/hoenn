@@ -165,11 +165,6 @@ int main() {
     uint32_t got[16] = {};
     if (!(flags & MoveResult::NO_EFFECT)) {
       const uint32_t base = damage(b, Player::P1, hit);
-      if (base == 0) {
-        std::printf("%s: zero divisor\n", c.name);
-        failures++;
-        continue;
-      }
       for (uint8_t i = 0; i < 16; i++) got[i] = apply_roll(base, i);
     }
     if (std::memcmp(got, c.expected, sizeof got) != 0) {

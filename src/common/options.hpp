@@ -6,8 +6,10 @@
 // Options. Search runs with all three null, and the null types are empty, so
 // they take no space and their calls compile to nothing. The log's types are
 // in protocol.hpp. Chance and Calc are generation-specific, so their real and
-// null types belong in gen3/chance.hpp and gen3/calc.hpp, with the hook
-// interface (not designed yet).
+// null types belong in gen3/chance.hpp and gen3/calc.hpp. The roll helpers
+// in gen3/mechanics.hpp use them directly behind `if constexpr
+// (T::enabled)`; the null types are only `enabled = false` (CLAUDE.md,
+// "Chance", Hooks).
 
 #pragma once
 
