@@ -201,9 +201,9 @@ static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1}.valid());
 static_assert(!Request{{}, {}, Phase(6), Player::P1, 0}.valid());
 
 // ---------------------------------------------------------------------------
-// The battle. Draft (2026-10-07): the decisions are in CLAUDE.md ("Decided")
-// and every ActivePokemon field is mapped to the decomp in
-// src/gen3/README.md. Packing comes last: no bitfields yet.
+// The battle. Draft (2026-10-07): the numbered decisions cited below and the
+// map of every ActivePokemon field to the decomp are in src/gen3/README.md.
+// Packing comes last: no bitfields yet.
 //
 // None of these have default member initializers, so they stay trivial. Zero
 // them with `T{}`.
@@ -334,7 +334,7 @@ static_assert(max_pp(Move::Growl, 3) == 64 && max_pp(Move::Sketch, 3) == 1);
 
 // A party Pokémon. Never reordered: Side::order maps SLOTs to it.
 //
-// Types live here and switch-in copies them (CLAUDE.md decision 7). The item
+// Types live here and switch-in copies them (decision 7). The item
 // is Item::KnockedOff once Knock Off has hit it (decision 8; the sentinel is
 // still to be added to the generator). Hidden Power's type is in its move ID;
 // `hidden_power` is its power (30-70), 0 if it doesn't know the move.
