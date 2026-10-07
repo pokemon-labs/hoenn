@@ -357,7 +357,7 @@ constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
   assert(slot >= 2 && slot <= 6);
   assert(side.get(slot).species != Species::None && !side.get(slot).fainted());
 
-  // TODO(plan step 3): Pursuit on the switching target (bs1:3088), and
+  // TODO(plan step 4): Pursuit on the switching target (bs1:3088), and
   // switchoutabilities (Natural Cure).
   ActivePokemon& f = battle.side(foe(player)).active;
   f.volatiles.infatuated = false;

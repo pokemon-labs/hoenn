@@ -290,6 +290,9 @@ tools/
 `pokeemerald/` is a depth-1 clone of pret/pokeemerald on the local branch
 `battle-only` (`a23e37a`), stripped to battle code, not pushed, ignored by
 this repo.
+`showdown/` is a depth-1 clone of smogon/pokemon-showdown master (`c046106`,
+0.11.11), ignored by this repo; cite it by path. `check_damage` still uses
+ADV-Simulator's pinned 0.11.10.
 
 ## Turn phases
 
@@ -467,8 +470,7 @@ feels like progress; every later mechanic inherits the frame.
    no Spikes, switch-in effects, residuals, Future Sight, Perish Song or
    Baton Pass; fainting itself (`FaintClearSetData`).
 3. **Switching and plain damaging moves end to end**, including the turn-0
-   start. Done when birch's search, adapted to this interface, runs against
-   it. Start from the `TODO(plan step 3)` markers in `mechanics.hpp`.
+   start. Start from the `TODO(plan step 3)` markers in `mechanics.hpp`.
    - **In scope:**
      - The hit backbone for `Effect::Hit` (`BattleScript_EffectHit`): the
        attack canceler, PP (deducted from both the active and the party
@@ -478,20 +480,24 @@ feels like progress; every later mechanic inherits the frame.
      - Roll helpers for accuracy, crit and the damage roll.
      - Fainting (`FaintClearSetData`, main:3264). Spikes on every switch-in.
      - The turn-0 start: trace `TryDoEventsBeforeFirstTurn` (main:3841).
-     - Scenario tests for what this reaches; Spikes layers can be set by
-       hand before the move exists.
-   - **Settle with the user before writing** (the working rule):
-     - What a not-yet-written effect does until step 4: a no-op that still
-       uses PP, a plain hit at its table power, or an assert.
-     - Crit before the immunity check, as the decomp does, or after, as
-       Showdown does (README "Damage", last paragraph).
-     - Switch-in abilities (Intimidate, Sand Stream, Drizzle, Trace) now or
-       in step 4, given that the weather residuals are step 4.
-     - Scope of the birch adaptation (see Interface): only search with a
-       non-NN evaluator, or the encoders too. Also the `Obs` key and
-       clamping offsets, and the Durations layout.
-     - Who loses when both last Pokémon faint in one action (Struggle
-       recoil can do it). Verify against Showdown.
+     - Scenario tests for what this reaches (deferred; see Decided).
+   - **Decided** (2026-10-07):
+     - Effects not written yet are a no-op that still uses PP. Step 3 fills
+       code in statically; testing comes later, so this stopgap isn't
+       designed further.
+     - Immunity before crit, as Showdown (README "Damage").
+     - Switch-in abilities (Intimidate, Sand Stream, Drizzle, Trace) wait
+       for step 4, with the weather residuals.
+     - No birch adaptation in step 3: this is sim development, and the
+       "done when birch runs" criterion is dropped for now.
+     - Both last Pokémon fainting in one action is a `Tie`: the decomp ORs
+       `B_OUTCOME_LOST` and `B_OUTCOME_WON` into `B_OUTCOME_DREW`
+       (`Cmd_checkteamslost`, bsc:3563-3577), and Showdown's `checkWin`
+       (`sim/battle.ts:2610`) picks a winner only after gen 4. This holds
+       for Explosion too: `setatkhptozero` (bsc:6577) zeroes the user before
+       the hit and `checkteamslost` runs after both faints (bs1:2831); in
+       Showdown the user's faint is queued first (gen3 `scripts.ts:201`) and
+       `checkWin` runs once on the whole queue.
 4. Trace the hit backbone and the dispatchers, then add effects by group,
    starting with what `teams/` uses. The log comes last.
 

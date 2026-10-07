@@ -243,9 +243,13 @@ bsc:1253) before the type calculation; the damage roll and Focus Band
 (`Cmd_adjustnormaldamage`, bsc:1658), which `jumpifmovehadnoeffect`
 (bs1:623) skips when the move had no effect. Focus Band draws whenever the
 target holds it, at full HP or behind a Substitute. Multi-hit runs crit
-through the roll per hit (`BattleScript_MultiHitLoop`, bs1:612). Showdown
-checks immunity before rolling crit; which order the roll helpers follow is
-open.
+through the roll per hit (`BattleScript_MultiHitLoop`, bs1:612).
+
+**Decided: immunity before crit, as Showdown** (gen3 `tryMoveHit`,
+`data/mods/gen3/scripts.ts:311`, before `getDamage` rolls crit,
+`sim/battle-actions.ts:1628`). A crit on a move with no effect changes
+nothing, so the only difference from the decomp is that no crit is drawn;
+following Showdown keeps the log's message order the same as its.
 
 ## Teams
 
