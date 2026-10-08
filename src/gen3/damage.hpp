@@ -45,6 +45,15 @@ struct Hit {
   static constexpr Hit of(Move move) {
     return {move, get(move).bp, get(move).type, false};
   }
+
+  // Confusion's self-hit, as Showdown: getDamage(pokemon, pokemon, 40)
+  // (data/mods/gen4/conditions.ts:77), a typeless physical 40-power move
+  // that can't crit. Struggle's ID gives the typeless path (typeless()); no
+  // other step reads it, as Struggle's effect (Recoil) matches nothing in
+  // damage().
+  static constexpr Hit confusion() {
+    return {Move::Struggle, 40, Type::Mystery, false};
+  }
 };
 
 // gMoveResultFlags as matchup() leaves them (include/constants/battle.h).
@@ -224,20 +233,25 @@ constexpr uint8_t matchup(const Battle& battle, Player player, const Hit& hit) {
 }
 
 // One hit's damage before the roll (battle-actions getDamage, then gen3
-// modifyDamage up to the randomizer). Precondition: matchup() set none of
-// NO_EFFECT.
+// modifyDamage up to the randomizer), from `player`'s active Pokémon to
+// `target`'s: the foe, or the user itself for confusion's self-hit
+// (Hit::confusion()). Precondition: matchup() set none of NO_EFFECT.
 //
 // The divisor is never zero for a valid Pokémon: the lowest Def or SpD at
 // any level is 4 (Chansey's base 5 Def, 0 IV, 0 EV, -Def nature), which is 1
 // at -6. A stat of 0-3 is corrupt state, so it's asserted, not checked.
-constexpr uint32_t damage(const Battle& battle, Player player, const Hit& hit) {
+constexpr uint32_t damage(const Battle& battle, Player player, Player target,
+                          const Hit& hit) {
   using namespace detail;
   assert(battle.valid());
   assert(hit.move != Move::None && hit.power != 0);
-  assert(!(matchup(battle, player, hit) & MoveResult::NO_EFFECT));
+  assert(target != player ||
+         (detail::typeless(hit) && hit.power == 40 && !hit.crit));
+  assert(target == player ||
+         !(matchup(battle, player, hit) & MoveResult::NO_EFFECT));
 
   const Side& side = battle.side(player);
-  const Side& foe_side = battle.side(foe(player));
+  const Side& foe_side = battle.side(target);
   const ActivePokemon& attacker = side.active;
   const ActivePokemon& defender = foe_side.active;
   const Pokemon& attacker_mon = side.get(1);
@@ -374,10 +388,13 @@ constexpr uint32_t damage(const Battle& battle, Player player, const Hit& hit) {
       attacker.ability != Ability::Guts) {
     d = modify(d, mod::HALF);
   }
-  // ModifyDamagePhase1: the screens unless crit, and Flash Fire, chained.
+  // ModifyDamagePhase1: the screens unless crit or the user hits itself
+  // (`target !== source`, data/mods/gen4/moves.ts:1130), and Flash Fire,
+  // chained.
   m = mod::ONE;
-  if (!hit.crit && (physical ? foe_side.conditions.reflect
-                             : foe_side.conditions.light_screen) != 0) {
+  if (!hit.crit && target != player &&
+      (physical ? foe_side.conditions.reflect
+                : foe_side.conditions.light_screen) != 0) {
     m = chain(m, mod::HALF);
   }
   if (attacker.volatiles.flash_fire && type == Type::Fire) {
@@ -431,6 +448,11 @@ constexpr uint32_t apply_roll(uint32_t damage, uint8_t index) {
   assert(index <= 15);
   const uint32_t d = uint32_t(uint64_t(damage) * (85u + (index & 15)) / 100);
   return d == 0 ? 1 : d;
+}
+
+// The usual case: a hit on the foe.
+constexpr uint32_t damage(const Battle& battle, Player player, const Hit& hit) {
+  return damage(battle, player, foe(player), hit);
 }
 
 static_assert(detail::chain(detail::mod::ONE_AND_HALF, detail::mod::ONE_AND_HALF) == 9216);

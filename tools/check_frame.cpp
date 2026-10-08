@@ -371,6 +371,151 @@ void check_moves() {
   }
 }
 
+void check_confusion() {
+  {
+    // A forced self-hit: Showdown's typeless 40-power hit with the roll,
+    // no PP used, and the move doesn't happen. Count 1 (just confused), so
+    // the counter can't end at this step: probability 1/2 * 1/16. Quick
+    // Attack's priority avoids the speed tie.
+    Battle b = started({SNORLAX}, {IDLE});
+    b.sides[0].active.volatiles.confusion = 3;
+    Observed o{};
+    o.chance.durations.p1.confusion = 1;
+    o.calc.overrides.p1.confusion = Optional::True;
+    o.calc.overrides.p1.hits[0].damage = 100;
+    const uint16_t hp1 = b.sides[0].get(1).hp;
+    const uint16_t hp2 = b.sides[1].get(1).hp;
+    const uint32_t expected =
+        apply_roll(damage(b, Player::P1, Player::P1, Hit::confusion()), 15);
+    CHECK(expected > 0);
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).hp == hp1 - expected);
+    CHECK(b.sides[1].get(1).hp == hp2);
+    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack, 3));
+    CHECK(b.sides[0].active.volatiles.confusion == 2);
+    CHECK(o.chance.actions.p1.confusion == Optional::True);
+    CHECK(o.chance.actions.p1.confusion_end == Optional::False);
+    CHECK(o.chance.actions.p1.hits[0].damage == 100);
+    CHECK(o.chance.actions.p1.hits[0].crit == Optional::None);
+    CHECK(o.chance.durations.p1.confusion == 2);
+    o.chance.probability.reduce();
+    CHECK(o.chance.probability.p == 1 && o.chance.probability.q == 32);
+  }
+  {
+    // Snapping out: the counter reaches 0 and the move goes ahead. At count
+    // 4 (three steps) the roll was 4 or 5, so this ends with 1/2; then no
+    // crit (15/16) and the roll (1/16).
+    Battle b = started({SNORLAX}, {IDLE});
+    b.sides[0].active.volatiles.confusion = 1;
+    Observed o{};
+    o.chance.durations.p1.confusion = 4;
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    o.calc.overrides.p1.hits[0].damage = 100;
+    const uint16_t hp2 = b.sides[1].get(1).hp;
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[1].get(1).hp < hp2);
+    CHECK(b.sides[0].active.volatiles.confusion == 0);
+    CHECK(o.chance.actions.p1.confusion_end == Optional::True);
+    CHECK(o.chance.actions.p1.confusion == Optional::None);
+    CHECK(o.chance.durations.p1.confusion == 0);
+    o.chance.probability.reduce();
+    CHECK(o.chance.probability.p == 15 && o.chance.probability.q == 512);
+  }
+  {
+    // The user's own Reflect doesn't halve its self-hit (Showdown's
+    // `target !== source`; the decomp's would).
+    Battle b = started({SNORLAX}, {IDLE});
+    const uint32_t plain = damage(b, Player::P1, Player::P1, Hit::confusion());
+    b.sides[0].conditions.reflect = 5;
+    CHECK(damage(b, Player::P1, Player::P1, Hit::confusion()) == plain);
+  }
+  {
+    // Focus Band saves the user from a lethal self-hit, here behind its own
+    // Substitute, which the self-hit ignores.
+    Battle b = started({holding(SNORLAX, Item::FocusBand)}, {IDLE});
+    b.sides[0].active.volatiles.confusion = 3;
+    b.sides[0].active.volatiles.substitute = true;
+    b.sides[0].active.substitute_hp = 50;
+    b.sides[0].get(1).hp = 2;
+    Observed o{};
+    o.calc.overrides.p1.confusion = Optional::True;
+    o.calc.overrides.p1.hits[0].focus_band = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).hp == 1);
+    CHECK(b.sides[0].active.substitute_hp == 50);
+    CHECK(o.chance.actions.p1.hits[0].focus_band == Optional::True);
+  }
+  {
+    // A self-hit that faints the user raises a replacement request.
+    Battle b = started({SNORLAX, JOLTEON}, {IDLE});
+    b.sides[0].active.volatiles.confusion = 3;
+    b.sides[0].get(1).hp = 1;
+    Observed o{};
+    o.calc.overrides.p1.confusion = Optional::True;
+    const Result r = update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
+    CHECK(b.sides[0].get(1).fainted());
+    CHECK(b.sides[0].active.volatiles.confusion == 0);
+  }
+}
+
+// accuracy() against Showdown's gen3 arithmetic, worked by hand
+// (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
+uint32_t accuracy_of(const Battle& b, Move move) {
+  detail::MoveState m{};
+  m.move = move;
+  return detail::accuracy(b, Player::P1, m);
+}
+
+void check_accuracy() {
+  const helpers::Pokemon hitter = {
+      .species = Species::Snorlax,
+      .moves = {Move::HydroPump, Move::FireBlast},
+      .ability = Ability::Immunity,
+      .gender = Gender::Male,
+  };
+  helpers::Pokemon veil = IDLE;
+  veil.species = Species::Sandslash;
+  veil.ability = Ability::SandVeil;
+  {
+    Battle b = started({hitter}, {IDLE});
+    CHECK(accuracy_of(b, Move::HydroPump) == 80);
+    // +1 accuracy: 80 * 4/3 = 106.7, certain (the decomp: 80 * 133/100).
+    b.sides[0].active.boosts.acc = 1;
+    CHECK(accuracy_of(b, Move::HydroPump) >= 100);
+    // +1 evasion cancels it exactly: 80 * 4/3 / (4/3) = 80.
+    b.sides[1].active.boosts.eva = 1;
+    CHECK(accuracy_of(b, Move::HydroPump) == 80);
+    // +1 evasion alone: 80 / (4/3) = 60, a whole number in floating point.
+    b.sides[0].active.boosts.acc = 0;
+    CHECK(accuracy_of(b, Move::HydroPump) == 60);
+    // +2 evasion: 80 * 3/5 = 48.
+    b.sides[1].active.boosts.eva = 2;
+    CHECK(accuracy_of(b, Move::HydroPump) == 48);
+    // Fire Blast at +1 evasion: 85 * 3/4 = 63.75, so 64 outcomes.
+    b.sides[1].active.boosts.eva = 1;
+    CHECK(accuracy_of(b, Move::FireBlast) == 64);
+    // Foresight ignores only a raised evasion.
+    b.sides[1].active.volatiles.foresight = true;
+    CHECK(accuracy_of(b, Move::FireBlast) == 85);
+    b.sides[1].active.boosts.eva = -1;
+    CHECK(accuracy_of(b, Move::FireBlast) >= 100);
+  }
+  {
+    // Sand Veil in sand chains 0.8 (3276/4096): modify(80) = 64.
+    Battle b = started({hitter}, {veil});
+    b.field.weather = Weather::Sandstorm;
+    CHECK(accuracy_of(b, Move::HydroPump) == 64);
+    // With BrightPowder, 80 * 0.9 = 72 is whole, so the chain applies:
+    // modify(72, 3276/4096) = (235872 + 2047) / 4096 = 58.
+    b.sides[1].get(1).item = Item::BrightPowder;
+    CHECK(accuracy_of(b, Move::HydroPump) == 58);
+    // 85 * 0.9 = 76.5 isn't whole, so runEvent drops the chained Sand Veil
+    // (sim/battle.ts:933): 77 outcomes.
+    CHECK(accuracy_of(b, Move::FireBlast) == 77);
+  }
+}
+
 void check_turn_cap() {
   Battle b = started({IDLE}, {IDLE});
   Null null{};
@@ -421,6 +566,8 @@ int main(int argc, char** argv) {
   check_switch();
   check_faints();
   check_moves();
+  check_confusion();
+  check_accuracy();
   check_turn_cap();
 
   std::vector<std::vector<helpers::Pokemon>> teams;

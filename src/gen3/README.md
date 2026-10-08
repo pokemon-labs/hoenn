@@ -271,11 +271,20 @@ Where it departs from the decomp, or from the draws the decomp makes:
   effect move no outcome changes anything. Showdown's gen3 `tryMoveHit`
   draws accuracy before it reports the immunity, which only changes the log
   message (`-miss` or `-immune`); settle that with the log.
-- **Accuracy uses the decomp's arithmetic** (`ACCURACY_STAGE_RATIOS`, integer
-  percentages, Compound Eyes, Sand Veil, Hustle and BrightPowder floored in
-  that order). Showdown multiplies by 4/3, 5/3 and so on in floating point
-  and chains the modifiers. *(open: compare the two over the stages and
-  modifiers; switch to Showdown's if they differ, as for damage)*
+- **Accuracy uses Showdown's arithmetic** (decided 2026-10-07; `accuracy()`
+  cites it): the accuracy stage, then the evasion stage, as exact fractions
+  in floating point; Compound Eyes, Sand Veil and Hustle chained, BrightPowder
+  and Lax Incense multiplied in directly; and the chain dropped when the
+  value isn't whole (`runEvent`, `sim/battle.ts:933`). Foresight ignores
+  only raised evasion. The decomp combines the stages with integer ratios
+  (`ACCURACY_STAGE_RATIOS`) and floors each modifier, so the two differ by
+  a point or more, and a lot when the chain is dropped (Fire Blast into
+  Sand Veil and BrightPowder: 77 against the decomp's 61).
+- **Confusion's self-hit is Showdown's** (decided 2026-10-07): a typeless
+  40-power physical hit with the roll, ignoring the user's own screens and
+  type items, and Focus Band can save it behind a Substitute. The decomp
+  computes it as Pound (so Reflect and Silk Scarf apply) and skips Focus Band
+  behind a Substitute. Its draws reuse `hits[0]` (`chance.hpp`).
 - **Focus Band draws only on a lethal hit**, and not for False Swipe, which
   spares the target anyway. The decomp draws whenever the target holds it.
 - **A thawing move (`EFFECT_THAW_HIT`) still draws the 1/5 thaw**, as the
@@ -286,9 +295,8 @@ Where it departs from the decomp, or from the draws the decomp makes:
   for a move that was stopped, which matters to Encore, Disable and Mimic.
 - **Not yet** (plan step 4, `TODO` in the code): the per-turn `ProtectStruct`
   (Protect, Endure, Magic Coat, Snatch, Counter's and Mirror Coat's damage),
-  which would live on `update`'s stack (decision 2); confusion's self-hit
-  (Showdown's gen4 condition calls `getDamage` with a typeless 40-power
-  move; whose arithmetic to follow is open); Bide; Soundproof; Destiny Bond;
+  which would live on `update`'s stack (decision 2); confusion's
+  infliction (the canceler is written); Bide; Soundproof; Destiny Bond;
   the absorbing abilities; the moves that hit semi-invulnerable targets;
   `moveend`'s ability and item dispatchers; Truant's end-of-turn toggle.
 - *(open, an optimization)* When every roll KOs (or every roll breaks the
@@ -340,6 +348,21 @@ main = `src/battle_main.c`.
    - This rests on requests only at action boundaries or Baton Pass, and on
      residuals never reading per-turn state. Guard it: read per-turn fields
      through an accessor that asserts the actions phase.
+   - **Exception found** (field check, 2026-10-07): residuals do read it.
+     `ENDTURN_UPROAR` and `ENDTURN_THRASH` (util:1648, 1674) call
+     `WasUnableToUseMove` (util:890), the OR of nine immobility bits set in
+     the actions. After a `FaintAfterAction` request the residuals run in a
+     later `update`, so a stack struct would lose them. Most of the nine
+     don't matter, because the canceler already ran `CancelMultiTurnMoves`
+     and the lock is gone. `targetNotAffected` does (Thrash or Uproar into a
+     Ghost type, then the Ghost faints itself, e.g. by Explosion). The
+     smallest fix is one "unable to use its move" bit per player in
+     `Request`, but Showdown ends these locks differently (`lockedmove`,
+     `data/conditions.ts:253`), so settle it when Thrash and Uproar are
+     written. *(open)* Every other field is set and read within one actions
+     phase, or cleared before the residuals (`protected` and `endured`,
+     `TurnValuesCleanUp(TRUE)`, main:3959). `noValidMoves` is
+     `Request::move` = Struggle.
    - `FaintClearSetData` (main:3264) clears most `ProtectStruct` flags but not
      the damage taken; a normal switch and Baton Pass clear none.
 3. **`request`** holds the phase, the next action (Baton Pass only), who moves

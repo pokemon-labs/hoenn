@@ -603,20 +603,37 @@ adapted (see Interface).
 **Next session** (step 4, on branch `step4`; ask before each open choice):
 
 - **Decisions for the user**, each blocking what follows it:
-  - Confusion's self-hit damage: Showdown's arithmetic (its gen4 confusion
-    condition calls `getDamage` with a typeless 40-power move) or the
-    decomp's. Blocks confusion, Dynamic Punch, Confuse Ray, Swagger; the
-    canceler asserts on confusion until then.
-  - Accuracy: the decomp's arithmetic now (README, "Hit backbone"); by the
-    follow-Showdown rule it should probably switch. Confirm.
-  - The per-turn `ProtectStruct` as a struct on `update`'s stack (README
-    decision 2). Blocks Protect, Endure, Counter, Mirror Coat, Magic Coat,
-    Snatch.
+  - Decided (2026-10-07): confusion's self-hit follows Showdown (typeless
+    40 power via `getDamage`, gen4 `conditions.ts:77`). Both roll 85-100
+    (decomp: `adjustnormaldamage2`, bsc:1705); they differ in that the
+    decomp applies Reflect and Normal type items to the self-hit and
+    blocks Focus Band under the user's Substitute. A self-hit cancels the
+    move, so it reuses `hits[0]` (`damage`, `focus_band`), keyed by
+    `confusion` = True: no new field.
+  - Decided (2026-10-07): accuracy follows Showdown (gen3 `scripts.ts:319`:
+    accuracy stage then evasion stage as exact fractions, then
+    `randomChance(acc, 100)`), replacing the decomp's combined integer
+    ratios.
+  - Checked: Brick Break breaks screens into a Ghost type in both the
+    decomp and Showdown (gen3 `scripts.ts:367`, `TryHit` before the
+    immunity result).
+  - Decided (2026-10-07): the per-turn `ProtectStruct` lives on `update`'s
+    stack (README decision 2), conditional on the field check. The check
+    found one exception: `WasUnableToUseMove`, read by the Uproar and
+    Thrash residuals after a `FaintAfterAction` request (README decision 2).
+    Open: how to keep it (probably one bit per player in `Request`), to
+    settle when Thrash and Uproar are written. Protect, Endure, Counter,
+    Mirror Coat, Magic Coat and Snatch are unblocked.
   - Skipping the damage roll when every roll KOs (fewer chance nodes, but
     it changes the `Actions` key). Can wait for the birch adaptation.
-  - Brick Break breaks screens into a Ghost type, as the decomp; check
-    Showdown.
   - Merge `step3` and `step4` into main?
+- Done (2026-10-07, uncommitted): accuracy switched to Showdown's
+  arithmetic; the confusion canceler and self-hit (`check_frame` covers
+  both). Nothing inflicts confusion yet (Confuse Ray, Swagger, the
+  confusion secondaries, Thrash's end).
+- The release build's `soak` doesn't link: `soak.cpp` calls
+  `__sanitizer_set_death_callback` without sanitizers. This predates the
+  confusion and accuracy changes.
 - **Then:** the end of turn (`DoFieldEndTurnEffects`,
   `DoBattlerEndTurnEffects`, as one ordered table) with the ability and item
   dispatchers: Leftovers, poison and burn damage, weather, Truant's toggle,

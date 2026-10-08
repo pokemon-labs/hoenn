@@ -181,14 +181,21 @@ constexpr bool paralysis(Battle& battle, Player p, O& options) {
   return coin(battle, p, &Action::paralysis, 1, 4, options);
 }
 
+// A confusion self-hit: !(Random() & 1) (CANCELER_CONFUSED, util:2148).
+template <typename O>
+constexpr bool confusion(Battle& battle, Player p, O& options) {
+  return coin(battle, p, &Action::confusion, 1, 2, options);
+}
+
 // Immobilized by love: !(Random() & 1) (CANCELER_IN_LOVE, util:2190).
 template <typename O>
 constexpr bool infatuation(Battle& battle, Player p, O& options) {
   return coin(battle, p, &Action::infatuation, 1, 2, options);
 }
 
-// The accuracy check: a hit unless Random() % 100 + 1 > calc (bsc:1176).
-// Called only for 0 < calc < 100; outside that the outcome is certain.
+// The accuracy check: a hit on `calc` of 100 outcomes, from accuracy()
+// (Showdown's randomChance; the decomp's draw is at bsc:1176). Called only
+// for 0 < calc < 100; outside that the outcome is certain.
 template <typename O>
 constexpr bool hit(Battle& battle, Player p, uint32_t calc, O& options) {
   assert(calc > 0 && calc < 100);
@@ -819,11 +826,42 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     }
   }
 
-  // CANCELER_CONFUSED. TODO(plan step 4): the tick, the 1/2 self-hit and its
-  // damage (Showdown's gen4 confusion condition calls getDamage with a
-  // typeless 40-power move; decide whose arithmetic to follow). Nothing in
-  // step 3 confuses.
-  assert(v.confusion == 0 && "confusion isn't implemented");
+  // CANCELER_CONFUSED. The hidden counter ticks; at 0 the Pokémon snaps out
+  // and moves this turn. Otherwise it hits itself with 1/2, which replaces
+  // the move: BattleScript_MoveUsedIsConfused (bs1:3796) with the target set
+  // to the user (util:2158, so moveend's target cases see the user), then
+  // tryfaintmon and moveend. The damage is Showdown's (decided 2026-10-07):
+  // Hit::confusion(), the roll, then Focus Band, which Showdown applies
+  // behind a Substitute too (the decomp doesn't, bsc:1725). The self-hit
+  // ignores the Substitute (HITMARKER_IGNORE_SUBSTITUTE) and counts toward
+  // Bide (datahpupdate, bsc:1905) but not toward Counter
+  // (HITMARKER_PASSIVE_HP_UPDATE). Its draws go in hits[0] (chance.hpp).
+  if (v.confusion != 0) {
+    v.confusion--;
+    const bool ended = v.confusion == 0;
+    if constexpr (CHANCE<O>) {
+      rolls::tick(options.chance.actions.get(player).confusion_end,
+                  options.chance.durations.get(player).confusion, ended, 2, 5,
+                  1, options);
+    }
+    if (!ended && rolls::confusion(battle, player, options)) {
+      m.self = true;
+      m.unable = true;
+      a.cancel_multi_turn_moves();
+      uint32_t d = apply_roll(damage(battle, player, player, Hit::confusion()),
+                              rolls::damage(battle, player, 0, options));
+      const ItemData item = item_data(mon.item);
+      if (mon.hp <= d && item.effect == HoldEffect::FocusBand &&
+          rolls::focus_band(battle, player, 0, item.param, options)) {
+        d = mon.hp - 1u;
+      }
+      a.bide_damage =
+          a.bide_damage > UINT32_MAX - d ? UINT32_MAX : a.bide_damage + d;
+      mon.hp = mon.hp > d ? uint16_t(mon.hp - d) : 0;
+      if (mon.fainted()) faint(battle, player, options);
+      return false;
+    }
+  }
 
   // CANCELER_PARALYZED. The decomp's own CancelMultiTurnMoves is commented
   // out, but the script it jumps to runs cancelmultiturnmoves (bs1:3773).
@@ -866,11 +904,47 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   return true;
 }
 
-// The accuracy check without its draw (Cmd_accuracycheck, bsc:1099, and
-// AccuracyCalcHelper, bsc:1054): 0 for a certain miss, 100 or more for a
-// certain hit, otherwise the hit chance in percent. The decomp's arithmetic
-// (ACCURACY_STAGE_RATIOS and integer percentages), not Showdown's
-// (README, "Accuracy").
+// Showdown's arithmetic on JavaScript numbers, which are doubles; C++'s
+// IEEE doubles give the same results for the same operations. `trunc` is
+// Dex.trunc (`num >>> 0`, sim/dex.ts:365) for the small positive values
+// here.
+constexpr double js_trunc(double x) { return double(uint32_t(x)); }
+
+// Battle.modify (sim/battle.ts:2336).
+constexpr double js_modify(double value, double modifier) {
+  const double m = js_trunc(modifier * 4096);
+  return js_trunc((js_trunc(value * m) + 2048 - 1) / 4096);
+}
+
+// Battle.chainModify (sim/battle.ts:2325): folds `next` into `modifier`.
+constexpr double js_chain(double modifier, double next) {
+  const uint32_t prev = uint32_t(modifier * 4096);
+  const uint32_t n = uint32_t(next * 4096);
+  return double((prev * n + 2048) >> 12) / 4096;
+}
+
+// boostTable in Showdown's gen3 tryMoveHit (data/mods/gen3/scripts.ts:319).
+inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
+                                              7.0 / 3,   8.0 / 3, 3};
+
+// The accuracy check without its draw: 0 for a certain miss, 100 or more
+// for a certain hit, otherwise the number of the 100 outcomes that hit.
+// The certain cases are the decomp's (Cmd_accuracycheck, bsc:1099, and
+// AccuracyCalcHelper, bsc:1054); the arithmetic is Showdown's (decided,
+// 2026-10-07), from its gen3 tryMoveHit (data/mods/gen3/scripts.ts:319-363):
+// - The accuracy stage, then the evasion stage, each as an exact fraction in
+//   floating point. The decomp combines them into one clamped stage with
+//   integer ratios (sAccuracyStageRatios, bsc:588).
+// - Foresight ignores only a positive evasion stage (its onModifyBoost,
+//   data/moves.ts:6114); the decomp ignores evasion entirely.
+// - ModifyAccuracy in priority order (data/mods/gen4/abilities.ts,
+//   items.ts): Compound Eyes ×1.3, Sand Veil ×0.8 and Hustle ×3277/4096 are
+//   chained; BrightPowder (×0.9) and Lax Incense (×0.95) multiply the value
+//   directly. runEvent applies the chained modifier only if the value is
+//   then a whole number (sim/battle.ts:933), so after a stage or a
+//   BrightPowder that leaves a fraction the chained modifiers are dropped.
+// - randomChance(acc, 100) is `random(100) < acc` (sim/prng.ts:115), so a
+//   fractional accuracy hits on ceil(acc) outcomes of 100.
 constexpr uint32_t accuracy(const Battle& battle, Player player,
                             const MoveState& m) {
   const Side& side = battle.side(player);
@@ -895,21 +969,40 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
     return 100;
   }
 
-  int stage = f.volatiles.foresight ? a.boosts.acc : a.boosts.acc - f.boosts.eva;
-  stage = stage < -6 ? -6 : stage > 6 ? 6 : stage;
-  uint32_t acc = data.accuracy;
+  double acc = data.accuracy;
   if (weather == Weather::Sun && data.effect == Effect::Thunder) acc = 50;
-  const Fraction& r = ACCURACY_STAGE_RATIOS[unsigned(stage + 6)];
-  uint32_t calc = r.num * acc / r.den;
-
-  if (a.ability == Ability::CompoundEyes) calc = calc * 130 / 100;
-  if (f.ability == Ability::SandVeil && weather == Weather::Sandstorm) {
-    calc = calc * 80 / 100;
+  const int8_t boost = a.boosts.acc;
+  if (boost > 0) {
+    acc *= ACCURACY_BOOSTS[boost];
+  } else {
+    acc /= ACCURACY_BOOSTS[-boost];
   }
-  if (a.ability == Ability::Hustle && physical(data.type)) calc = calc * 80 / 100;
+  int8_t evasion = f.boosts.eva;
+  if (f.volatiles.foresight && evasion > 0) evasion = 0;
+  if (evasion > 0) {
+    acc /= ACCURACY_BOOSTS[evasion];
+  } else if (evasion < 0) {
+    acc *= ACCURACY_BOOSTS[-evasion];
+  }
+
+  double modifier = 1;
+  if (a.ability == Ability::CompoundEyes) modifier = js_chain(modifier, 1.3);
+  if (f.ability == Ability::SandVeil && weather == Weather::Sandstorm) {
+    modifier = js_chain(modifier, 0.8);
+  }
+  if (a.ability == Ability::Hustle && physical(data.type)) {
+    modifier = js_chain(modifier, 3277.0 / 4096);
+  }
   const ItemData item = item_data(foe_side.get(1).item);
-  if (item.effect == HoldEffect::EvasionUp) calc = calc * (100 - item.param) / 100;
-  return calc;
+  if (item.effect == HoldEffect::EvasionUp) {
+    assert(item.param == 10 || item.param == 5);
+    acc *= item.param == 10 ? 0.9 : 0.95;
+  }
+  if (acc == double(uint32_t(acc))) acc = js_modify(acc, modifier);
+
+  // ceil(acc), from below: every integer r in 0-99 with r < acc.
+  const uint32_t floor = uint32_t(acc);
+  return double(floor) == acc ? floor : floor + 1;
 }
 
 // Cmd_ppreduce (bsc:1205): one PP, or two into Pressure, unless the move
@@ -1362,8 +1455,9 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   m.result |= matchup(battle, player, h);
   const bool affects = !(m.result & MoveResult::NO_EFFECT);
   // Brick Break's accuracy check comes before typecalc and its screen
-  // breaking after, so it breaks screens even into a Ghost type
-  // *(verify against Showdown)*: its accuracy matters then too.
+  // breaking after, so it breaks screens even into a Ghost type: its
+  // accuracy matters then too. Showdown agrees (gen3 tryMoveHit runs TryHit
+  // before it reports the immunity, data/mods/gen3/scripts.ts:367).
   SideConditions& foe_conditions = battle.side(foe(player)).conditions;
   const bool breaks = effect == Effect::BrickBreak &&
                       (foe_conditions.reflect != 0 || foe_conditions.light_screen != 0);
