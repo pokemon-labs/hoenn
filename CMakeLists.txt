@@ -53,6 +53,10 @@ add_test(NAME check_damage COMMAND check_damage)
 add_executable(check_frame tools/check_frame.cpp)
 target_link_libraries(check_frame PRIVATE pkmn_gen3 pkmn_warnings)
 
+# Random self-play over the team corpus (tools/soak.cpp).
+add_executable(soak tools/soak.cpp)
+target_link_libraries(soak PRIVATE pkmn_gen3 pkmn_warnings)
+
 # The team corpus lives in birch, beside this repo.
 set(PKMN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../teams/adv
     CACHE PATH "Showdown export teams for check_teams")
@@ -63,6 +67,8 @@ list(FILTER PKMN_TEAM_FILES EXCLUDE REGEX "/all\\.txt$")
 if(PKMN_TEAM_FILES)
   add_test(NAME check_teams COMMAND check_teams ${PKMN_TEAM_FILES})
   add_test(NAME check_frame COMMAND check_frame ${PKMN_TEAM_FILES})
+  # A short soak; run the binary by hand for long ones.
+  add_test(NAME soak COMMAND soak --games 100 ${PKMN_TEAM_FILES})
 else()
   add_test(NAME check_frame COMMAND check_frame)
   message(WARNING "No teams in ${PKMN_TEAMS_DIR}; check_teams won't run")
