@@ -1048,7 +1048,8 @@ constexpr void moveend(Battle& battle, Player player, const MoveState& m,
 // singles, and IGNORE_UNDERGROUND; damage.hpp doubles it into Dig).
 // Double-Edge is MOVE_EFFECT_RECOIL_33 (bs1:2567). Explosion (bs1:374) and
 // Seismic Toss and Night Shade (Effect::LevelDamage, bs1:1195) are
-// variations on the same path, handled in hit().
+// variations on the same path, handled in hit(), as are Rapid Spin
+// (MOVE_EFFECT_RAPIDSPIN, bs1:1716) and Brick Break (bs1:2418).
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1084,6 +1085,8 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::AccuracyDownHit:
   case Effect::AttackUpHit:
   case Effect::DefenseUpHit:
+  case Effect::RapidSpin:
+  case Effect::BrickBreak:
     return true;
   default:
     return false;
@@ -1358,7 +1361,13 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // them, but no outcome changes anything.
   m.result |= matchup(battle, player, h);
   const bool affects = !(m.result & MoveResult::NO_EFFECT);
-  if (affects) {
+  // Brick Break's accuracy check comes before typecalc and its screen
+  // breaking after, so it breaks screens even into a Ghost type
+  // *(verify against Showdown)*: its accuracy matters then too.
+  SideConditions& foe_conditions = battle.side(foe(player)).conditions;
+  const bool breaks = effect == Effect::BrickBreak &&
+                      (foe_conditions.reflect != 0 || foe_conditions.light_screen != 0);
+  if (affects || breaks) {
     const uint32_t calc = accuracy(battle, player, m);
     const bool hits =
         calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options));
@@ -1378,6 +1387,11 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
 
   m.attackstring = true;
   pp_reduce(battle, player, m);
+  // removelightscreenreflect (bsc:9883), before the damage.
+  if (breaks) {
+    foe_conditions.reflect = 0;
+    foe_conditions.light_screen = 0;
+  }
 
   if (affects) {
     // critcalc, damagecalc, typecalc, then adjustnormaldamage: the roll,
@@ -1410,6 +1424,19 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   secondary(battle, player, m, options);
+
+  // Rapid Spin's certain MOVE_EFFECT_RAPIDSPIN on the user, if the move
+  // affected the target: Cmd_rapidspinfree (bsc:8821) runs once per release, so
+  // it frees the user from binding and Leech Seed and clears its side's
+  // Spikes, all three.
+  if (effect == Effect::RapidSpin && affects && !user.fainted()) {
+    ActivePokemon& a = side.active;
+    a.volatiles.wrapped = 0;
+    a.wrapped_move = Move::None;
+    a.volatiles.leech_seed = false;
+    side.conditions.spikes = 0;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).binding = 0;
+  }
 
   // seteffectwithchance: the certain recoil of Effect::Recoil
   // (MOVE_EFFECT_RECOIL_25, a quarter of the HP dealt, bsc:2636) and
