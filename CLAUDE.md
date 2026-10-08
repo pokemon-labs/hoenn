@@ -386,15 +386,16 @@ unchecked claims.
   switch-in abilities and items, which a Spikes faint skips
   (`tryfaintmon_spikes`, bs1:3394); a replacement that faints to it raises
   another request in the same phase. When
-  both sides replace at once, `HandleFaintedMonActions` goes in battler-ID
-  order, not speed order *(verify against Showdown)*.
+  both sides replace at once, both enter, then each takes Spikes and its
+  switch-in effects in speed order, as Showdown (README, "Switch-in
+  effects"); the decomp uses battler-ID order.
 - **Effect order.**
   - Turn order: switches, then priority, then Quick Claw (one u16 per turn,
     `gRandomTurnNumber`, serves both sides), then speed with a random tie.
     `GetWhoStrikesFirst` and `SetActionsAndBattlersTurnOrder` (main).
-  - Two switches go in speed order with a random tie, as Showdown (decided;
-    the decomp uses battler-ID order, so record it in the README). The order
-    matters: the first switch-in's Intimidate hits the foe that's leaving.
+  - Two switches go in speed order with Quick Claw and a random tie, as
+    Showdown (decided; README). The order matters: the first switch-in's
+    Intimidate hits the foe that's leaving.
   - Quick Claw is drawn lazily, at the first read where it can change the
     order, and kept in `Request` (the padding byte) so the end-of-turn order
     reuses it across a request (decided). Two holders share the one draw, so
@@ -666,9 +667,15 @@ adapted (see Interface).
   `JumpIfMoveFailed` after a passed accuracy check, in the hit and status
   paths; Flash Fire takes Will-O-Wisp). Destiny Bond's setup there is still
   a TODO.
-- **Then:** a proposal for the switch-in abilities (Sand Stream, Drizzle,
-  Intimidate, Trace) and Natural Cure, with the battle start's order and
-  its tie draw. Uproar, Thrash and Yawn residuals wait. Then the status moves by `tools/coverage`'s
+- Done (2026-10-07, following Showdown, verified in its source): switch-in
+  abilities (Sand Stream, Drizzle, Drought, Intimidate, Trace), White Herb
+  and Natural Cure; simultaneous switch-ins arrive in speed order. Fixed:
+  two switch actions now count Quick Claw (gen3 Showdown's
+  `getActionSpeed`); the old code and test said Showdown ignored it.
+- **Then** (needs a proposal): sleep (sleep moves, Rest, Yawn, Sleep Clause,
+  Effect Spore's sleep); Uproar, Thrash and Yawn residuals; then the status
+  moves by `tools/coverage`'s order (Roar, Calm Mind, Substitute, Protect,
+  Spikes...). Then the status moves by `tools/coverage`'s
   order (Roar, Calm Mind, Rest, Substitute, Protect, Spikes...).
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.

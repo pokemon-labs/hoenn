@@ -397,8 +397,10 @@ struct Speeds {
 };
 
 // `moves` are the players' chosen moves (Move::None for a switch, so
-// priority 0). Quick Claw applies unless `quick_claw` is false (two
-// switches: Showdown sorts them by speed alone).
+// priority 0). Quick Claw applies unless `quick_claw` is false: only at the
+// battle start, before Showdown makes the first turn's roll (gen3
+// getActionSpeed, data/mods/gen3/scripts.ts:18, which every action uses,
+// switches included; quickClawRoll, sim/battle.ts:1802).
 constexpr Speeds speeds(const Battle& battle, Move m1, Move m2,
                         bool quick_claw) {
   Speeds s{};
@@ -439,8 +441,9 @@ constexpr Player first(Battle& battle, const Speeds& s, bool residual,
 }
 
 // SetActionsAndBattlersTurnOrder (main:4756): a switch goes before a move;
-// two moves go by GetWhoStrikesFirst; two switches by speed, as Showdown
-// (decided; the decomp takes them in battler-ID order, see the README).
+// two moves go by GetWhoStrikesFirst; two switches by speed with Quick
+// Claw, as Showdown (decided; the decomp takes them in battler-ID order,
+// see the README).
 template <typename O> constexpr void order(Battle& battle, O& options) {
   Request& r = battle.request;
   const bool s1 = r.choice[0].type() == Choice::Switch;
@@ -449,7 +452,7 @@ template <typename O> constexpr void order(Battle& battle, O& options) {
     r.first = s1 ? Player::P1 : Player::P2;
     return;
   }
-  r.first = first(battle, speeds(battle, r.move[0], r.move[1], !s1), false,
+  r.first = first(battle, speeds(battle, r.move[0], r.move[1], true), false,
                   options);
 }
 
@@ -612,59 +615,89 @@ constexpr bool spikes(Battle& battle, Player player, O& options) {
   return true;
 }
 
-// The Pokémon in SLOT 1 becomes active: Cmd_switchindataupdate (bsc:4621)
-// and SwitchInClearSetData (main:3152), as README decision 4. Then
-// switchineffects (bsc:5180).
-template <typename O>
-constexpr void switch_in(Battle& battle, Player player, O& options) {
-  Side& side = battle.side(player);
-  const Pokemon& mon = side.get(1);
-  assert(mon.species != Species::None && !mon.fainted());
+// Cmd_removeitem (bsc:5901): the item is used up, and Recycle remembers it.
+constexpr void consume_item(Side& side) {
+  side.recycle_item = side.get(1).item;
+  side.get(1).item = Item::None;
+}
 
+// The cures ITEMEFFECT_NORMAL (util:3485-3606) and ITEMEFFECT_MOVE_END
+// (util:3627-3752) share, and White Herb, which both run too. Cured sleep
+// and confusion are public, so their counts reset. Returns whether the item
+// was used.
+template <typename O>
+constexpr bool item_cure(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  Pokemon& mon = side.get(1);
   ActivePokemon& a = side.active;
-  a = ActivePokemon{};
-  a.stats = mon.stats;
-  for (uint8_t i = 0; i < 4; i++) a.moves[i] = mon.moves[i];
-  a.species = mon.species;
-  a.types[0] = mon.types[0];
-  a.types[1] = mon.types[1];
-  a.ability = mon.ability;
-  a.first_turn = 2; // main:3220, decision 14
-
-  if (spikes(battle, player, options)) return;
-  if (a.ability == Ability::Truant) a.truant = true; // bsc:5258
-  // TODO(plan step 4): the switch-in abilities and items
-  // (ABILITYEFFECT_ON_SWITCHIN, ITEMEFFECT_ON_SWITCH_IN).
+  Volatiles& v = a.volatiles;
+  const auto wake = [&] {
+    v.nightmare = false;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+  };
+  const auto unconfuse = [&] {
+    v.confusion = 0;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).confusion = 0;
+  };
+  switch (item_data(mon.item).effect) {
+  case HoldEffect::CurePar:
+    if (!mon.status.paralyzed()) return false;
+    mon.status = Status::none();
+    break;
+  case HoldEffect::CurePsn:
+    if (!mon.status.poisoned()) return false;
+    mon.status = Status::none();
+    a.toxic = 0;
+    break;
+  case HoldEffect::CureBrn:
+    if (!mon.status.burned()) return false;
+    mon.status = Status::none();
+    break;
+  case HoldEffect::CureFrz:
+    if (!mon.status.frozen()) return false;
+    mon.status = Status::none();
+    break;
+  case HoldEffect::CureSlp:
+    if (!mon.status.asleep()) return false;
+    mon.status = Status::none();
+    wake();
+    break;
+  case HoldEffect::CureConfusion:
+    if (v.confusion == 0) return false;
+    unconfuse();
+    break;
+  case HoldEffect::CureStatus:
+    if (!mon.status.any() && v.confusion == 0) return false;
+    if (mon.status.asleep()) wake();
+    mon.status = Status::none();
+    a.toxic = 0;
+    unconfuse();
+    break;
+  case HoldEffect::CureAttract:
+    if (!v.infatuated) return false;
+    v.infatuated = false;
+    break;
+  case HoldEffect::RestoreStats: {
+    // White Herb: every lowered stage back to 0.
+    bool lowered = false;
+    const auto reset = [&](int8_t& b) {
+      if (b < 0) {
+        b = 0;
+        lowered = true;
+      }
+    };
+    Boosts& b = a.boosts;
+    reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
+    reset(b.acc), reset(b.eva);
+    if (!lowered) return false;
+    break;
+  }
+  default:
+    return false;
+  }
+  consume_item(side);
+  return true;
 }
-
-// p's active Pokémon leaves for SLOT `slot`: a switch action or a faint
-// replacement. Switch-out clears the foe's state that p's Pokémon was the
-// source of (SwitchInClearSetData and FaintClearSetData, main:3158-3199;
-// README decision 9). Baton Pass will need its own version.
-template <typename O>
-constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
-                         O& options) {
-  Side& side = battle.side(player);
-  assert(slot >= 2 && slot <= 6);
-  assert(side.get(slot).species != Species::None && !side.get(slot).fainted());
-
-  // TODO(plan step 4): Pursuit on the switching target (bs1:3088), and
-  // switchoutabilities (Natural Cure).
-  ActivePokemon& f = battle.side(foe(player)).active;
-  f.volatiles.infatuated = false;
-  f.volatiles.wrapped = 0;
-  f.wrapped_move = Move::None;
-  f.volatiles.escape_prevention = false;
-  f.volatiles.lock_on = 0;
-
-  std::swap(side.order[0], side.order[slot - 1]);
-  if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot);
-  switch_in(battle, player, options);
-}
-
-// ---------------------------------------------------------------------------
-// Faints and the end of the battle
-// ---------------------------------------------------------------------------
 
 constexpr bool lost(const Side& side) {
   for (const Pokemon& p : side.pokemon) {
@@ -686,6 +719,183 @@ constexpr Flow outcome(const Battle& battle) {
   return Result::init(type, Choice::Pass, Choice::Pass);
 }
 
+// ---------------------------------------------------------------------------
+// Switch-in effects (decided 2026-10-07, following Showdown): each Pokémon's
+// Spikes, ability and item run together when it arrives, as gen3
+// Showdown's runSwitch (gen4's, data/mods/gen4/scripts.ts:18: hazards,
+// SwitchIn, the ability's and item's Start). The cartridge sets flags for
+// Intimidate and Trace and runs them after the action (util:1945); for a
+// lone switch-in nothing happens in between.
+// ---------------------------------------------------------------------------
+
+// The weather a switch-in ability sets, or None.
+constexpr Weather ability_weather(Ability ability) {
+  switch (ability) {
+  case Ability::Drizzle: return Weather::Rain;
+  case Ability::Drought: return Weather::Sun;
+  case Ability::SandStream: return Weather::Sandstorm;
+  default: return Weather::None;
+  }
+}
+
+// Intimidate (bs1:4024; Showdown's gen3 onStart, data/mods/gen3/abilities.ts:61):
+// -1 Attack to the foe unless it has a Substitute, Clear Body, White Smoke
+// or Hyper Cutter, its side has Mist (Showdown's onTryBoost), or it is at
+// -6. Showdown's White Herb reacts at once (onUpdate).
+template <typename O>
+constexpr void intimidate(Battle& battle, Player player, O& options) {
+  const Player target = foe(player);
+  Side& side = battle.side(target);
+  ActivePokemon& t = side.active;
+  if (side.get(1).fainted() || t.volatiles.substitute ||
+      t.ability == Ability::ClearBody || t.ability == Ability::WhiteSmoke ||
+      t.ability == Ability::HyperCutter || side.conditions.mist != 0 ||
+      t.boosts.atk <= -6) {
+    return;
+  }
+  t.boosts.atk--;
+  item_cure(battle, target, options);
+}
+
+// ABILITYEFFECT_ON_SWITCHIN (util:2470) with Intimidate and Trace:
+// - Drizzle, Drought and Sand Stream set their weather with no timer, unless
+//   it is already there from an ability (Showdown's setWeather and its gen <= 5
+//   onFieldStart agree).
+// - Trace copies the foe's ability if the foe stands; in Gen III the copy
+//   doesn't take effect on entry (Showdown's setAbility starts it only for
+//   gen > 3, sim/pokemon.ts:1941; the decomp doesn't run it either).
+template <typename O>
+constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  if (const Weather w = ability_weather(a.ability); w != Weather::None) {
+    Field& field = battle.field;
+    if (field.weather != w || !field.permanent) {
+      field.weather = w;
+      field.weather_turns = 0;
+      field.permanent = true;
+    }
+    return;
+  }
+  if (a.ability == Ability::Intimidate) return intimidate(battle, player, options);
+  if (a.ability == Ability::Trace) {
+    const Side& f = battle.side(foe(player));
+    if (!f.get(1).fainted() && f.active.ability != Ability::None) {
+      a.ability = f.active.ability;
+    }
+  }
+}
+
+// ITEMEFFECT_ON_SWITCH_IN (util:3291): White Herb.
+template <typename O>
+constexpr void item_switch_in(Battle& battle, Player player, O& options) {
+  if (holds(battle.side(player), HoldEffect::RestoreStats)) {
+    item_cure(battle, player, options);
+  }
+}
+
+// The Pokémon in SLOT 1 becomes active: Cmd_switchindataupdate (bsc:4621)
+// and SwitchInClearSetData (main:3152), as README decision 4.
+constexpr void enter(Battle& battle, Player player) {
+  Side& side = battle.side(player);
+  const Pokemon& mon = side.get(1);
+  assert(mon.species != Species::None && !mon.fainted());
+
+  ActivePokemon& a = side.active;
+  a = ActivePokemon{};
+  a.stats = mon.stats;
+  for (uint8_t i = 0; i < 4; i++) a.moves[i] = mon.moves[i];
+  a.species = mon.species;
+  a.types[0] = mon.types[0];
+  a.types[1] = mon.types[1];
+  a.ability = mon.ability;
+  a.first_turn = 2; // main:3220, decision 14
+}
+
+// switchineffects (bsc:5180) for the Pokémon that just entered: Spikes, and
+// unless they faint it, Truant's counter and the switch-in ability and item.
+template <typename O>
+constexpr void arrive(Battle& battle, Player player, O& options) {
+  if (spikes(battle, player, options)) return;
+  ActivePokemon& a = battle.side(player).active;
+  if (a.ability == Ability::Truant) a.truant = true; // bsc:5258
+  ability_switch_in(battle, player, options);
+  item_switch_in(battle, player, options);
+}
+
+// Whether the order of two arrivals can change the result, so a speed tie
+// needs its draw: two different weathers (the later one stays), or Spikes,
+// whose KO can end the battle before the other arrives. Intimidate, Trace
+// and White Herb don't depend on it (see intimidate and ability_switch_in).
+constexpr bool arrival_order_matters(const Battle& battle) {
+  const Weather w1 = ability_weather(battle.sides[0].active.ability);
+  const Weather w2 = ability_weather(battle.sides[1].active.ability);
+  return (w1 != Weather::None && w2 != Weather::None && w1 != w2) ||
+         battle.sides[0].conditions.spikes != 0 ||
+         battle.sides[1].conditions.spikes != 0;
+}
+
+// Both Pokémon entered together (the battle start, or both sides
+// replacing): each arrives in Showdown's order, the runSwitch actions'
+// speed with the turn's Quick Claw (not at the start) and a random tie,
+// and the battle can end before the second (Showdown checks after each
+// action). The decomp orders replacements by battler ID (util:1880).
+template <typename O>
+constexpr void arrive_both(Battle& battle, bool start, O& options) {
+  const Player first =
+      arrival_order_matters(battle)
+          ? detail::first(battle, speeds(battle, Move::None, Move::None, !start),
+                          false, options)
+          : Player::P1;
+  arrive(battle, first, options);
+  if (outcome(battle)) return;
+  arrive(battle, foe(first), options);
+}
+
+// p's active Pokémon leaves for SLOT `slot`, which enters: a switch action
+// or a faint replacement, before the new Pokémon arrives. Switch-out clears
+// the foe's state that p's Pokémon was the source of (SwitchInClearSetData
+// and FaintClearSetData, main:3158-3199; README decision 9). Baton Pass will
+// need its own version.
+template <typename O>
+constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options) {
+  Side& side = battle.side(player);
+  assert(slot >= 2 && slot <= 6);
+  assert(side.get(slot).species != Species::None && !side.get(slot).fainted());
+
+  // TODO(plan step 4): Pursuit on the switching target (bs1:3088).
+  // switchoutabilities (bsc:9590): Natural Cure, as Showdown's onSwitchOut.
+  // A cured sleep is public, so its count resets before the SLOTs swap.
+  Pokemon& out = side.get(1);
+  if (side.active.ability == Ability::NaturalCure && out.status.any()) {
+    out.status = Status::none();
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+  }
+  ActivePokemon& f = battle.side(foe(player)).active;
+  f.volatiles.infatuated = false;
+  f.volatiles.wrapped = 0;
+  f.wrapped_move = Move::None;
+  f.volatiles.escape_prevention = false;
+  f.volatiles.lock_on = 0;
+
+  std::swap(side.order[0], side.order[slot - 1]);
+  if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot);
+  enter(battle, player);
+}
+
+// A switch action: the Pokémon leaves, the new one enters and arrives
+// (Showdown's switch action runs its runSwitch before the next action,
+// sim/battle-queue.ts:181-182).
+template <typename O>
+constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
+                         O& options) {
+  leave(battle, player, slot, options);
+  arrive(battle, player, options);
+}
+
+// ---------------------------------------------------------------------------
+// Faints and the end of the battle
+// ---------------------------------------------------------------------------
+
 // HandleFaintedMonActions (util:1880) at the point `phase` names: the end of
 // the battle, or a replacement request for each side whose active Pokémon
 // fainted. Fainting itself (faint()) happened where the HP reached 0.
@@ -700,15 +910,24 @@ constexpr Flow faints(Battle& battle, Phase phase) {
                       f2 ? Choice::Switch : Choice::Pass);
 }
 
-// The replacements a faint request asked for, P1 first: HandleFaintedMonActions
-// goes in battler-ID order *(verify against Showdown)*.
+// The replacements a faint request asked for: as Showdown's instaswitch
+// actions, every replacement enters before any arrives (instaswitch comes
+// before runSwitch, sim/battle-queue.ts:177), then they arrive in
+// arrive_both's order.
 template <typename O>
 constexpr void replace(Battle& battle, Choice c1, Choice c2, O& options) {
   const Choice choices[2] = {c1, c2};
   for (const Player p : {Player::P1, Player::P2}) {
     const Choice c = choices[index(p)];
     assert((c.type() == Choice::Switch) == battle.side(p).get(1).fainted());
-    if (c.type() == Choice::Switch) switch_to(battle, p, c.data(), options);
+    if (c.type() == Choice::Switch) leave(battle, p, c.data(), options);
+  }
+  const bool s1 = c1.type() == Choice::Switch;
+  const bool s2 = c2.type() == Choice::Switch;
+  if (s1 && s2) {
+    arrive_both(battle, false, options);
+  } else {
+    arrive(battle, s1 ? Player::P1 : Player::P2, options);
   }
   battle.request.phase = Phase::None;
 }
@@ -721,15 +940,15 @@ constexpr void replace(Battle& battle, Choice c1, Choice c2, O& options) {
 // turn 1.
 //
 // Then TryDoEventsBeforeFirstTurn (main:3841): it orders the battlers by
-// GetWhoStrikesFirst ignoring chosen moves (a speed tie draws), then runs the
-// switch-in weather (none in link battles), the switch-in abilities in that
-// order, Intimidate, Trace and the switch-in items in that order, then
-// TurnValuesCleanUp and the turn's Quick Claw draw. Only the abilities and
-// items depend on the order, so the tie is drawn with them, in step 4.
+// GetWhoStrikesFirst ignoring chosen moves, then runs the switch-in weather
+// (none in link battles), the switch-in abilities in that order,
+// Intimidate, Trace and the switch-in items, then TurnValuesCleanUp. This
+// follows Showdown instead: both enter, then each arrives in speed order
+// without Quick Claw (arrive_both).
 template <typename O> constexpr Result start(Battle& battle, O& options) {
-  switch_in(battle, Player::P1, options);
-  switch_in(battle, Player::P2, options);
-  // TODO(plan step 4): the switch-in abilities and items, in speed order.
+  enter(battle, Player::P1);
+  enter(battle, Player::P2);
+  arrive_both(battle, true, options);
   turn_cleanup(battle);
   battle.turn = 1;
   return Result::start();
@@ -1151,90 +1370,6 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // Held items (ItemBattleEffects, util:3243): one function per mode, called
 // where the decomp calls it (decided 2026-10-07).
 // ---------------------------------------------------------------------------
-
-// Cmd_removeitem (bsc:5901): the item is used up, and Recycle remembers it.
-constexpr void consume_item(Side& side) {
-  side.recycle_item = side.get(1).item;
-  side.get(1).item = Item::None;
-}
-
-// The cures ITEMEFFECT_NORMAL (util:3485-3606) and ITEMEFFECT_MOVE_END
-// (util:3627-3752) share, and White Herb, which both run too. Cured sleep
-// and confusion are public, so their counts reset. Returns whether the item
-// was used.
-template <typename O>
-constexpr bool item_cure(Battle& battle, Player player, O& options) {
-  Side& side = battle.side(player);
-  Pokemon& mon = side.get(1);
-  ActivePokemon& a = side.active;
-  Volatiles& v = a.volatiles;
-  const auto wake = [&] {
-    v.nightmare = false;
-    if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
-  };
-  const auto unconfuse = [&] {
-    v.confusion = 0;
-    if constexpr (CHANCE<O>) options.chance.durations.get(player).confusion = 0;
-  };
-  switch (item_data(mon.item).effect) {
-  case HoldEffect::CurePar:
-    if (!mon.status.paralyzed()) return false;
-    mon.status = Status::none();
-    break;
-  case HoldEffect::CurePsn:
-    if (!mon.status.poisoned()) return false;
-    mon.status = Status::none();
-    a.toxic = 0;
-    break;
-  case HoldEffect::CureBrn:
-    if (!mon.status.burned()) return false;
-    mon.status = Status::none();
-    break;
-  case HoldEffect::CureFrz:
-    if (!mon.status.frozen()) return false;
-    mon.status = Status::none();
-    break;
-  case HoldEffect::CureSlp:
-    if (!mon.status.asleep()) return false;
-    mon.status = Status::none();
-    wake();
-    break;
-  case HoldEffect::CureConfusion:
-    if (v.confusion == 0) return false;
-    unconfuse();
-    break;
-  case HoldEffect::CureStatus:
-    if (!mon.status.any() && v.confusion == 0) return false;
-    if (mon.status.asleep()) wake();
-    mon.status = Status::none();
-    a.toxic = 0;
-    unconfuse();
-    break;
-  case HoldEffect::CureAttract:
-    if (!v.infatuated) return false;
-    v.infatuated = false;
-    break;
-  case HoldEffect::RestoreStats: {
-    // White Herb: every lowered stage back to 0.
-    bool lowered = false;
-    const auto reset = [&](int8_t& b) {
-      if (b < 0) {
-        b = 0;
-        lowered = true;
-      }
-    };
-    Boosts& b = a.boosts;
-    reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
-    reset(b.acc), reset(b.eva);
-    if (!lowered) return false;
-    break;
-  }
-  default:
-    return false;
-  }
-  consume_item(side);
-  return true;
-}
 
 // The effects whose script is BattleScript_EffectHit, maybe after setting a
 // move effect or a hit marker: the plain hits (Quick Attack and Vital Throw

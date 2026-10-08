@@ -159,12 +159,17 @@ void check_order() {
     CHECK(o.chance.actions == Actions{});
   }
   {
-    // Two switches go in speed order (Showdown), Quick Claw ignored.
+    // Two switches go in speed order with Quick Claw, as Showdown's gen3
+    // getActionSpeed: the slower holder draws, and goes first on a proc.
     Battle b = started({holding(SNORLAX, Item::QuickClaw), SNORLAX},
                        {JOLTEON, JOLTEON});
     Observed o{};
+    o.calc.overrides.turn.quick_claw = Optional::False;
     CHECK(first(b, Choice::swap(2), Choice::swap(2), o) == Player::P2);
-    CHECK(o.chance.actions == Actions{});
+    CHECK(o.chance.actions.turn.quick_claw == Optional::False);
+    Observed q{};
+    q.calc.overrides.turn.quick_claw = Optional::True;
+    CHECK(first(b, Choice::swap(2), Choice::swap(2), q) == Player::P1);
   }
 }
 
@@ -968,6 +973,83 @@ void check_absorbing() {
   }
 }
 
+void check_switch_ins() {
+  const helpers::Pokemon ttar =
+      mon(Species::Tyranitar, Ability::SandStream, {Move::Splash});
+  const helpers::Pokemon kyogre =
+      mon(Species::Kyogre, Ability::Drizzle, {Move::Splash}, Gender::None);
+  const helpers::Pokemon gyarados =
+      mon(Species::Gyarados, Ability::Intimidate, {Move::Splash});
+  const helpers::Pokemon metagross =
+      mon(Species::Metagross, Ability::ClearBody, {Move::Splash}, Gender::None);
+  Null null{};
+  {
+    // Both leads set weather: the slower (Tyranitar) arrives last, so sand
+    // stays, with no timer. The speeds differ, so nothing is drawn.
+    const std::vector<helpers::Pokemon> t1{kyogre}, t2{ttar};
+    Battle b = *helpers::init_battle(1, t1, t2);
+    Observed o{};
+    CHECK(update(b, Choice::pass(), Choice::pass(), o) == Result::start());
+    CHECK(b.field.weather == Weather::Sandstorm && b.field.permanent);
+    CHECK(o.chance.actions == Actions{});
+  }
+  {
+    // Intimidate at the start and on a switch; not into Clear Body; White
+    // Herb undoes it at once.
+    Battle b = started({gyarados}, {IDLE});
+    CHECK(b.sides[1].active.boosts.atk == -1);
+    Battle c = started({gyarados}, {metagross});
+    CHECK(c.sides[1].active.boosts.atk == 0);
+    Battle d = started({gyarados}, {holding(IDLE, Item::WhiteHerb)});
+    CHECK(d.sides[1].active.boosts.atk == 0);
+    CHECK(d.sides[1].get(1).item == Item::None);
+    Battle e = started({IDLE, gyarados}, {IDLE});
+    update(e, Choice::swap(2), Choice::move(1), null);
+    CHECK(e.sides[1].active.boosts.atk == -1);
+  }
+  {
+    // Trace copies Sand Stream, which doesn't take effect on entry in Gen
+    // III; the weather is Tyranitar's own.
+    const helpers::Pokemon porygon2 =
+        mon(Species::Porygon2, Ability::Trace, {Move::Splash}, Gender::None);
+    Battle b = started({porygon2}, {ttar});
+    CHECK(b.sides[0].active.ability == Ability::SandStream);
+    CHECK(b.field.weather == Weather::Sandstorm);
+  }
+  {
+    // Natural Cure on switching out.
+    const helpers::Pokemon starmie =
+        mon(Species::Starmie, Ability::NaturalCure, {Move::Splash}, Gender::None);
+    Battle b = started({starmie, IDLE}, {IDLE});
+    b.sides[0].get(1).status = Status::par();
+    update(b, Choice::swap(2), Choice::move(1), null);
+    CHECK(!b.sides[0].get(2).status.any());
+  }
+  {
+    // Both sides replace onto three layers of Spikes with their last
+    // Pokémon at 1 HP: the faster (Jolteon) arrives first and faints, and
+    // its side loses before Snorlax arrives.
+    const helpers::Pokemon boomer =
+        mon(Species::Snorlax, Ability::ThickFat, {Move::Explosion});
+    helpers::Pokemon fast = JOLTEON;
+    fast.moves[0] = Move::Splash;
+    Battle b = started({boomer, fast}, {IDLE, IDLE});
+    b.sides[1].get(1).hp = 1;
+    b.sides[0].get(2).hp = 1;
+    b.sides[1].get(2).hp = 1;
+    b.sides[0].conditions.spikes = 3;
+    b.sides[1].conditions.spikes = 3;
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    o.calc.overrides.p1.hits[0].damage = 85;
+    const Result r = update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Switch));
+    CHECK(update(b, Choice::swap(2), Choice::swap(2), null).type() == Result::Lose);
+    CHECK(b.sides[1].get(1).hp == 1);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -1082,6 +1164,7 @@ int main(int argc, char** argv) {
   check_items();
   check_move_abilities();
   check_absorbing();
+  check_switch_ins();
   check_accuracy();
   check_turn_cap();
 

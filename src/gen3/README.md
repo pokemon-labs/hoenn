@@ -154,11 +154,22 @@ entries here are the exceptions.
     Knock Off only makes the target's item unusable; it cannot obtain a new
     item."
 
-- **Two switches go in speed order, as Showdown** (decided 2026-10-07). The
-  decomp doesn't sort switches: `SetActionsAndBattlersTurnOrder` queues them
-  in battler-ID order and only compares speed between moves (main:4756).
-  We use the speed comparison and tie draw that moves use. It matters
-  because the first switch-in's Intimidate hits the foe that's about to leave.
+- **Two switches go in speed order with Quick Claw, as Showdown** (decided
+  2026-10-07; Quick Claw corrected the same day: gen3 Showdown's
+  `getActionSpeed`, `data/mods/gen3/scripts.ts:18`, serves every action).
+  The decomp doesn't sort switches: `SetActionsAndBattlersTurnOrder` queues
+  them in battler-ID order and only compares speed between moves
+  (main:4756). It matters because the first switch-in's Intimidate hits the
+  foe that's about to leave.
+- **Switch-in effects follow Showdown's `runSwitch`** (decided 2026-10-07).
+  Each Pokémon's Spikes, switch-in ability (weather, Intimidate, Trace) and
+  item run together when it arrives (gen4's `runSwitch`, inherited by gen3).
+  The decomp flags Intimidate and Trace and runs them after the action
+  (util:1945). When two Pokémon enter together (the battle start, both
+  sides replacing), both enter, then each arrives in speed order (Quick
+  Claw except at the start, a random tie) and the battle can end between
+  them; the decomp uses `GetWhoStrikesFirst` at the start
+  (main:3841) and battler-ID order for replacements (util:1880).
 
 ### Damage
 
