@@ -1253,6 +1253,31 @@ void check_knock_off() {
   }
 }
 
+// Perish Song: both count 3, 2, 1, then faint at the fourth end of turn;
+// both last Pokémon perishing ends it on the faster one's side first.
+void check_perish_song() {
+  helpers::Pokemon singer = JOLTEON;
+  singer.moves[0] = Move::PerishSong;
+  singer.moves[1] = Move::Splash;
+  Null null{};
+  {
+    Battle b = started({singer, DUGTRIO}, {IDLE, SNORLAX});
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].active.perish_song_timer == 2 && b.sides[1].active.perish_song_timer == 2);
+    update(b, Choice::move(2), Choice::move(1), null);
+    update(b, Choice::move(2), Choice::move(1), null);
+    const Result r = update(b, Choice::move(2), Choice::move(1), null);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Switch));
+    CHECK(b.sides[0].get(1).fainted() && b.sides[1].get(1).fainted());
+  }
+  {
+    Battle b = started({singer}, {IDLE});
+    Result r = Result::start();
+    for (int i = 0; i < 4; i++) r = update(b, Choice::move(i == 0 ? 1 : 2), Choice::move(1), null);
+    CHECK(r.type() == Result::Lose); // Jolteon is faster and perishes first
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2173,6 +2198,7 @@ int main(int argc, char** argv) {
   check_endeavor();
   check_beat_up();
   check_knock_off();
+  check_perish_song();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

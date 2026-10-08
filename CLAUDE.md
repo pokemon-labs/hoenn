@@ -346,7 +346,9 @@ A turn runs:
 4. `BattleTurnPassed` (main:3956): `DoFieldEndTurnEffects`, then
    `DoBattlerEndTurnEffects`, then `HandleFaintedMonActions`, then
    `HandleWishPerishSongOnTurnEnd` (Future Sight, then Perish Song), with
-   faint replacement after each Future Sight or Perish Song event.
+   faint replacement after each Future Sight or Perish Song event. Perish
+   Song follows Showdown instead (decided 2026-10-07): its count runs at
+   the end of the residual pass, before the residual faints are replaced.
 
 `update` suspends wherever a Pokémon can faint, plus Baton Pass (`Phase` in
 `data.hpp`):
@@ -356,8 +358,7 @@ A turn runs:
 | `BatonPass` | user's side `Switch`, other `Pass` | finish Baton Pass's switch-in, then the remaining action |
 | `FaintAfterAction` | either side or both | end of turn (the remaining action was cancelled) |
 | `FaintAfterResiduals` | either side or both | Future Sight |
-| `FaintAfterFutureSight` | either side or both | Perish Song |
-| `FaintAfterPerish` | either side or both | the next turn |
+| `FaintAfterFutureSight` | either side or both | the next turn |
 
 `Request` holds the phase, the next action (Baton Pass only), who moves first
 (decided once at selection, after the Quick Claw and speed-tie draws, which
@@ -370,8 +371,7 @@ passes. Per-turn state isn't in `Battle` (README decision 2).
 through in turn order, so the order is written once: `None` (select, order,
 Focus Punch, actions from 0), `BatonPass` (finish the switch-in, actions from
 `request.next`), `FaintAfterAction` (end of turn), `FaintAfterResiduals`
-(Future Sight), `FaintAfterFutureSight` (Perish Song), `FaintAfterPerish`
-(next turn). A resumed case first does its replacement. This relies on
+(Future Sight), `FaintAfterFutureSight` (next turn). A resumed case first does its replacement. This relies on
 `Phase` being declared in that order: `static_assert` it. Internal steps
 return `std::optional<Result>`: empty continues, a value (a request or the
 end of the battle) is returned.
@@ -771,10 +771,13 @@ adapted (see Interface).
   grew to 6 (`MAX_HITS`, decided). The survival step is `survive()`.
 - Done (2026-10-07): Knock Off, as Showdown (README decision 8), with
   `Item::KnockedOff` now in the generator. 98%.
+- Done (2026-10-07): Perish Song, as Showdown: the count runs in the
+  residual pass (`perish_count`), so `Phase::FaintAfterPerish` is gone; the
+  user's Soundproof doesn't protect it; a semi-invulnerable foe is missed.
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Perish Song, Superpower, Return, Thief, Mean Look...). Uproar and Thrash (with the
+  (Superpower, Return, Thief, Mean Look, Screech...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

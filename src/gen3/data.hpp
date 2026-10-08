@@ -143,16 +143,16 @@ static_assert(!Status{6}.valid() && Status{Status::PSN}.valid());
 //                          Request::next
 //   FaintAfterAction       replace; resume at end of turn. The replacement's
 //                          cancelallactions (bsc:5850) cancelled the rest.
-//   FaintAfterResiduals    replace; resume at Future Sight
-//   FaintAfterFutureSight  replace; resume at Perish Song
-//   FaintAfterPerish       replace; resume at the next turn
+//   FaintAfterResiduals    replace; resume at Future Sight. Perish Song's
+//                          faints are among these, as Showdown (decided
+//                          2026-10-07; the decomp has a request after it).
+//   FaintAfterFutureSight  replace; resume at the next turn
 enum class Phase : uint8_t {
   None,
   BatonPass,
   FaintAfterAction,
   FaintAfterResiduals,
   FaintAfterFutureSight,
-  FaintAfterPerish,
 };
 
 // What survives a mid-turn request: only what update can't recompute when it
@@ -188,7 +188,7 @@ struct Request {
 
   // A well-formed request. Asserted in debug builds.
   constexpr bool valid() const {
-    if (phase > Phase::FaintAfterPerish) return false;
+    if (phase > Phase::FaintAfterFutureSight) return false;
     if (first != Player::P1 && first != Player::P2) return false;
     if (!choice[0].valid() || !choice[1].valid()) return false;
     if (quick_claw > Optional::False) return false;
@@ -203,14 +203,13 @@ static_assert(Request{}.valid());
 static_assert(!Request{{}, {}, Phase::BatonPass, Player::P1, 0, Optional::None}.valid());
 static_assert(Request{{}, {}, Phase::BatonPass, Player::P2, 2, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1, Optional::None}.valid());
-static_assert(!Request{{}, {}, Phase(6), Player::P1, 0, Optional::None}.valid());
+static_assert(!Request{{}, {}, Phase(5), Player::P1, 0, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase::None, Player::P1, 0, Optional(3)}.valid());
 // The frame (mechanics.hpp) falls through the phases in this order.
 static_assert(Phase::None < Phase::BatonPass &&
               Phase::BatonPass < Phase::FaintAfterAction &&
               Phase::FaintAfterAction < Phase::FaintAfterResiduals &&
-              Phase::FaintAfterResiduals < Phase::FaintAfterFutureSight &&
-              Phase::FaintAfterFutureSight < Phase::FaintAfterPerish);
+              Phase::FaintAfterResiduals < Phase::FaintAfterFutureSight);
 
 // ---------------------------------------------------------------------------
 // The battle. Draft (2026-10-07): the numbered decisions cited below and the

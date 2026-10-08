@@ -3297,6 +3297,38 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectPerishSong (bs1:1567), as Showdown's Perish Song
+// (data/moves.ts onHitField): after the canceler, attackstring and
+// ppreduce, every active Pokémon without a count gets 3, except a
+// semi-invulnerable one, which it misses, and a Soundproof one other than
+// the user. It fails only if nothing was missed, blocked or started. The
+// decomp's Cmd_trysetperishsong (bsc:8508) skips the user's Soundproof too,
+// ignores semi-invulnerability, and fails when every Pokémon is Soundproof
+// or counting. Pressure takes no extra PP here (Target::User); the decomp
+// takes one (PressurePPLoseOnUsingPerishSong), Showdown's is unverified
+// *(verify)*. Log: FieldActivate Perish
+// Song, Immune for Soundproof, Miss, or Fail.
+template <typename O>
+constexpr void perish_song(Battle& battle, Player player, MoveState& m,
+                           O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  bool result = false;
+  for (const Player p : {player, foe(player)}) {
+    ActivePokemon& a = battle.side(p).active;
+    if (p != player && (a.volatiles.semi_invulnerable() || a.ability == Ability::Soundproof)) {
+      result = true;
+    } else if (!a.volatiles.perish_song) {
+      a.volatiles.perish_song = true;
+      a.perish_song_timer = 3;
+      result = true;
+    }
+  }
+  if (!result) m.result |= MoveResult::FAILED;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
 // ppreduce, a missed accuracy check (Protect, evasion) or an existing
 // Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
@@ -3392,7 +3424,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::BatonPass || effect == Effect::Wish ||
          effect == Effect::LeechSeed || effect == Effect::Refresh ||
          effect == Effect::HealBell || effect == Effect::Taunt ||
-         move_weather(effect) != Weather::None || effect == Effect::BeatUp;
+         move_weather(effect) != Weather::None || effect == Effect::BeatUp ||
+         effect == Effect::PerishSong;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3437,6 +3470,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::HealBell) return heal_bell(battle, player, m, options);
   if (effect == Effect::Taunt) return taunt(battle, player, m, options);
   if (effect == Effect::BeatUp) return beat_up(battle, player, m, options);
+  if (effect == Effect::PerishSong) return perish_song(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
@@ -3575,7 +3609,7 @@ constexpr bool could_lose(const Battle& battle, Player player) {
   }
   const Volatiles& v = side.active.volatiles;
   return mon.status.poisoned() || mon.status.burned() || v.leech_seed ||
-         v.nightmare || v.cursed || v.wrapped != 0 ||
+         v.nightmare || v.cursed || v.wrapped != 0 || v.perish_song ||
          battle.field.weather == Weather::Sandstorm ||
          battle.field.weather == Weather::Hail;
 }
@@ -3906,8 +3940,32 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   return std::nullopt;
 }
 
+// Perish Song's count for p's active Pokémon, as Showdown (decided
+// 2026-10-07): its gen4 condition (onResidualOrder 12,
+// data/mods/gen4/moves.ts:1017) counts down in the residual pass, after the
+// per-Pokémon residuals and in their order, so its faints are replaced with
+// theirs. The decomp's HandleWishPerishSongOnTurnEnd (util:1825) runs it
+// after the residual faints are replaced, with a request of its own. The
+// count shows 3, 2, 1; at 0 the Pokémon faints, and the battle can end
+// there. Showdown runs Speed Boost, Truant's toggle and White Herb after it
+// (order 27-29); that changes only the log. Log: Start perishN, or the
+// faint.
+template <typename O>
+constexpr Flow perish_count(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  Pokemon& mon = battle.side(player).get(1);
+  if (!a.volatiles.perish_song || mon.fainted()) return std::nullopt;
+  if (a.perish_song_timer != 0) {
+    a.perish_song_timer--;
+    return std::nullopt;
+  }
+  a.volatiles.perish_song = false;
+  passive_damage(battle, player, mon.hp, options);
+  return outcome(battle);
+}
+
 // HandleEndTurn_ContinueBattle (main:3932), then BattleTurnPassed's residuals
-// (main:3956) and HandleFaintedMonActions.
+// (main:3956), Perish Song's count and HandleFaintedMonActions.
 template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
@@ -3929,17 +3987,15 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   for (const Player p : {first, foe(first)}) {
     if (Flow over = battler_residuals(battle, p, options)) return over;
   }
+  for (const Player p : {first, foe(first)}) {
+    if (Flow over = perish_count(battle, p, options)) return over;
+  }
   return faints(battle, Phase::FaintAfterResiduals);
 }
 
 // HandleWishPerishSongOnTurnEnd (util:1781), Future Sight and Doom Desire.
 // TODO(plan step 4).
 template <typename O> constexpr Flow future_sight(Battle&, O&) {
-  return std::nullopt;
-}
-
-// HandleWishPerishSongOnTurnEnd, Perish Song. TODO(plan step 4).
-template <typename O> constexpr Flow perish_song(Battle&, O&) {
   return std::nullopt;
 }
 
@@ -4095,14 +4151,6 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
     [[fallthrough]];
   case Phase::FaintAfterFutureSight:
     if (phase == Phase::FaintAfterFutureSight) {
-      replace(battle, c1, c2, options);
-      // A replacement can faint to Spikes: replace it before going on.
-      if ((f = faints(battle, phase))) return checked(battle, *f);
-    }
-    if ((f = perish_song(battle, options))) return checked(battle, *f);
-    [[fallthrough]];
-  case Phase::FaintAfterPerish:
-    if (phase == Phase::FaintAfterPerish) {
       replace(battle, c1, c2, options);
       // A replacement can faint to Spikes: replace it before going on.
       if ((f = faints(battle, phase))) return checked(battle, *f);
