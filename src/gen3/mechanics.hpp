@@ -1076,6 +1076,14 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::ParalyzeHit:
   case Effect::FlinchHit:
   case Effect::TriAttack:
+  case Effect::AttackDownHit:
+  case Effect::DefenseDownHit:
+  case Effect::SpeedDownHit:
+  case Effect::SpecialAttackDownHit:
+  case Effect::SpecialDefenseDownHit:
+  case Effect::AccuracyDownHit:
+  case Effect::AttackUpHit:
+  case Effect::DefenseUpHit:
     return true;
   default:
     return false;
@@ -1085,7 +1093,22 @@ constexpr bool plain_hit(Effect effect) {
 // MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
 enum class Secondary : uint8_t {
   None, Poison, Burn, Freeze, Paralysis, Toxic, Flinch, TriAttack,
+  // MOVE_EFFECT_*_MINUS_1 on the target, in Boosts order (atk-acc), then
+  // MOVE_EFFECT_ATK_PLUS_1 and DEF_PLUS_1 with MOVE_EFFECT_AFFECTS_USER.
+  AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
 };
+
+// The stage a stat change moves: 0 Atk, 1 Def, 2 Spe, 3 SpA, 4 SpD, 5 Acc.
+constexpr int8_t& stage(Boosts& b, uint8_t stat) {
+  switch (stat) {
+  case 0: return b.atk;
+  case 1: return b.def;
+  case 2: return b.spe;
+  case 3: return b.spa;
+  case 4: return b.spd;
+  default: assert(stat == 5); return b.acc;
+  }
+}
 
 // setmoveeffect in each effect's script (bs1). Blaze Kick and Poison Tail
 // share Burn Hit's and Poison Hit's scripts; Thunder sets PARALYSIS.
@@ -1102,6 +1125,14 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::Thunder: return Secondary::Paralysis;
   case Effect::FlinchHit: return Secondary::Flinch;
   case Effect::TriAttack: return Secondary::TriAttack;
+  case Effect::AttackDownHit: return Secondary::AtkDown;
+  case Effect::DefenseDownHit: return Secondary::DefDown;
+  case Effect::SpeedDownHit: return Secondary::SpeDown;
+  case Effect::SpecialAttackDownHit: return Secondary::SpaDown;
+  case Effect::SpecialDefenseDownHit: return Secondary::SpdDown;
+  case Effect::AccuracyDownHit: return Secondary::AccDown;
+  case Effect::AttackUpHit: return Secondary::AtkUp;
+  case Effect::DefenseUpHit: return Secondary::DefUp;
   default: return Secondary::None;
   }
 }
@@ -1177,8 +1208,23 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
       (battle.side(player).active.ability == Ability::SereneGrace ? 2u : 1u);
   if (chance == 0) return;
 
+  // A stat raise on the user (MOVE_EFFECT_AFFECTS_USER): SetMoveEffect's
+  // preamble checks the user, which is alive, and ChangeStatBuffs only fails
+  // at +6 (bsc:6937).
+  if (s == Secondary::AtkUp || s == Secondary::DefUp) {
+    int8_t& b = stage(battle.side(player).active.boosts,
+                      s == Secondary::AtkUp ? 0 : 1);
+    if (b >= 6) return;
+    if (chance < 100 && !rolls::secondary(battle, player, chance, options)) {
+      return;
+    }
+    b++;
+    return;
+  }
+
   // SetMoveEffect's preamble: not into a fainted target, a Substitute or
-  // Shield Dust (every effect here is MOVE_EFFECT_TRI_ATTACK or below).
+  // Shield Dust (for the statuses, flinch and Tri Attack; ChangeStatBuffs
+  // has its own Shield Dust check for secondary stat drops).
   Side& side = battle.side(foe(player));
   ActivePokemon& t = side.active;
   const Pokemon& target = side.get(1);
@@ -1189,6 +1235,24 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
 
   bool matters = false;
   switch (s) {
+  case Secondary::AtkDown:
+  case Secondary::DefDown:
+  case Secondary::SpeDown:
+  case Secondary::SpaDown:
+  case Secondary::SpdDown:
+  case Secondary::AccDown: {
+    // ChangeStatBuffs (bsc:6937) for a secondary drop: Mist, Clear Body and
+    // White Smoke, Hyper Cutter for Attack, Keen Eye for accuracy, and a
+    // stage already at -6 stop it. TODO(plan step 4): Protect's check.
+    const uint8_t stat = uint8_t(s) - uint8_t(Secondary::AtkDown);
+    matters = side.conditions.mist == 0 &&
+              t.ability != Ability::ClearBody &&
+              t.ability != Ability::WhiteSmoke &&
+              !(t.ability == Ability::HyperCutter && stat == 0) &&
+              !(t.ability == Ability::KeenEye && stat == 5) &&
+              stage(t.boosts, stat) > -6;
+    break;
+  }
   case Secondary::Flinch:
     // Set only if the target hasn't moved yet this turn (bsc:2685).
     matters = m.first && !t.volatiles.flinched &&
@@ -1215,6 +1279,14 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   }
 
   switch (s) {
+  case Secondary::AtkDown:
+  case Secondary::DefDown:
+  case Secondary::SpeDown:
+  case Secondary::SpaDown:
+  case Secondary::SpdDown:
+  case Secondary::AccDown:
+    stage(t.boosts, uint8_t(uint8_t(s) - uint8_t(Secondary::AtkDown)))--;
+    break;
   case Secondary::Flinch:
     t.volatiles.flinched = true;
     break;
