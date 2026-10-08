@@ -1161,6 +1161,32 @@ void check_weather_moves() {
         b.field.weather_turns == 4);
 }
 
+// Endeavor: the target drops to the user's HP; it fails at equal or lower
+// HP and doesn't affect a Ghost type.
+void check_endeavor() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::Endeavor;
+  Null null{};
+  {
+    Battle b = started({user}, {IDLE});
+    b.sides[0].get(1).hp = 30;
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].get(1).hp == 30);
+    update(b, Choice::move(1), Choice::move(1), null); // fails
+    CHECK(b.sides[1].get(1).hp == 30);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Endeavor, 3) - 2);
+  }
+  {
+    helpers::Pokemon ghost = IDLE;
+    ghost.species = Species::Gengar;
+    ghost.ability = Ability::Levitate;
+    Battle b = started({user}, {ghost});
+    b.sides[0].get(1).hp = 30;
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2078,6 +2104,7 @@ int main(int argc, char** argv) {
   check_drain();
   check_taunt();
   check_weather_moves();
+  check_endeavor();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

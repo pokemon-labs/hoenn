@@ -1627,7 +1627,8 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // Seismic Toss and Night Shade (Effect::LevelDamage, bs1:1195) are
 // variations on the same path, handled in hit(), as are Rapid Spin
 // (MOVE_EFFECT_RAPIDSPIN, bs1:1716), Brick Break (bs1:2418), and Counter
-// and Mirror Coat (bs1:1217, 1801) and the draining moves (bs1:323).
+// and Mirror Coat (bs1:1217, 1801), Endeavor (bs1:2479) and the draining
+// moves (bs1:323).
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1671,6 +1672,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Counter:
   case Effect::MirrorCoat:
   case Effect::Absorb:
+  case Effect::Endeavor:
     return true;
   default:
     return false;
@@ -2276,11 +2278,25 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // gen3 onTry agrees. A failure under Pressure still costs 2 PP, as
   // Showdown deducts before onTry; the decomp spares it
   // (ppNotAffectedByPressure). Log: Fail.
-  uint32_t taken = 0;
-  if (effect == Effect::Counter || effect == Effect::MirrorCoat) {
-    taken = (effect == Effect::Counter ? m.turn->physical
-                                       : m.turn->special)[index(player)];
-    if (taken == 0) {
+  //
+  // Endeavor (BattleScript_EffectEndeavor, bs1:2479): attackstring and
+  // ppreduce, then Cmd_setdamagetohealthdifference (bsc:9366) fails it
+  // unless the target has more HP than the user; then the plain hit for the
+  // difference, with typecalc's immunities and no crit or roll. Showdown's
+  // gen4 onTry agrees. Log: Fail.
+  //
+  // `fixed` is the damage of these, 0 for any other move.
+  uint32_t fixed = 0;
+  if (effect == Effect::Counter || effect == Effect::MirrorCoat ||
+      effect == Effect::Endeavor) {
+    const uint16_t foe_hp = battle.side(foe(player)).get(1).hp;
+    if (effect == Effect::Endeavor) {
+      fixed = foe_hp > user.hp ? foe_hp - user.hp : 0u;
+    } else {
+      fixed = 2u * (effect == Effect::Counter ? m.turn->physical
+                                              : m.turn->special)[index(player)];
+    }
+    if (fixed == 0) {
       m.attackstring = true;
       pp_reduce(battle, player, m);
       m.result |= MoveResult::FAILED;
@@ -2371,8 +2387,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // Seismic Toss and Night Shade: the user's level, with no crit or roll
     // (dmgtolevel, then adjustsetdamage, bsc:5878, which has the same
     // survival checks).
-    uint32_t d = taken != 0 ? 2 * taken : user.level;
-    if (effect != Effect::LevelDamage && taken == 0) {
+    uint32_t d = fixed != 0 ? fixed : user.level;
+    if (effect != Effect::LevelDamage && fixed == 0) {
       if (can_crit(battle, player)) {
         h.crit = rolls::crit(battle, player, 0,
                              crit_stage(battle, player, m.move), options);
