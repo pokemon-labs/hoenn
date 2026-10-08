@@ -937,9 +937,36 @@ adapted (see Interface).
   order by Speed, sand/hail and Perish Song double KOs tie, Pursuit on a
   switching target, the turn cap (turn 1000 is played), Protect's chain
   ending after any turn without a success (`ActivePokemon::stall`), and
-  Endure at +4 (likely a Showdown data bug, followed anyway). Next: the
-  log (opcodes, formatter; README "Protocol"), replacing the guard with
-  line comparison, keeping the guard (see the realizability Q&A, gap 6).
+  Endure at +4 (likely a Showdown data bug, followed anyway). Committed
+  (`a53cd5b`).
+- **Next session: the log** (2026-10-08, the user's call). Plan steps: the
+  opcodes written by `update`, then the formatter, then `check_showdown`
+  compares lines. Until then the realizability results are state-only (the
+  guard), so log-only differences are untested.
+  - Read first: README "Protocol" (the inventory, every decision so far:
+    libpkmn's `ArgType` values, hybrid `[from]`, 2-byte species and moves,
+    exact HP with the `|split|` triplet, nicknames as a formatter input,
+    a buffer that can't fill, the dropped messages); `common/protocol.hpp`
+    (Writer, NullWriter, Log: plumbing only, no messages).
+  - libpkmn references (`~/oak/cpp/extern/engine`): `src/lib/common/
+    protocol.zig` (ArgType and the reason enums, the Log methods) and
+    `src/pkg/protocol.ts` (its binary-to-Showdown text parser, the model
+    for our formatter); `src/test/integration.ts` for the `FILTER`.
+  - Sites: `mechanics.hpp` has 46 `// Log: <ArgType>` markers, written as
+    mechanics went in; the hit backbone and the frame (switch, move, damage,
+    crit, effectiveness, miss, faint, turn, win) mostly have none yet, so
+    list every site first.
+  - Showdown's line order and quirks to match: Pressure only in the
+    omniscient stream; Quick Claw not logged; Leech Seed, Taunt and Encore
+    draw accuracy first and log a miss where we fail (README shortlist,
+    log only); 0.11.11's forms (README "Protocol").
+  - Open, to settle with the user before writing: the opcode values for
+    `-nothing`, `-notarget`, `-anim`; where the formatter lives (a header
+    in `src/`, or tools only) and its interface; how the harness compares
+    (Showdown's raw lines after a `FILTER`, both `|split|` lines); the
+    buffer bound (derive it, or measure first with a soak); whether the
+    log lands in one pass or by groups of messages, each checked against
+    the traces.
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.
