@@ -2714,23 +2714,21 @@ constexpr uint8_t bench(const Battle& battle, Player player) {
   return mask;
 }
 
-// BattleScript_EffectRoar (bs1:593), for Roar and Whirlwind, with
-// Showdown's differences where they show (gen3 Roar, data/moves.ts:15159,
-// forceSwitch in sim/battle-actions.ts:1342):
+// BattleScript_EffectRoar (bs1:593), for Roar and Whirlwind. Showdown's
+// gen3 Roar has accuracy 100 and the protect flag (data/mods/gen4/moves.ts:
+// 1164, inheriting gen5's accuracy), as the decomp's.
 // - After the canceler (Soundproof stops Roar, a sound move), attackstring
-//   and ppreduce: Suction Cups and Ingrain fail it (Showdown's onDragOut),
-//   then a semi-invulnerable target (accuracycheck with
-//   NO_ACC_CALC_CHECK_LOCK_ON; Showdown's invulnerability step), then an
-//   empty bench (forcerandomswitch; Showdown's canSwitch).
-// - No accuracy roll: Showdown's accuracy is `true`, where the decomp
-//   rolls ACC_CURR_MOVE (bs1:600), so evasion could make it miss.
+//   and ppreduce: Suction Cups and Ingrain stop it with no result flag
+//   (Showdown's onDragOut), then a semi-invulnerable target fails it
+//   (accuracycheck with NO_ACC_CALC_CHECK_LOCK_ON), then the accuracy roll
+//   (ACC_CURR_MOVE: evasion can make it miss), then an empty bench fails
+//   it (forcerandomswitch; Showdown's canSwitch). The bench is checked
+//   before the roll, since the roll can't matter without one.
 // - No level check: TryDoForceSwitchOut (bsc:7163) only draws when the
 //   user's level is lower, and Showdown has none.
 // - The drag happens after the whole action (Showdown's forceSwitchFlag;
 //   the decomp drags before moveend), so this only sets m.drag.
-// - It hits through a Substitute in both. TODO(plan step 4): Protect. The
-//   decomp's NO_ACC_CALC_CHECK_LOCK_ON checks it; Showdown's gen3 Roar has
-//   no protect flag *(verify)*.
+// - It hits through a Substitute in both. TODO(plan step 4): Protect.
 template <typename O>
 constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -2742,9 +2740,15 @@ constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
   if (t.ability == Ability::SuctionCups || t.volatiles.rooted) {
     return moveend(battle, player, m, options);
   }
-  if ((t.volatiles.lock_on == 0 && t.volatiles.semi_invulnerable()) ||
-      bench(battle, foe(player)) == 0) {
+  const uint32_t calc = accuracy(battle, player, m);
+  // accuracy() is 0 only for a semi-invulnerable target here: Roar's
+  // accuracy is 100.
+  if (calc == 0 || bench(battle, foe(player)) == 0) {
     m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (calc < 100 && !rolls::hit(battle, player, calc, options)) {
+    m.result |= MoveResult::MISSED;
     return moveend(battle, player, m, options);
   }
   m.drag = true;

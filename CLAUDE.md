@@ -460,6 +460,25 @@ unchecked claims.
   Sleep Talk and Snore turns go back on the counter at switch-out
   (`sleep_skipped`, Showdown's gen3 `skippedTime`, a real cartridge quirk).
 - **Roar and Whirlwind** (`roar`, `drag`, tested in `check_frame`).
+  Priority −6, accuracy 100 (evasion can make it miss), blocked by Protect
+  (Showdown's gen3 agrees on both; master's base data doesn't, its gen4
+  mod restores them). The replacement is a uniform pick among the
+  non-fainted bench (`switch_target`, no request). Fails with no bench,
+  against Suction Cups, Ingrain or a semi-invulnerable target; Soundproof
+  stops Roar. As Showdown: no level check, through a Substitute, and the
+  drag comes after the whole action. The dragged-in Pokémon takes Spikes
+  and its switch-in effects, and the dragged-out one's queued move is
+  cancelled.
+- **Sleep Talk** (`sleep_talk`, tested), as Showdown's gen3: only asleep;
+  fails under a Choice Band lock or Encore (the cartridge agrees); picks
+  uniformly among the slots `sleep_talk_banned` allows (a `move_slot` chance
+  action) and fails if the pick has no PP. The cartridge also leaves out
+  disabled, taunted, tormented and imprisoned moves and calls 0-PP moves.
+  The called move uses no PP and doesn't re-run the canceler (the decomp's
+  tracker stays at its end; Showdown's useMove skips BeforeMove).
+  Sleep Talk and Snore turns go back on the counter at switch-out
+  (`sleep_skipped`, Showdown's gen3 `skippedTime`, a real cartridge quirk).
+- **Roar and Whirlwind** (`roar`, `drag`, tested in `check_frame`).
   Priority −6. The replacement is a uniform pick among the non-fainted
   bench (`switch_target`, no request). Fails with no bench, against
   Suction Cups, Ingrain or a semi-invulnerable target; Soundproof stops

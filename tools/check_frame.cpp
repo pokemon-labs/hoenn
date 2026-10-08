@@ -763,6 +763,17 @@ void check_roar() {
     CHECK(stays(1, [](Battle& b) { b.sides[1].active.ability = Ability::Soundproof; }));
     CHECK(!stays(2, [](Battle& b) { b.sides[1].active.ability = Ability::Soundproof; }));
   }
+  // Evasion can make it miss: a forced miss drags nothing.
+  {
+    Battle b = started({roarer}, foes);
+    b.sides[1].active.boosts.eva = 6;
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::False;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[1].get(1).species == Species::Snorlax);
+    CHECK(o.chance.actions.p1.hit == Optional::False);
+    CHECK(o.chance.actions.p1.switch_target == 0);
+  }
   // No bench: it fails.
   {
     Battle b = started({roarer}, {IDLE});
