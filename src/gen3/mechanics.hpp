@@ -195,6 +195,31 @@ constexpr bool hit(Battle& battle, Player p, uint32_t calc, O& options) {
   return coin(battle, p, &Action::hit, calc, 100, options);
 }
 
+// A move's secondary effect: Random() % 100 < chance (seteffectwithchance,
+// bsc:2923). Called only for 0 < chance < 100 and when the effect could take
+// hold.
+template <typename O>
+constexpr bool secondary(Battle& battle, Player p, uint32_t chance,
+                         O& options) {
+  assert(chance > 0 && chance < 100);
+  return coin(battle, p, &Action::secondary, chance, 100, options);
+}
+
+// Tri Attack's status: Random() % 3, 1 burn, 2 freeze, 3 paralysis
+// (bsc:2601).
+template <typename O>
+constexpr uint8_t tri_attack(Battle& battle, Player p, O& options) {
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).tri_attack;
+  assert(forced <= 3);
+  const uint8_t which = forced != 0 ? forced : uint8_t(1 + battle.rng.range(3));
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).tri_attack, which);
+    observe(options, 1, 3);
+  }
+  return which;
+}
+
 // A crit on hit `i`: !(Random() % n) with n from the crit stage (bsc:1282).
 template <typename O>
 constexpr bool crit(Battle& battle, Player p, uint8_t i, uint8_t stage,
@@ -668,6 +693,9 @@ struct MoveState {
   bool attackstring; // HITMARKER_ATTACKSTRING_PRINTED
   bool unable;       // HITMARKER_UNABLE_TO_USE_MOVE
   bool damaged;      // TARGET_TURN_DAMAGED: the target's own HP took damage
+  bool first;        // the target acts after this, so a flinch can stop it
+  bool ignore_on_air;      // HITMARKER_IGNORE_ON_AIR (Thunder, Sky Uppercut)
+  bool ignore_underground; // HITMARKER_IGNORE_UNDERGROUND (Earthquake)
 
   static constexpr uint8_t NO_SLOT = 4;
 };
@@ -855,11 +883,12 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   // Lock-On and Mind Reader: the only possible locker in singles is the
   // attacker.
   if (f.volatiles.lock_on != 0) return 100;
-  // Semi-invulnerable targets. Surf hits Dive (HITMARKER_IGNORE_UNDERWATER,
-  // bs1:239). TODO(plan step 4): the moves that set IGNORE_ON_AIR and
-  // IGNORE_UNDERGROUND (Gust, Twister, Thunder, Sky Uppercut, Earthquake,
-  // Magnitude).
-  if (f.volatiles.on_air || f.volatiles.underground) return 0;
+  // Semi-invulnerable targets, unless the move reaches them: Surf hits Dive
+  // (HITMARKER_IGNORE_UNDERWATER, bs1:239), and the moves that set
+  // ignore_on_air or ignore_underground. TODO(plan step 4): Gust, Twister
+  // and Magnitude.
+  if (f.volatiles.on_air && !m.ignore_on_air) return 0;
+  if (f.volatiles.underground && !m.ignore_underground) return 0;
   if (f.volatiles.underwater && m.move != Move::Surf) return 0;
   if ((weather == Weather::Rain && data.effect == Effect::Thunder) ||
       data.effect == Effect::AlwaysHit || data.effect == Effect::VitalThrow) {
@@ -945,9 +974,12 @@ constexpr void moveend(Battle& battle, Player player, const MoveState& m,
     t.boosts.atk++;
   }
 
-  // MOVEEND_DEFROST: a Fire move's special damage thaws the target.
+  // MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
+  // Power's damage is recorded under its base type, Normal, so Hidden Power
+  // Fire doesn't thaw (datahpupdate, bsc:1852).
   if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
-      !physical(type) && !no_effect && type == Type::Fire) {
+      !physical(type) && !no_effect && type == Type::Fire &&
+      data.effect != Effect::HiddenPower) {
     target_side.get(1).status = Status::none();
   }
 
@@ -1006,10 +1038,14 @@ constexpr void moveend(Battle& battle, Player player, const MoveState& m,
   }
 }
 
-// The effects whose script is BattleScript_EffectHit with the table's power,
-// and Effect::Recoil, which sets MOVE_EFFECT_RECOIL_25 first (bs1:897).
-// Quick Attack and Vital Throw differ only in priority (the table); Pursuit
-// only when the target switches (TODO(plan step 4)).
+// The effects whose script is BattleScript_EffectHit, maybe after setting a
+// move effect or a hit marker: the plain hits (Quick Attack and Vital Throw
+// differ only in the table; Pursuit only when the target switches,
+// TODO(plan step 4)), Effect::Recoil (MOVE_EFFECT_RECOIL_25, bs1:897), the
+// status and flinch secondaries (secondary_of), Hidden Power
+// (hiddenpowercalc, bs1:1740), Thunder and Sky Uppercut (IGNORE_ON_AIR) and
+// Earthquake (bs1:1834: PP before accuracy, which changes nothing in
+// singles, and IGNORE_UNDERGROUND; damage.hpp doubles it into Dig).
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1020,9 +1056,178 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::QuickAttack:
   case Effect::Pursuit:
   case Effect::Recoil:
+  case Effect::HiddenPower:
+  case Effect::Thunder:
+  case Effect::SkyUppercut:
+  case Effect::Earthquake:
+  case Effect::PoisonHit:
+  case Effect::PoisonTail:
+  case Effect::PoisonFang:
+  case Effect::BurnHit:
+  case Effect::BlazeKick:
+  case Effect::ThawHit:
+  case Effect::FreezeHit:
+  case Effect::ParalyzeHit:
+  case Effect::FlinchHit:
+  case Effect::TriAttack:
     return true;
   default:
     return false;
+  }
+}
+
+// MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
+enum class Secondary : uint8_t {
+  None, Poison, Burn, Freeze, Paralysis, Toxic, Flinch, TriAttack,
+};
+
+// setmoveeffect in each effect's script (bs1). Blaze Kick and Poison Tail
+// share Burn Hit's and Poison Hit's scripts; Thunder sets PARALYSIS.
+constexpr Secondary secondary_of(Effect effect) {
+  switch (effect) {
+  case Effect::PoisonHit:
+  case Effect::PoisonTail: return Secondary::Poison;
+  case Effect::PoisonFang: return Secondary::Toxic;
+  case Effect::BurnHit:
+  case Effect::BlazeKick:
+  case Effect::ThawHit: return Secondary::Burn;
+  case Effect::FreezeHit: return Secondary::Freeze;
+  case Effect::ParalyzeHit:
+  case Effect::Thunder: return Secondary::Paralysis;
+  case Effect::FlinchHit: return Secondary::Flinch;
+  case Effect::TriAttack: return Secondary::TriAttack;
+  default: return Secondary::None;
+  }
+}
+
+// Whether a major status `s` would take hold on p's foe now: SetMoveEffect's
+// checks for a secondary (not primary, not certain; bsc:2408-2560) after
+// its preamble. Safeguard, then each status's type and ability immunities,
+// and an existing status. Freeze Clause (Smogon, always on, as Showdown's
+// freezeclausemod: no freeze while a Pokémon on that side is frozen) and
+// sun stop a freeze.
+constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
+  const Side& side = battle.side(foe(player));
+  const ActivePokemon& t = side.active;
+  if (side.conditions.safeguard != 0) return false;
+  if (side.get(1).status.any()) return false;
+  switch (s) {
+  case Secondary::Poison:
+  case Secondary::Toxic:
+    return !has_type(t, Type::Poison) && !has_type(t, Type::Steel) &&
+           t.ability != Ability::Immunity;
+  case Secondary::Burn:
+    return !has_type(t, Type::Fire) && t.ability != Ability::WaterVeil;
+  case Secondary::Freeze: {
+    if (has_type(t, Type::Ice) || t.ability == Ability::MagmaArmor) return false;
+    if (effective_weather(battle) == Weather::Sun) return false;
+    for (const Pokemon& p : side.pokemon) {
+      if (p.status.frozen()) return false;
+    }
+    return true;
+  }
+  case Secondary::Paralysis:
+    return t.ability != Ability::Limber;
+  default:
+    assert(false && "not a major status");
+    return false;
+  }
+}
+
+// Sets a major status on p's foe, as SetMoveEffect does once statusChanged
+// (bsc:2565): freezing also cancels its multi-turn move. Changing the status
+// restarts the toxic counter (data.hpp, Status). TODO(plan step 4):
+// Synchronize (HITMARKER_SYNCHRONIZE_EFFECT).
+constexpr void set_status(Battle& battle, Player player, Secondary s) {
+  Side& side = battle.side(foe(player));
+  Status& status = side.get(1).status;
+  switch (s) {
+  case Secondary::Poison: status = Status::psn(); break;
+  case Secondary::Toxic: status = Status::tox(); break;
+  case Secondary::Burn: status = Status::brn(); break;
+  case Secondary::Freeze:
+    status = Status::frz();
+    side.active.cancel_multi_turn_moves();
+    break;
+  case Secondary::Paralysis: status = Status::par(); break;
+  default: assert(false && "not a major status");
+  }
+  side.active.toxic = 0;
+}
+
+// seteffectwithchance (bsc:2923) and SetMoveEffect (bsc:2380) for a move's
+// secondary effect on its target, after the damage. The chance is the
+// table's, doubled by Serene Grace; it's drawn only when the effect could
+// take hold (or, for Poison Fang, change the result flags), since otherwise
+// no outcome changes anything.
+template <typename O>
+constexpr void secondary(Battle& battle, Player player, MoveState& m,
+                         O& options) {
+  const MoveData& data = get(m.move);
+  const Secondary s = secondary_of(data.effect);
+  if (s == Secondary::None || (m.result & MoveResult::NO_EFFECT)) return;
+  const uint32_t chance =
+      data.chance *
+      (battle.side(player).active.ability == Ability::SereneGrace ? 2u : 1u);
+  if (chance == 0) return;
+
+  // SetMoveEffect's preamble: not into a fainted target, a Substitute or
+  // Shield Dust (every effect here is MOVE_EFFECT_TRI_ATTACK or below).
+  Side& side = battle.side(foe(player));
+  ActivePokemon& t = side.active;
+  const Pokemon& target = side.get(1);
+  if (target.fainted() || t.volatiles.substitute ||
+      t.ability == Ability::ShieldDust) {
+    return;
+  }
+
+  bool matters = false;
+  switch (s) {
+  case Secondary::Flinch:
+    // Set only if the target hasn't moved yet this turn (bsc:2685).
+    matters = m.first && !t.volatiles.flinched &&
+              t.ability != Ability::InnerFocus;
+    break;
+  case Secondary::TriAttack:
+    // Any status at all stops it before the 1/3 draw; Safeguard and the
+    // immunities apply to the status it picks.
+    matters = !target.status.any();
+    break;
+  case Secondary::Toxic:
+    // Into a Poison or Steel type with no status, it marks the move as not
+    // affecting the foe (bsc:2552), which moveend reads.
+    matters = status_takes(battle, player, s) ||
+              (!target.status.any() && side.conditions.safeguard == 0 &&
+               (has_type(t, Type::Poison) || has_type(t, Type::Steel)));
+    break;
+  default:
+    matters = status_takes(battle, player, s);
+  }
+  if (!matters) return;
+  if (chance < 100 && !rolls::secondary(battle, player, chance, options)) {
+    return;
+  }
+
+  switch (s) {
+  case Secondary::Flinch:
+    t.volatiles.flinched = true;
+    break;
+  case Secondary::TriAttack: {
+    constexpr Secondary TRI[3] = {Secondary::Burn, Secondary::Freeze,
+                                  Secondary::Paralysis};
+    const Secondary which = TRI[rolls::tri_attack(battle, player, options) - 1];
+    if (status_takes(battle, player, which)) set_status(battle, player, which);
+    break;
+  }
+  case Secondary::Toxic:
+    if (status_takes(battle, player, s)) {
+      set_status(battle, player, s);
+    } else {
+      m.result |= MoveResult::DOESNT_AFFECT_FOE;
+    }
+    break;
+  default:
+    set_status(battle, player, s);
   }
 }
 
@@ -1046,6 +1251,12 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   Pokemon& target = foe_side.get(1);
   const MoveData& data = get(m.move);
   Hit h = Hit::of(m.move);
+  // hiddenpowercalc (bsc:8889): the type is in the move ID, the power on the
+  // Pokémon.
+  if (data.effect == Effect::HiddenPower) {
+    assert(m.move != Move::HiddenPower && side.get(1).hidden_power != 0);
+    h.power = side.get(1).hidden_power;
+  }
 
   // typecalc's immunities first, as Showdown (decided; README "Damage"). A
   // move with no effect draws neither accuracy nor crit: the decomp draws
@@ -1095,6 +1306,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     m.hp_dealt = hp_update(battle, defender, d, m);
   }
 
+  secondary(battle, player, m, options);
+
   // seteffectwithchance: Effect::Recoil's certain MOVE_EFFECT_RECOIL_25, a
   // quarter of the HP dealt, at least 1 (bsc:2636). Rock Head prevents it
   // except for Struggle (BattleScript_MoveEffectRecoil, bs1:3938). The recoil
@@ -1118,7 +1331,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
 // applies even when it began after selection: the encored move replaces the
 // chosen one, unless it was overwritten, which ends the Encore.
 template <typename O>
-constexpr void use_move(Battle& battle, Player player, O& options) {
+constexpr void use_move(Battle& battle, Player player, bool first,
+                        O& options) {
   const Request& r = battle.request;
   const uint8_t i = index(player);
   ActivePokemon& a = battle.side(player).active;
@@ -1156,6 +1370,10 @@ constexpr void use_move(Battle& battle, Player player, O& options) {
   }
   assert(m.move != Move::None);
   m.self = get(m.move).target == Target::User;
+  m.first = first;
+  const Effect effect = get(m.move).effect;
+  m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut;
+  m.ignore_underground = effect == Effect::Earthquake;
 
   if (plain_hit(get(m.move).effect)) return hit(battle, player, m, options);
 
@@ -1180,7 +1398,7 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
     if (c.type() == Choice::Switch) {
       switch_to(battle, p, c.data(), options);
     } else {
-      use_move(battle, p, options);
+      use_move(battle, p, i == 0, options);
     }
     if (Flow f = faints(battle, Phase::FaintAfterAction)) return f;
   }

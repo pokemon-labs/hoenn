@@ -3,7 +3,7 @@
 // requests and resuming, the turn cap, and a random self-play soak over the
 // given team files (every update keeps the battle valid; debug asserts the
 // rest). Also the plain hits, Struggle, fainting and Spikes (plan step 3);
-// every other move only uses PP so far.
+// moves the engine doesn't handle yet only use PP.
 //
 // Usage: check_frame [team files...]
 
@@ -256,14 +256,14 @@ void check_moves() {
   {
     // A plain hit (Quick Attack), forced through Calc: no crit, the 100%
     // roll. Recorded in Chance with its probability.
-    Battle b = started({SNORLAX}, {SNORLAX});
+    Battle b = started({SNORLAX}, {IDLE});
     Observed o{};
     o.calc.overrides.p1.hits[0].crit = Optional::False;
     o.calc.overrides.p1.hits[0].damage = 100;
     const uint16_t hp = b.sides[1].get(1).hp;
     const uint32_t expected =
         apply_roll(damage(b, Player::P1, Hit::of(Move::QuickAttack)), 15);
-    // Body Slam's effect isn't written yet: it only uses PP.
+    // Splash does nothing yet: it only uses PP.
     CHECK(update(b, Choice::move(2), Choice::move(1), o) == Result::start());
     CHECK(b.sides[1].get(1).hp == hp - expected);
     CHECK(o.chance.actions.p1.hits[0].crit == Optional::False);
@@ -275,8 +275,9 @@ void check_moves() {
     // PP on both the active Pokémon and the party, for both players.
     CHECK(b.sides[0].active.moves[1].pp == b.sides[0].get(1).moves[1].pp);
     CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack, 3) - 1);
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::BodySlam, 3) - 1);
-    CHECK(b.sides[1].active.last_landed_move == Move::QuickAttack);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
+    // Splash targets its user, so its moveend overwrites last_landed_move.
+    CHECK(b.sides[1].active.last_taken_move == Move::QuickAttack);
   }
   {
     // A Ground move into a Flying type: no effect, no draws, PP used.
