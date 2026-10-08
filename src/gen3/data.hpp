@@ -354,7 +354,10 @@ static_assert(max_pp(Move::Growl, 3) == 64 && max_pp(Move::Sketch, 3) == 1);
 // Types live here and switch-in copies them (decision 7). The item
 // is Item::KnockedOff once Knock Off has hit it (decision 8; the sentinel is
 // still to be added to the generator). Hidden Power's type is in its move ID;
-// `hidden_power` is its power (30-70), 0 if it doesn't know the move.
+// `hidden_power` (30-70) and `hidden_power_type` are the Pokémon's own, from
+// its IVs, set whether or not it knows the move: a Hidden Power it copies
+// (Mimic) is its own, as the decomp's hiddenpowercalc and Showdown's hpType.
+// The type fills what was padding.
 struct Pokemon {
   Stats stats;
   MoveSlot moves[4];
@@ -368,6 +371,7 @@ struct Pokemon {
   uint8_t happiness;
   Gender gender;
   uint8_t hidden_power;
+  Type hidden_power_type; // Fighting..Dark, not Normal or Mystery
 
   constexpr bool fainted() const { return hp == 0; }
 
@@ -382,7 +386,10 @@ struct Pokemon {
     if (level < 1 || level > 100 || stats.hp == 0 || hp > stats.hp) return false;
     if (uint8_t(gender) > uint8_t(Gender::Female)) return false;
     if (!status.valid()) return false;
-    if (hidden_power != 0 && (hidden_power < 30 || hidden_power > 70)) {
+    if (hidden_power < 30 || hidden_power > 70 ||
+        !detail::valid(hidden_power_type) ||
+        hidden_power_type == Type::Normal ||
+        hidden_power_type == Type::Mystery) {
       return false;
     }
     for (const MoveSlot& m : moves) {
@@ -691,6 +698,8 @@ static_assert([] {
     p.stats = {35, 55, 30, 90, 50, 40};
     p.hp = 35;
     p.level = 50;
+    p.hidden_power = 70;
+    p.hidden_power_type = Type::Dark;
     p.moves[0] = {Move::Tackle, 35, 0};
     s.active.species = p.species;
   }
@@ -711,6 +720,8 @@ static_assert([] {
     p.stats = {35, 55, 30, 90, 50, 40};
     p.hp = 35;
     p.level = 50;
+    p.hidden_power = 70;
+    p.hidden_power_type = Type::Dark;
     p.moves[0] = {Move::Tackle, 35, 0};
   }
   if (!b.valid()) return false;

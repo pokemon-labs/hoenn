@@ -816,13 +816,20 @@ adapted (see Interface).
   Effect Spore's status moved into `HitDraws` (per hit), so `Actions` grew
   to 121 B.
 - Done (2026-10-08): Mimic (the decomp and Showdown agree).
-- **Then (resume here):** the moves on `teams/adv/` still missing, by
-  `tools/coverage` (7848 slots without `all.txt`; the older 15696 counted
-  it twice, and the older "six left" missed seven single-slot moves):
-  Water Spout, Imprison, Memento, Fake Out, Pain Split, Nightmare and Gust at 1
-  each. Then the realizability test (see Testing), not started. Uproar and
-  Thrash (with the `WasUnableToUseMove` question, README decision 2) wait:
-  no team uses them.
+- Done (2026-10-08): the last single-slot moves: Water Spout (and
+  Eruption), Gust and Twister, Fake Out, Pain Split, Memento, Imprison,
+  Nightmare, all checked against Showdown (Memento and Pain Split follow
+  it where the decomp differs). `tools/coverage`: 100% of the 7848 move
+  slots on `teams/adv/`.
+- Fixed (2026-10-08), found by 200k-game soaks: Mimic copying Hidden
+  Power (every `Pokemon` now holds its own `hidden_power` and
+  `hidden_power_type`, in what was padding); sleep or freeze landing on a
+  charging Pokémon left a forced choice with no lock (now, as Showdown, the
+  lock stays until the move is aborted). `soak` now reports the game seed
+  on a release segfault.
+- **Gate reached. Resume here:** the realizability test against Showdown
+  (see Testing), not started. Uproar and Thrash (with the
+  `WasUnableToUseMove` question, README decision 2) wait: no team uses them.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 

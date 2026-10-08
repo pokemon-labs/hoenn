@@ -1540,8 +1540,7 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   if (f.volatiles.lock_on != 0) return 100;
   // Semi-invulnerable targets, unless the move reaches them: Surf hits Dive
   // (HITMARKER_IGNORE_UNDERWATER, bs1:239), and the moves that set
-  // ignore_on_air or ignore_underground. TODO(plan step 4): Gust, Twister
-  // and Magnitude.
+  // ignore_on_air or ignore_underground. TODO(plan step 4): Magnitude.
   if (f.volatiles.on_air && !m.ignore_on_air) return 0;
   if (f.volatiles.underground && !m.ignore_underground) return 0;
   if (f.volatiles.underwater && m.move != Move::Surf) return 0;
@@ -1736,6 +1735,10 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Return:
   case Effect::Frustration:
   case Effect::Flail:
+  case Effect::Eruption:
+  case Effect::Gust:
+  case Effect::Twister:
+  case Effect::FakeOut:
     return true;
   default:
     return false;
@@ -1777,6 +1780,8 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::Thunder: return Secondary::Paralysis;
   case Effect::ConfuseHit: return Secondary::Confusion;
   case Effect::FlinchHit:
+  case Effect::Twister:
+  case Effect::FakeOut:
   case Effect::Snore: return Secondary::Flinch;
   case Effect::TriAttack: return Secondary::TriAttack;
   case Effect::AttackDownHit: return Secondary::AtkDown;
@@ -1858,8 +1863,12 @@ constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
 }
 
 // Sets a major status on `target`, as SetMoveEffect does once statusChanged
-// (bsc:2476): freezing also cancels its multi-turn move, and poison, toxic,
-// paralysis and burn arm Synchronize (bsc:2503). Changing the status
+// (bsc:2476): poison, toxic, paralysis and burn arm Synchronize (bsc:2503).
+// The decomp's sleep and freeze also cancel a multi-turn move here
+// (bsc:2296); Showdown keeps it until the move is aborted (onMoveAborted,
+// in cancel()), so a Pokémon that wakes or thaws first still fires a
+// charged move, and this follows Showdown. A forced choice then always
+// finds its move locked at the action. Changing the status
 // restarts the toxic counter (data.hpp, Status).
 template <typename O>
 constexpr void inflict(Battle& battle, Player target, Secondary s,
@@ -1869,18 +1878,14 @@ constexpr void inflict(Battle& battle, Player target, Secondary s,
   switch (s) {
   case Secondary::Sleep:
     // (Random() & 3) + 2 turns, hidden, so drawn without Chance; the public
-    // count starts at 1. Sleep cancels a multi-turn move (bsc:2296).
+    // count starts at 1.
     status = Status::slp(uint8_t(Status::MIN_SLEEP + battle.rng.range(4)));
-    side.active.cancel_multi_turn_moves();
     if constexpr (CHANCE<O>) options.chance.durations.get(target).sleep[0] = 1;
     break;
   case Secondary::Poison: status = Status::psn(); break;
   case Secondary::Toxic: status = Status::tox(); break;
   case Secondary::Burn: status = Status::brn(); break;
-  case Secondary::Freeze:
-    status = Status::frz();
-    side.active.cancel_multi_turn_moves();
-    break;
+  case Secondary::Freeze: status = Status::frz(); break;
   case Secondary::Paralysis: status = Status::par(); break;
   default: assert(false && "not a major status");
   }
@@ -1910,9 +1915,14 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   const MoveData& data = get(m.move);
   const Secondary s = secondary_of(data.effect);
   if (s == Secondary::None || (m.result & MoveResult::NO_EFFECT)) return;
+  // Fake Out's flinch is certain (MOVE_EFFECT_CERTAIN, table chance 0).
   const uint32_t chance =
-      data.chance *
-      (battle.side(player).active.ability == Ability::SereneGrace ? 2u : 1u);
+      data.effect == Effect::FakeOut
+          ? 100u
+          : data.chance * (battle.side(player).active.ability ==
+                                   Ability::SereneGrace
+                               ? 2u
+                               : 1u);
   if (chance == 0) return;
 
   // A stat raise on the user (MOVE_EFFECT_AFFECTS_USER): SetMoveEffect's
@@ -2362,6 +2372,17 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     pp_reduce(battle, player, m);
     return moveend(battle, player, m, options);
   }
+  // BattleScript_EffectFakeOut (bs1:2048): only on the user's first turn
+  // out (jumpifnotfirstturn, bsc:6786; README decision 14), else
+  // FailedFromAtkString; then the plain hit with a certain flinch
+  // (secondary()). Showdown's activeMoveActions > 1 check fails it on the
+  // same turns in singles. Log: Fail.
+  if (effect == Effect::FakeOut && battle.side(player).active.first_turn == 0) {
+    m.attackstring = true;
+    pp_reduce(battle, player, m);
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
   // BattleScript_EffectSolarBeam (bs1:1903). In sun (not suppressed by
   // Cloud Nine or Air Lock) it fires at once: the plain hit. Otherwise the
   // first turn charges (BattleScriptFirstChargingTurn, bs1:795): ppreduce
@@ -2464,6 +2485,13 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     uint32_t ratio = uint32_t(mon.hp) * 48 / mon.stats.hp;
     if (ratio == 0) ratio = 1;
     h.power = ratio < 2 ? 200 : ratio < 5 ? 150 : ratio < 10 ? 100 : ratio < 17 ? 80 : ratio < 33 ? 40 : 20;
+  } else if (data.effect == Effect::Eruption) {
+    // Eruption and Water Spout (scaledamagebyhealthratio, bsc:9379): power *
+    // hp / max HP, at least 1. Showdown's basePowerCallback, floored by
+    // getDamage's clampIntRange, agrees.
+    const Pokemon& mon = side.get(1);
+    const uint32_t power = uint32_t(data.bp) * mon.hp / mon.stats.hp;
+    h.power = power == 0 ? uint16_t(1) : uint16_t(power);
   }
 
   // typecalc's immunities first, as Showdown (decided; README "Damage"). A
@@ -3044,6 +3072,85 @@ constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
   }
   if (atk) lower(t, 0, 1);
   if (def) lower(t, 1, 1);
+  moveend(battle, player, m, options);
+}
+
+// Memento, as Showdown's gen3 (accuracy true, boosts -2/-2, selfdestruct
+// "ifHit"): after attackstring and ppreduce, Protect, a semi-invulnerable
+// target (unless Locked-On) or a Substitute stops it and the user lives;
+// otherwise each drop that can happen (can_lower), then the user faints,
+// even if neither stat could fall. The decomp (bs1:2204, Cmd_trymemento,
+// bsc:9072) faints the user through Protect, a Substitute and Fly, and
+// fails with both stats at -6 and the user alive. Log: Unboost each, then
+// Faint; or Fail or Miss.
+template <typename O>
+constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  if (protected_from(m, player) ||
+      (t.volatiles.semi_invulnerable() && t.volatiles.lock_on == 0) ||
+      t.volatiles.substitute) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (can_lower(battle, target, 0)) lower(t, 0, 2);
+  if (can_lower(battle, target, 3)) lower(t, 3, 2);
+  battle.side(player).get(1).hp = 0;
+  moveend(battle, player, m, options);
+  faint(battle, player, options);
+}
+
+// BattleScript_EffectImprison (bs1:2509), Cmd_tryimprison (bsc:9413): it
+// fails if the user already imprisons, or shares no move with the foe;
+// otherwise the foe can't select (usable_moves) or use (the canceler) the
+// user's moves while it stays in. Showdown's gen4 onTryHit agrees, and its
+// gen3 drops the decomp's extra PP under Pressure
+// (PressurePPLoseOnUsingImprison), as pp_reduce does for a move on the user.
+// Log: Start Imprison, or Fail.
+template <typename O>
+constexpr void imprison(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& a = battle.side(player).active;
+  const ActivePokemon& f = battle.side(foe(player)).active;
+  bool shared = false;
+  for (const MoveSlot& ms : a.moves) {
+    for (const MoveSlot& fm : f.moves) {
+      shared |= ms.id != Move::None && ms.id == fm.id;
+    }
+  }
+  if (a.volatiles.imprisoned_others || !shared) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  a.volatiles.imprisoned_others = true;
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectNightmare (bs1:1459): after attackstring and ppreduce
+// it fails on a Substitute, a target already in a Nightmare or one not
+// asleep (Rest counts). No accuracy check; Showdown's gen3 (accuracy true,
+// protect flag) also fails it into Protect and a semi-invulnerable target,
+// and this follows it. The residual takes 1/4 while it sleeps; waking ends
+// it. Log: Start Nightmare, or Fail.
+template <typename O>
+constexpr void nightmare(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& foe_side = battle.side(foe(player));
+  Volatiles& v = foe_side.active.volatiles;
+  if (protected_from(m, player) ||
+      (v.semi_invulnerable() && v.lock_on == 0) || v.substitute ||
+      v.nightmare || !foe_side.get(1).status.asleep()) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  v.nightmare = true;
   moveend(battle, player, m, options);
 }
 
@@ -3772,9 +3879,13 @@ constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
   pp_reduce(battle, player, m);
   ActivePokemon& a = battle.side(player).active;
   const ActivePokemon& t = battle.side(foe(player)).active;
+  // Hidden Power is one move on the cartridge (MOVE_HIDDEN_POWER): the user
+  // knows it if it knows any typed one, and a copy is the user's own type.
   const Move last = t.last_move;
   bool known = false;
-  for (const MoveSlot& ms : a.moves) known |= ms.id == last;
+  for (const MoveSlot& ms : a.moves) {
+    known |= ms.id == last || (is_hidden_power(ms.id) && is_hidden_power(last));
+  }
   if (t.volatiles.substitute || protected_from(m, player) ||
       (t.volatiles.semi_invulnerable() && t.volatiles.lock_on == 0) ||
       a.volatiles.transformed || last == Move::None ||
@@ -3784,9 +3895,40 @@ constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
   }
   assert(m.slot < 4);
   const uint8_t base = get(last).pp;
-  a.moves[m.slot].id = last;
+  a.moves[m.slot].id = is_hidden_power(last)
+                           ? hidden_power(battle.side(player).get(1).hidden_power_type)
+                           : last;
   a.moves[m.slot].pp = base < 5 ? base : 5;
   a.mimicked = uint8_t(a.mimicked | 1 << m.slot);
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectPainSplit (bs1:1239), Cmd_painsplitdmgcalc
+// (bsc:8049): after attackstring and ppreduce it fails (ButItFailed) on
+// Protect or a semi-invulnerable target unless Locked-On, with no accuracy
+// roll (NO_ACC_CALC_CHECK_LOCK_ON), or on a Substitute; otherwise both
+// Pokémon go to the average of their HP, capped at max HP. Showdown agrees
+// on the state, but sets the HP directly where the decomp runs datahpupdate,
+// so here the change doesn't count as damage (Counter, Focus Punch, Bide).
+// Log: SetHP for both.
+template <typename O>
+constexpr void pain_split(Battle& battle, Player player, MoveState& m,
+                          O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& foe_side = battle.side(foe(player));
+  const Volatiles& v = foe_side.active.volatiles;
+  if (protected_from(m, player) ||
+      (v.semi_invulnerable() && v.lock_on == 0) || v.substitute) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  Pokemon& user = battle.side(player).get(1);
+  Pokemon& target = foe_side.get(1);
+  const uint16_t average = uint16_t((uint32_t(user.hp) + target.hp) / 2);
+  user.hp = average < user.stats.hp ? average : user.stats.hp;
+  target.hp = average < target.stats.hp ? average : target.stats.hp;
   moveend(battle, player, m, options);
 }
 
@@ -3869,7 +4011,9 @@ constexpr bool handled(Effect effect) {
          effect == Effect::PsychUp || effect == Effect::Reflect ||
          effect == Effect::LightScreen || effect == Effect::MeanLook ||
          effect == Effect::Encore || effect == Effect::DestinyBond ||
-         effect == Effect::Mimic;
+         effect == Effect::Mimic || effect == Effect::PainSplit ||
+         effect == Effect::Memento || effect == Effect::Imprison ||
+         effect == Effect::Nightmare;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3880,7 +4024,10 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (m.chosen == Move::None) m.chosen = m.move;
   m.self = get(m.move).target == Target::User;
   const Effect effect = get(m.move).effect;
-  m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut;
+  // Gust and Twister (bs1:1892, 1826) hit a target in the air, doubled
+  // (damage.hpp, as Showdown's Fly condition).
+  m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut ||
+                    effect == Effect::Gust || effect == Effect::Twister;
   m.ignore_underground = effect == Effect::Earthquake;
 
   if (plain_hit(effect)) return hit(battle, player, m, options);
@@ -3928,6 +4075,10 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Encore) return encore(battle, player, m, options);
   if (effect == Effect::DestinyBond) return destiny_bond(battle, player, m, options);
   if (effect == Effect::Mimic) return mimic(battle, player, m, options);
+  if (effect == Effect::PainSplit) return pain_split(battle, player, m, options);
+  if (effect == Effect::Memento) return memento(battle, player, m, options);
+  if (effect == Effect::Imprison) return imprison(battle, player, m, options);
+  if (effect == Effect::Nightmare) return nightmare(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
@@ -4427,9 +4578,10 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
     a.volatiles.flinched = false;
-    if (side.get(1).status.asleep() && a.volatiles.multiple_turns) {
-      a.cancel_multi_turn_moves();
-    }
+    // The decomp also cancels a sleeping Pokémon's multi-turn move here
+    // (main:3944); Showdown keeps it until the move is aborted (see
+    // inflict()). TODO(plan step 4): check Showdown's lockedmove for
+    // Thrash and Uproar when they are written.
   }
   // ENDTURN_ORDER (util:1209): GetWhoStrikesFirst with the chosen moves'
   // priority and the turn's Quick Claw draw, and its own tie draw, taken

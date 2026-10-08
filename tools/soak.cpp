@@ -67,6 +67,13 @@ extern "C" void on_abort(int) {
   std::abort();
 }
 
+// A crash in release, where there are no asserts.
+extern "C" void on_segv(int) {
+  report();
+  std::signal(SIGSEGV, SIG_DFL);
+  std::raise(SIGSEGV);
+}
+
 int failures = 0;
 
 #define CHECK(cond, game_seed)                                                 \
@@ -159,6 +166,9 @@ int main(int argc, char** argv) {
   }
 
   std::signal(SIGABRT, on_abort);
+#ifndef PKMN_SOAK_SANITIZER
+  std::signal(SIGSEGV, on_segv);
+#endif
 #ifdef PKMN_SOAK_SANITIZER
   __sanitizer_set_death_callback(report);
 #endif

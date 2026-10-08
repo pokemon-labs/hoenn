@@ -129,10 +129,7 @@ constexpr std::optional<gen3::Pokemon> init_pokemon(const Pokemon& p) {
   const HiddenPower hp = hidden_power(p.ivs);
   for (size_t i = 0; i < 4 && p.moves[i] != Move::None; i++) {
     Move m = p.moves[i];
-    if (m == Move::HiddenPower) {
-      m = hp.move;
-      out.hidden_power = hp.power;
-    }
+    if (m == Move::HiddenPower) m = hp.move;
     out.moves[i] = {m, max_pp(m, 3), 3};
   }
   out.hp = p.hp.value_or(out.stats.hp);
@@ -145,6 +142,8 @@ constexpr std::optional<gen3::Pokemon> init_pokemon(const Pokemon& p) {
   out.ability = p.ability;
   out.happiness = p.happiness;
   out.gender = p.gender;
+  out.hidden_power = hp.power;
+  out.hidden_power_type = get(hp.move).type;
   assert(out.valid());
   return out;
 }
@@ -217,7 +216,7 @@ static_assert([] {
          p.stats.spd == 261 && p.moves[0].pp == 32 && p.moves[0].pp_ups == 3 &&
          p.moves[3].id == Move::Toxic && p.moves[3].pp == 16 &&
          p.types[0] == Type::Steel && p.types[1] == Type::Flying &&
-         p.hidden_power == 0 && p.happiness == 255;
+         p.hidden_power >= 30 && p.happiness == 255;
 }());
 static_assert([] {
   const gen3::Pokemon p = *init_pokemon(detail::TYRANITAR);

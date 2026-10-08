@@ -1355,6 +1355,19 @@ void check_mimic() {
     CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic, 3) - 2);
   }
   {
+    // A copied Hidden Power is the user's own (Dark from 31s), and works.
+    helpers::Pokemon hp = target;
+    hp.moves[3] = Move::HiddenPower;
+    hp.ivs = {31, 30, 31, 30, 30, 31}; // Fire
+    Battle b = started({user}, {hp});
+    update(b, Choice::move(2), Choice::move(4), null);
+    update(b, Choice::move(1), Choice::move(3), null);
+    CHECK(b.sides[0].active.moves[0].id == Move::HiddenPowerDark);
+    const uint16_t foe = b.sides[1].get(1).hp;
+    update(b, Choice::move(1), Choice::move(3), null);
+    CHECK(b.sides[1].get(1).hp < foe);
+  }
+  {
     // A move the user knows can't be copied.
     Battle b = started({user}, {target});
     update(b, Choice::move(2), Choice::move(3), null);
@@ -1368,6 +1381,105 @@ void check_mimic() {
     b.sides[1].active.substitute_hp = 100;
     update(b, Choice::move(1), Choice::move(3), null);
     CHECK(b.sides[0].active.moves[0].id == Move::Mimic);
+  }
+}
+
+// The last single-slot moves on teams/adv/: Water Spout, Gust, Fake Out,
+// Pain Split, Memento, Imprison and Nightmare.
+void check_misc_moves() {
+  Observed o{};
+  o.calc.overrides.p1.hit = Optional::True;
+  for (uint8_t i = 0; i < MAX_HITS; i++) {
+    o.calc.overrides.p1.hits[i].crit = Optional::False;
+    o.calc.overrides.p1.hits[i].damage = 100;
+  }
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::WaterSpout;
+  user.moves[1] = Move::Gust;
+  user.moves[2] = Move::FakeOut;
+  user.moves[3] = Move::PainSplit;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Splash;
+  target.moves[3] = Move::Rest;
+  {
+    // Water Spout's power falls with the user's HP.
+    Battle full = started({user}, {target});
+    Battle half = full;
+    half.sides[0].get(1).hp = uint16_t(half.sides[0].get(1).stats.hp / 2);
+    update(full, Choice::move(1), Choice::move(3), o);
+    update(half, Choice::move(1), Choice::move(3), o);
+    const Pokemon& a = full.sides[1].get(1);
+    const Pokemon& b = half.sides[1].get(1);
+    CHECK(a.hp < b.hp && b.hp < b.stats.hp);
+  }
+  {
+    // Gust hits a target in the air, doubled.
+    Battle ground = started({user}, {target});
+    Battle air = ground;
+    air.sides[1].active.volatiles.on_air = true;
+    update(ground, Choice::move(2), Choice::move(3), o);
+    update(air, Choice::move(2), Choice::move(3), o);
+    const Pokemon& g = ground.sides[1].get(1);
+    const Pokemon& f = air.sides[1].get(1);
+    CHECK(f.stats.hp - f.hp >= 2 * (g.stats.hp - g.hp) - 1);
+  }
+  {
+    // Fake Out flinches on the first turn, then fails.
+    Battle b = started({user}, {target});
+    update(b, Choice::move(3), Choice::move(1), o);
+    const uint16_t hp = b.sides[0].get(1).hp;
+    CHECK(hp == b.sides[0].get(1).stats.hp);
+    const uint16_t foe = b.sides[1].get(1).hp;
+    update(b, Choice::move(3), Choice::move(3), o);
+    CHECK(b.sides[1].get(1).hp == foe);
+  }
+  {
+    // Pain Split averages the HP.
+    Battle b = started({user}, {target});
+    b.sides[0].get(1).hp = 100;
+    const uint16_t t = b.sides[1].get(1).hp;
+    update(b, Choice::move(4), Choice::move(3), o);
+    const uint16_t avg = uint16_t((100 + t) / 2);
+    CHECK(b.sides[1].get(1).hp == avg);
+    CHECK(b.sides[0].get(1).hp ==
+          std::min<uint16_t>(avg, b.sides[0].get(1).stats.hp));
+  }
+  helpers::Pokemon other = JOLTEON;
+  other.moves[0] = Move::Memento;
+  other.moves[1] = Move::Imprison;
+  other.moves[2] = Move::Nightmare;
+  other.moves[3] = Move::Splash;
+  {
+    // Memento: -2 Atk and SpA, the user faints; into Protect it lives.
+    Battle b = started({other, DUGTRIO}, {target});
+    const Result r = update(b, Choice::move(1), Choice::move(3), o);
+    CHECK(b.sides[0].get(1).fainted() && r.p1() == Choice::Switch);
+    CHECK(b.sides[1].active.boosts.atk == -2 && b.sides[1].active.boosts.spa == -2);
+    helpers::Pokemon protector = target;
+    protector.moves[3] = Move::Protect;
+    Battle c = started({other, DUGTRIO}, {protector});
+    Observed p{};
+    p.calc.overrides.p2.protect = Optional::True;
+    update(c, Choice::move(1), Choice::move(4), p);
+    CHECK(!c.sides[0].get(1).fainted() && c.sides[1].active.boosts.atk == 0);
+  }
+  {
+    // Imprison: Splash is shared, so the foe can't pick it.
+    Battle b = started({other}, {target});
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[0].active.volatiles.imprisoned_others);
+    std::array<Choice, MAX_CHOICES> out{};
+    const uint8_t n = choices(b, Player::P2, Choice::Move, out);
+    for (uint8_t i = 0; i < n; i++) CHECK(!(out[i] == Choice::move(3)));
+  }
+  {
+    // Nightmare fails on an awake foe, works on a sleeping one.
+    Battle b = started({other}, {target});
+    update(b, Choice::move(3), Choice::move(3), o);
+    CHECK(!b.sides[1].active.volatiles.nightmare);
+    b.sides[1].get(1).status = Status::slp(3);
+    update(b, Choice::move(3), Choice::move(3), o);
+    CHECK(b.sides[1].active.volatiles.nightmare);
   }
 }
 
@@ -2597,6 +2709,7 @@ int main(int argc, char** argv) {
   check_destiny_bond();
   check_multi_hit();
   check_mimic();
+  check_misc_moves();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();
