@@ -1278,6 +1278,53 @@ void check_perish_song() {
   }
 }
 
+// The stat-change batch: Screech, Metal Sound, Tickle (and Clear Body),
+// Superpower and Overheat on the user, Haze, Psych Up with Focus Energy.
+void check_stat_changes() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::Screech;
+  user.moves[1] = Move::Tickle;
+  user.moves[2] = Move::Haze;
+  user.moves[3] = Move::PsychUp;
+  Observed o{};
+  o.calc.overrides.p1.hit = Optional::True;
+  {
+    Battle b = started({user}, {IDLE});
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[1].active.boosts.def == -2);
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[1].active.boosts.atk == -1 && b.sides[1].active.boosts.def == -3);
+    b.sides[1].active.boosts.spa = 2;
+    b.sides[1].active.volatiles.focus_energy = true;
+    update(b, Choice::move(4), Choice::move(1), o);
+    CHECK(b.sides[0].active.boosts.def == -3 && b.sides[0].active.boosts.spa == 2);
+    CHECK(b.sides[0].active.volatiles.focus_energy);
+    update(b, Choice::move(3), Choice::move(1), o);
+    CHECK(b.sides[0].active.boosts.def == 0 && b.sides[1].active.boosts.def == 0);
+  }
+  {
+    helpers::Pokemon clear = IDLE;
+    clear.species = Species::Metagross;
+    clear.ability = Ability::ClearBody;
+    clear.gender = Gender::None;
+    Battle b = started({user}, {clear});
+    Observed none{};
+    update(b, Choice::move(1), Choice::move(1), none);
+    CHECK(b.sides[1].active.boosts.def == 0);
+    CHECK(none.chance.actions.p1.hit == Optional::None); // no draw
+  }
+  {
+    helpers::Pokemon hitter = SNORLAX;
+    hitter.moves[0] = Move::Superpower;
+    hitter.moves[1] = Move::Overheat;
+    Battle b = started({hitter}, {IDLE});
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[0].active.boosts.atk == -1 && b.sides[0].active.boosts.def == -1);
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[0].active.boosts.spa == -2);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2199,6 +2246,7 @@ int main(int argc, char** argv) {
   check_beat_up();
   check_knock_off();
   check_perish_song();
+  check_stat_changes();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

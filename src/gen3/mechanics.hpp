@@ -1674,6 +1674,8 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Absorb:
   case Effect::Endeavor:
   case Effect::KnockOff:
+  case Effect::Superpower:
+  case Effect::Overheat:
     return true;
   default:
     return false;
@@ -1692,6 +1694,12 @@ constexpr int8_t& stage(Boosts& b, uint8_t stat) {
   case 5: return b.acc;
   default: assert(stat == 6); return b.eva;
   }
+}
+
+// Lowers a stage by up to n, stopping at -6 (no check of who may lower it).
+constexpr void lower(ActivePokemon& a, uint8_t stat, int8_t n) {
+  int8_t& b = stage(a.boosts, stat);
+  b = b - n < -6 ? int8_t(-6) : int8_t(b - n);
 }
 
 // setmoveeffect in each effect's script (bs1). Blaze Kick and Poison Tail
@@ -2439,6 +2447,21 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     foe_side.active.choice_move = Move::None;
   }
 
+  // Superpower (MOVE_EFFECT_ATK_DEF_DOWN) and Overheat (SP_ATK_TWO_DOWN),
+  // certain and on the user (bs1:2388, 2648; bsc:2839, 2895): after a hit that
+  // affected the target, Substitute or not, Mist and the user's own
+  // abilities aside, down to -6. Showdown's self boosts agree. Log:
+  // Unboost.
+  if (affects && (effect == Effect::Superpower || effect == Effect::Overheat)) {
+    ActivePokemon& a = side.active;
+    if (effect == Effect::Superpower) {
+      lower(a, 0, 1);
+      lower(a, 1, 1);
+    } else {
+      lower(a, 3, 2);
+    }
+  }
+
   // Rapid Spin's certain MOVE_EFFECT_RAPIDSPIN on the user, if the move
   // affected the target: Cmd_rapidspinfree (bsc:8821) runs once per release, so
   // it frees the user from binding and Leech Seed and clears its side's
@@ -2778,6 +2801,128 @@ constexpr void stat_up_move(Battle& battle, Player player, MoveState& m,
                                                        : stat_up(effect);
   assert(c.n != 0);
   raise(a, c.stat, c.n, m); // Log: Boost
+  moveend(battle, player, m, options);
+}
+
+// The stat and stages of a one-stat drop on the foe: setstatchanger in
+// BattleScript_EffectAttackDown and its siblings (bs1:516-533, 958-975);
+// {0, 0} for any other effect.
+constexpr StatChange stat_down(Effect effect) {
+  switch (effect) {
+  case Effect::AttackDown: return {0, 1};
+  case Effect::AttackDown2: return {0, 2};
+  case Effect::DefenseDown: return {1, 1};
+  case Effect::DefenseDown2: return {1, 2};
+  case Effect::SpeedDown: return {2, 1};
+  case Effect::SpeedDown2: return {2, 2};
+  case Effect::SpecialDefenseDown2: return {4, 2};
+  case Effect::AccuracyDown: return {5, 1};
+  case Effect::EvasionDown: return {6, 1};
+  default: return {0, 0};
+  }
+}
+
+// Whether ChangeStatBuffs (bsc:6937) lets a primary drop of `stat` reach
+// p's active Pokémon: not under Mist, Clear Body or White Smoke, Hyper
+// Cutter for Attack or Keen Eye for accuracy, and not already at -6.
+// Showdown's Mist and onTryBoost handlers agree.
+constexpr bool can_lower(const Battle& battle, Player p, uint8_t stat) {
+  const Side& side = battle.side(p);
+  const ActivePokemon& t = side.active;
+  return side.conditions.mist == 0 && t.ability != Ability::ClearBody &&
+         t.ability != Ability::WhiteSmoke &&
+         !(t.ability == Ability::HyperCutter && stat == 0) &&
+         !(t.ability == Ability::KeenEye && stat == 5) &&
+         [&] { Boosts b = t.boosts; return stage(b, stat); }() > -6;
+}
+
+// BattleScript_EffectStatDown (bs1:534), for Screech, Metal Sound and the
+// other one-stat drops: after the canceler, a Substitute fails it
+// (FailedFromAtkString); then accuracy (with Protect), attackstring,
+// ppreduce and the drop. A drop that can't happen (can_lower) changes
+// nothing whatever the accuracy draw, so nothing is drawn. Showdown's
+// order differs only in its log (see leech_seed). Log: Unboost, or Fail
+// or Miss.
+template <typename O>
+constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
+                              StatChange c, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  if (t.volatiles.substitute) {
+    m.attackstring = true;
+    pp_reduce(battle, player, m);
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const bool can = can_lower(battle, target, c.stat);
+  const uint32_t calc = can ? accuracy(battle, player, m) : 100;
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  if (can) lower(t, c.stat, c.n);
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectTickle (bs1:2652): after the canceler, attackstring and
+// ppreduce it fails with Attack and Defense both at -6, then on a missed
+// accuracy check (ButItFailed); then each drop that can happen. The decomp
+// has no Substitute check; Showdown's Tickle (no bypasssub) fails into one,
+// and this follows it. As stat_down_move, nothing is drawn when neither
+// drop can happen. Log: Unboost each, or Fail.
+template <typename O>
+constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  const bool atk = can_lower(battle, target, 0);
+  const bool def = can_lower(battle, target, 1);
+  if (t.volatiles.substitute || (t.boosts.atk == -6 && t.boosts.def == -6)) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const uint32_t calc = atk || def ? accuracy(battle, player, m) : 100;
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (atk) lower(t, 0, 1);
+  if (def) lower(t, 1, 1);
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectHaze (bs1:562), Cmd_normalisebuffs: every active
+// Pokémon's stages go to 0. Showdown's gen3 Haze agrees (it keeps Focus
+// Energy, unlike gen4's). Never fails. Log: ClearAllBoost.
+template <typename O>
+constexpr void haze(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  for (Side& side : battle.sides) side.active.boosts = Boosts{};
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectPsychUp (bs1:1790), Cmd_copyfoestats (bsc:8809): the
+// user takes the foe's stages, through a Substitute and Protect; it never
+// fails. Showdown's Psych Up also copies Focus Energy (its onHit's
+// volatilesToCopy, which gen3 inherits), and this follows it. Log:
+// CopyBoost.
+template <typename O>
+constexpr void psych_up(Battle& battle, Player player, MoveState& m,
+                        O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& a = battle.side(player).active;
+  const ActivePokemon& f = battle.side(foe(player)).active;
+  a.boosts = f.boosts;
+  a.volatiles.focus_energy = f.volatiles.focus_energy;
   moveend(battle, player, m, options);
 }
 
@@ -3425,7 +3570,9 @@ constexpr bool handled(Effect effect) {
          effect == Effect::LeechSeed || effect == Effect::Refresh ||
          effect == Effect::HealBell || effect == Effect::Taunt ||
          move_weather(effect) != Weather::None || effect == Effect::BeatUp ||
-         effect == Effect::PerishSong;
+         effect == Effect::PerishSong || stat_down(effect).n != 0 ||
+         effect == Effect::Tickle || effect == Effect::Haze ||
+         effect == Effect::PsychUp;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3471,6 +3618,12 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Taunt) return taunt(battle, player, m, options);
   if (effect == Effect::BeatUp) return beat_up(battle, player, m, options);
   if (effect == Effect::PerishSong) return perish_song(battle, player, m, options);
+  if (const StatChange c = stat_down(effect); c.n != 0) {
+    return stat_down_move(battle, player, m, c, options);
+  }
+  if (effect == Effect::Tickle) return tickle(battle, player, m, options);
+  if (effect == Effect::Haze) return haze(battle, player, m, options);
+  if (effect == Effect::PsychUp) return psych_up(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
