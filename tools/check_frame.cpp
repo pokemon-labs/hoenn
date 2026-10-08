@@ -1139,6 +1139,59 @@ void check_taunt() {
   CHECK(b.sides[1].active.taunt == 0);
 }
 
+// Encore: fails with no last move or on an encored target; a target that
+// hasn't moved yet uses the encored move this turn; only that slot is
+// offered until the hidden 3-6 turn timer runs out. A full paralysis keeps
+// the last move (Showdown's lastMove).
+void check_encore() {
+  helpers::Pokemon encorer = JOLTEON;
+  encorer.moves[0] = Move::Encore;
+  encorer.moves[1] = Move::Splash;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Splash;
+  Observed o{};
+  Battle b = started({encorer}, {target});
+  const auto pp = [&](uint8_t slot) { return b.sides[1].get(1).moves[slot].pp; };
+  const auto only = [&](Choice c) {
+    std::array<Choice, MAX_CHOICES> out{};
+    const uint8_t n = choices(b, Player::P2, Choice::Move, out);
+    return n == 1 && out[0] == c;
+  };
+  // Faster, before the target has a last move: fails.
+  update(b, Choice::move(1), Choice::move(3), o);
+  CHECK(b.sides[1].active.encored_move == Move::None);
+  CHECK(b.sides[1].active.last_move == Move::Splash);
+  // Now it works, and Body Slam turns into Splash this turn.
+  o.calc.overrides.p1.hit = Optional::True;
+  update(b, Choice::move(1), Choice::move(1), o);
+  CHECK(b.sides[1].active.encored_move == Move::Splash);
+  CHECK(pp(0) == max_pp(Move::BodySlam, 3));
+  CHECK(pp(2) == max_pp(Move::Splash, 3) - 2);
+  CHECK(o.chance.durations.p2.encore == 2);
+  CHECK(only(Choice::move(3)));
+  // A second Encore fails; the timer runs out within 6 ends of turn.
+  update(b, Choice::move(1), Choice::move(3), o);
+  CHECK(b.sides[1].active.encored_move == Move::Splash);
+  for (int i = 0; i < 4 && b.sides[1].active.encore_timer != 0; i++) {
+    CHECK(only(Choice::move(3)));
+    update(b, Choice::move(2), Choice::move(3), o);
+  }
+  CHECK(b.sides[1].active.encore_timer == 0);
+  CHECK(b.sides[1].active.encored_move == Move::None);
+  CHECK(o.chance.durations.p2.encore == 0);
+  CHECK(!only(Choice::move(3)));
+
+  // Fully paralyzed: the last move stays Splash, so Encore still works.
+  b.sides[1].get(1).status = Status::par();
+  o.calc.overrides = {};
+  o.calc.overrides.p2.paralysis = Optional::True;
+  update(b, Choice::move(2), Choice::move(1), o);
+  CHECK(b.sides[1].active.last_move == Move::Splash);
+  o.calc.overrides.p1.hit = Optional::True;
+  update(b, Choice::move(1), Choice::move(1), o);
+  CHECK(b.sides[1].active.encored_move == Move::Splash);
+}
+
 // The weather moves: 5 turns counting this one, replacing an ability's
 // permanent weather, failing on the same weather.
 void check_weather_moves() {
@@ -2360,6 +2413,7 @@ int main(int argc, char** argv) {
   check_beat_up();
   check_knock_off();
   check_thief();
+  check_encore();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();

@@ -800,10 +800,14 @@ adapted (see Interface).
   Testing): 0 collisions over 500 games at 128 samples.
 - Done (2026-10-08): Thief and Covet (the decomp and Showdown agree;
   Showdown doesn't keep Enigma Berry and Mail out).
+- Done (2026-10-08): Encore, as Showdown's gen3 fail list. `last_move`
+  now follows Showdown's lastMove: a move stopped before use (paralysis,
+  sleep, flinch, a confusion self-hit) leaves it as it was, where the
+  decomp writes MOVE_UNAVAILABLE.
 - **Then (resume here):** the moves on `teams/adv/` still missing, by
   `tools/coverage` (7848 slots without `all.txt`; the older 15696 counted
   it twice, and the older "six left" missed seven single-slot moves):
-  Encore 10, Solar Beam 9, Destiny Bond 5 (the TODO in `hit()`), Rock
+  Solar Beam 9, Destiny Bond 5 (the TODO in `hit()`), Rock
   Blast 4 (first 2-5 multi-hit; `Action::multi_hit`), Mimic 2, then Water
   Spout, Imprison, Memento, Fake Out, Pain Split, Nightmare and Gust at 1
   each. Then the realizability test (see Testing), not started. Uproar and

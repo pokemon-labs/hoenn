@@ -2234,7 +2234,10 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // resulting and landed ones.
   if (m.attackstring) a.last_printed_move = m.chosen;
   if (get(m.chosen).effect != Effect::BatonPass) {
-    a.last_move = m.obeys ? m.chosen : UNAVAILABLE;
+    // As Showdown's lastMove (moveUsed): a move stopped before it was used
+    // leaves the last move as it was. The decomp writes MOVE_UNAVAILABLE,
+    // so Encore after a full paralysis fails there and works here.
+    if (m.obeys) a.last_move = m.chosen;
     a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
     if (m.obeys && !no_effect) {
       t.last_landed_move = m.move;
@@ -3587,6 +3590,50 @@ constexpr void taunt(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectEncore (bs1:1227), Cmd_trysetencore (bsc:8017): the
+// target's last move must be in its moveset with PP left, not one of
+// Showdown's gen3 failencore moves (Encore, Mimic, Mirror Move, Sketch,
+// Struggle, Transform: a superset of the decomp's Struggle, Encore and Mirror
+// Move, since the others replace their own slot), and the target must not
+// already be encored; otherwise it fails (ButItFailed). Then the accuracy
+// check (Protect, evasion; skipped when it fails anyway, as Taunt) and a
+// hidden 3-6 turn timer ((Random() & 3) + 3; Showdown's random(3, 7)). No
+// Substitute check (Showdown: bypasssub). A target that hasn't moved yet
+// this turn uses the encored move (use_move, as Showdown's
+// onOverrideAction); the residual counts it down. Log: Start Encore, or
+// Fail.
+template <typename O>
+constexpr void encore(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& t = battle.side(foe(player)).active;
+  uint8_t slot = 0;
+  while (slot < 4 && t.moves[slot].id != t.last_move) slot++;
+  bool fails = slot == 4 || t.last_move == Move::None ||
+               t.encored_move != Move::None;
+  switch (t.last_move) {
+  case Move::Encore:
+  case Move::Mimic:
+  case Move::MirrorMove:
+  case Move::Sketch:
+  case Move::Struggle:
+  case Move::Transform: fails = true; break;
+  default: break;
+  }
+  fails = fails || t.moves[slot].pp == 0;
+  const uint32_t calc = fails ? 0 : accuracy(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  t.encored_move = t.last_move;
+  t.encored_slot = slot;
+  t.encore_timer = uint8_t(3 + battle.rng.range(4));
+  if constexpr (CHANCE<O>) options.chance.durations.get(foe(player)).encore = 1;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectRefresh (bs1:2520), Cmd_cureifburnedparalyzedorpoisoned
 // (bsc:9119): the user's poison, burn or paralysis is cured; otherwise it
 // fails (asleep, frozen or healthy). Showdown agrees. Log: CureStatus, or
@@ -3664,7 +3711,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::PerishSong || stat_down(effect).n != 0 ||
          effect == Effect::Tickle || effect == Effect::Haze ||
          effect == Effect::PsychUp || effect == Effect::Reflect ||
-         effect == Effect::LightScreen || effect == Effect::MeanLook;
+         effect == Effect::LightScreen || effect == Effect::MeanLook ||
+         effect == Effect::Encore;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3720,6 +3768,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
     return screen(battle, player, m, options);
   }
   if (effect == Effect::MeanLook) return mean_look(battle, player, m, options);
+  if (effect == Effect::Encore) return encore(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
