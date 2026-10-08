@@ -1272,6 +1272,62 @@ void check_destiny_bond() {
   }
 }
 
+// 2-5 hit moves: each hit draws its own crit and roll; a contact ability
+// acts per hit; the loop stops when the target faints, and goes on after
+// Endure (Showdown).
+void check_multi_hit() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::RockBlast;
+  user.moves[1] = Move::ArmThrust;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Splash;
+  target.moves[3] = Move::Endure;
+  const auto run = [&](Battle& b, uint8_t move, uint8_t foe_move, uint8_t n) {
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    o.calc.overrides.p1.multi_hit = n;
+    o.calc.overrides.p2.protect = Optional::True;
+    for (uint8_t i = 0; i < MAX_HITS; i++) {
+      o.calc.overrides.p1.hits[i].crit = Optional::False;
+      o.calc.overrides.p1.hits[i].damage = 100;
+      o.calc.overrides.p1.hits[i].contact = Optional::False;
+    }
+    update(b, Choice::move(move), Choice::move(foe_move), o);
+    uint8_t rolled = 0;
+    while (rolled < MAX_HITS && o.chance.actions.p1.hits[rolled].damage != 0) {
+      rolled++;
+    }
+    return rolled;
+  };
+  {
+    Battle b = started({user}, {target});
+    const Pokemon& t = b.sides[1].get(1);
+    CHECK(run(b, 1, 3, 4) == 4);
+    const uint16_t four = uint16_t(t.stats.hp - t.hp);
+    CHECK(four % 4 == 0 && four != 0);
+  }
+  {
+    Battle b = started({user}, {target});
+    b.sides[1].active.ability = Ability::RoughSkin;
+    const Pokemon& u = b.sides[0].get(1);
+    CHECK(run(b, 2, 3, 3) == 3);
+    CHECK(u.stats.hp - u.hp == 3 * (u.stats.hp / 16));
+  }
+  {
+    Battle b = started({user}, {target, DUGTRIO});
+    b.sides[1].get(1).hp = 1;
+    CHECK(run(b, 1, 3, 5) == 1);
+    CHECK(b.sides[1].get(1).fainted());
+  }
+  {
+    // Endure holds at 1 HP and the remaining hits still come.
+    Battle b = started({user}, {target});
+    b.sides[1].get(1).hp = 2;
+    CHECK(run(b, 1, 4, 5) == 5);
+    CHECK(b.sides[1].get(1).hp == 1);
+  }
+}
+
 // The weather moves: 5 turns counting this one, replacing an ability's
 // permanent weather, failing on the same weather.
 void check_weather_moves() {
@@ -1524,7 +1580,7 @@ void check_screens_and_power() {
     Battle b = started({attacker}, {IDLE});
     setup(b);
     Observed o{};
-    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None};
+    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, 0};
     update(b, Choice::move(slot), Choice::move(1), o);
     const Pokemon& t = b.sides[1].get(1);
     return t.stats.hp - t.hp;
@@ -2065,14 +2121,14 @@ void check_move_abilities() {
     Battle b = started({slammer}, {breloom});
     const Observed o = run(b, 1, [](Observed& o) {
       o.calc.overrides.p1.hits[0].contact = Optional::True;
-      o.calc.overrides.p1.spore = 2;
+      o.calc.overrides.p1.hits[0].spore = 2;
     });
     CHECK(b.sides[0].get(1).status.poisoned());
-    CHECK(o.chance.actions.p1.spore == 2);
+    CHECK(o.chance.actions.p1.hits[0].spore == 2);
     Battle c = started({slammer}, {breloom});
     run(c, 1, [](Observed& o) {
       o.calc.overrides.p1.hits[0].contact = Optional::True;
-      o.calc.overrides.p1.spore = 1;
+      o.calc.overrides.p1.hits[0].spore = 1;
     });
     CHECK(c.sides[0].get(1).status.asleep());
   }
@@ -2496,6 +2552,7 @@ int main(int argc, char** argv) {
   check_encore();
   check_solar_beam();
   check_destiny_bond();
+  check_multi_hit();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();

@@ -265,6 +265,10 @@ struct HitDraws {
                        // Cute Charm or Effect Spore (util:2774-2844). Per hit:
                        // a mid-loop burn changes later damage, and a mid-loop
                        // sleep ends the loop.
+  uint8_t spore;       // Effect Spore's status when `contact` procs: 1 sleep,
+                       // 2 poison, 3 paralysis (util:2776). Per hit too: a
+                       // status that doesn't take leaves the next hit free
+                       // to proc again.
 
   friend constexpr bool operator==(const HitDraws&, const HitDraws&) = default;
 };
@@ -280,7 +284,7 @@ struct Action {
 
   // The move.
   //
-  // spore, tri_attack and variable are sparse: each picks from a small set
+  // tri_attack and variable are sparse: each picks from a small set
   // and is rarely filled. They are separate for clarity for now. They could
   // be combined into one detail byte whose meaning depends on the move or
   // ability.
@@ -289,8 +293,6 @@ struct Action {
   Optional hit;          // accuracy (bsc:1176), once per move
   uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147)
   HitDraws hits[6];       // MAX_HITS
-  uint8_t spore;         // Effect Spore's status: 1 sleep, 2 poison,
-                         // 3 paralysis
   Optional kings_rock;   // True = flinched. A flinch is set at most once and
                          // which draw set it doesn't change state.
   Optional secondary;    // the move's secondary effect (bsc:2923)
@@ -348,12 +350,12 @@ struct Actions {
   friend constexpr bool operator==(const Actions&, const Actions&) = default;
 };
 
-static_assert(sizeof(HitDraws) == 4);
+static_assert(sizeof(HitDraws) == 5);
 // The most hits one move execution draws for (Beat Up's six).
 inline constexpr uint8_t MAX_HITS = std::size(Action{}.hits);
 static_assert(MAX_HITS == 6);
-static_assert(sizeof(Action) == 53);
-static_assert(sizeof(Actions) == 3 + 2 * 53);
+static_assert(sizeof(Action) == 59);
+static_assert(sizeof(Actions) == 3 + 2 * 59);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 

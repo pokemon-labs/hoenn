@@ -344,17 +344,38 @@ constexpr uint8_t switch_target(Battle& battle, Player p, uint8_t mask,
   return slot;
 }
 
+// A 2-5 hit move's count: Cmd_setmultihitcounter (bsc:7139) draws twice
+// for 2 or 3 at 3/8 each and 4 or 5 at 1/8 each; Showdown's gen3 samples
+// [2, 2, 2, 3, 3, 3, 4, 5], the same.
+template <typename O>
+constexpr uint8_t multi_hit(Battle& battle, Player p, O& options) {
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).multi_hit;
+  assert(forced == 0 || (forced >= 2 && forced <= 5));
+  uint8_t n = forced;
+  if (n == 0) {
+    const uint32_t r = battle.rng.range(8);
+    n = r < 3 ? 2 : r < 6 ? 3 : r == 6 ? 4 : 5;
+  }
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).multi_hit, n);
+    observe(options, n <= 3 ? 3 : 1, 8);
+  }
+  return n;
+}
+
 // Effect Spore's status: Random() & 3 redrawn while 0, so 1 sleep, 2
 // poison, 3 paralysis (MOVE_EFFECT_BURN replaced, util:2776); Showdown
 // samples the same three.
 template <typename O>
-constexpr uint8_t spore(Battle& battle, Player p, O& options) {
+constexpr uint8_t spore(Battle& battle, Player p, uint8_t i, O& options) {
+  assert(i < MAX_HITS);
   uint8_t forced = 0;
-  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).spore;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].spore;
   assert(forced <= 3);
   const uint8_t which = forced != 0 ? forced : uint8_t(1 + battle.rng.range(3));
   if constexpr (detail::CHANCE<O>) {
-    record(options.chance.actions.get(p).spore, which);
+    record(options.chance.actions.get(p).hits[i].spore, which);
     observe(options, 1, 3);
   }
   return which;
@@ -1185,6 +1206,9 @@ struct MoveState {
   // Baton Pass worked: the user's side picks the recipient after the action
   // (Phase::BatonPass), as Showdown's switchFlag.
   bool pass;
+  // The multi-hit loop ran the target's contact abilities after each hit
+  // (moveendto MOVEEND_NEXT_TARGET), so moveend doesn't run them again.
+  bool multi;
   // gBattleStruct->changedItems for the user: the item Thief or Covet took,
   // given to the user at MOVEEND_CHANGED_ITEMS. None when nothing was taken.
   Item stolen;
@@ -1706,6 +1730,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::KnockOff:
   case Effect::Thief:
   case Effect::SolarBeam:
+  case Effect::MultiHit:
   case Effect::Superpower:
   case Effect::Overheat:
   case Effect::Return:
@@ -2070,7 +2095,7 @@ constexpr void synchronize(Battle& battle, Player holder, MoveState& m,
 // Spore's sleep is subject to Sleep Clause, as Showdown's onSetStatus.
 template <typename O>
 constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
-                                 O& options) {
+                                 uint8_t i, O& options) {
   if (m.self || !m.damaged || (m.result & MoveResult::NO_EFFECT)) return;
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
@@ -2103,8 +2128,8 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
         !takes(Secondary::Paralysis)) {
       return;
     }
-    if (!rolls::contact(battle, player, 0, 10, options)) return;
-    const uint8_t which = rolls::spore(battle, player, options);
+    if (!rolls::contact(battle, player, i, 10, options)) return;
+    const uint8_t which = rolls::spore(battle, player, i, options);
     s = which == 1   ? Secondary::Sleep
         : which == 2 ? Secondary::Poison
                      : Secondary::Paralysis;
@@ -2123,13 +2148,13 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
         g1 == g2) {
       return;
     }
-    if (rolls::contact(battle, player, 0, 3, options)) a.volatiles.infatuated = true;
+    if (rolls::contact(battle, player, i, 3, options)) a.volatiles.infatuated = true;
     return;
   }
   default:
     return;
   }
-  if (takes(s) && rolls::contact(battle, player, 0, 3, options)) {
+  if (takes(s) && rolls::contact(battle, player, i, 3, options)) {
     inflict(battle, player, s, m, options);
   }
 }
@@ -2213,7 +2238,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // SYNCHRONIZE_ATTACKER. No self-targeting move arms Synchronize (Rest's
   // sleep doesn't), so its target case is the foe's.
   if (!m.self) synchronize(battle, foe(player), m, options);
-  ability_on_damage(battle, player, m, options);
+  if (!m.multi) ability_on_damage(battle, player, m, 0, options);
   ability_immunity(battle, options);
   synchronize(battle, player, m, options);
 
@@ -2487,7 +2512,36 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     foe_conditions.light_screen = 0;
   }
 
-  if (affects) {
+  if (affects && effect == Effect::MultiHit) {
+    // BattleScript_EffectMultiHit (bs1:604), as Showdown's gen3 loop
+    // (data/mods/gen3/scripts.ts:393): after the accuracy check, 2-5 hits,
+    // each with its own crit, roll and survival, while both Pokémon have HP
+    // and the user isn't asleep (unless Sleep Talk called the move). Each hit
+    // that took the target's own HP runs its contact ability (Showdown's
+    // DamagingHit per hit; the decomp's moveendto MOVEEND_NEXT_TARGET). The
+    // decomp also stops once the target endures a hit
+    // (MOVE_RESULT_FOE_ENDURED, bs1:638); Showdown goes on, and this follows
+    // it. Log: one Damage per hit, then HitCount.
+    const uint8_t n = rolls::multi_hit(battle, player, options);
+    bool damaged = false;
+    for (uint8_t i = 0; i < n && !target.fainted() && !user.fainted(); i++) {
+      if (i > 0 && user.status.asleep() && m.chosen != Move::SleepTalk) break;
+      Hit hi = h;
+      if (can_crit(battle, player)) {
+        hi.crit = rolls::crit(battle, player, i,
+                              crit_stage(battle, player, m.move), options);
+      }
+      uint32_t d = apply_roll(damage(battle, player, hi),
+                              rolls::damage(battle, player, i, options));
+      d = survive(battle, player, m, d, i, options);
+      m.damaged = false;
+      m.hp_dealt = hp_update(battle, defender, d, m);
+      ability_on_damage(battle, player, m, i, options);
+      damaged |= m.damaged;
+    }
+    m.damaged = damaged;
+    m.multi = true;
+  } else if (affects) {
     // critcalc, damagecalc, typecalc, then adjustnormaldamage: the roll,
     // then whatever lets the target survive at 1 HP (not behind a
     // Substitute). Focus Band is drawn only when the hit would be lethal,
