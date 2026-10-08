@@ -762,10 +762,12 @@ adapted (see Interface).
 - Done (2026-10-07): Absorb, Mega Drain and Giga Drain, as Showdown
   where it differs (a Substitute's half rounds up; no drain without
   effect).
+- Done (2026-10-07): Taunt (the selection, canceler and residual were
+  already there; power 0 matches Showdown's Status on every move).
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Taunt, Sunny Day, Rain Dance, Endeavor, Beat Up...). Uproar and Thrash (with the
+  (Sunny Day, Rain Dance, Endeavor, Beat Up, Knock Off...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

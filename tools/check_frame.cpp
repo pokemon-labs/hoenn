@@ -1114,6 +1114,31 @@ void check_drain() {
   }
 }
 
+// Taunt: two turns of no status moves (not offered, and stopped if chosen
+// before it landed), failing on a Taunted target.
+void check_taunt() {
+  helpers::Pokemon taunter = JOLTEON;
+  taunter.moves[0] = Move::Taunt;
+  taunter.moves[1] = Move::Thunderbolt;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Splash;
+  Null null{};
+  Battle b = started({taunter}, {target});
+  // Faster Taunt stops this turn's Splash, without PP.
+  update(b, Choice::move(1), Choice::move(3), null);
+  CHECK(b.sides[1].active.taunt == 1);
+  CHECK(b.sides[1].get(1).moves[2].pp == max_pp(Move::Splash, 3));
+  std::array<Choice, MAX_CHOICES> out{};
+  const uint8_t n = choices(b, Player::P2, Choice::Move, out);
+  bool splash = false;
+  for (uint8_t i = 0; i < n; i++) splash |= out[i] == Choice::move(3);
+  CHECK(!splash);
+  // A second Taunt fails; then it runs out.
+  update(b, Choice::move(1), Choice::move(1), null);
+  CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Taunt, 3) - 2);
+  CHECK(b.sides[1].active.taunt == 0);
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2029,6 +2054,7 @@ int main(int argc, char** argv) {
   check_cures();
   check_counter();
   check_drain();
+  check_taunt();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

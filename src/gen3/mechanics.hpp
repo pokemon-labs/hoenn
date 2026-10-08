@@ -3170,6 +3170,28 @@ constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
+// ppreduce, a missed accuracy check (Protect, evasion) or an existing
+// Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
+// Substitute check. Showdown's gen3 Taunt agrees (duration 2, bypasssub,
+// protect). The selection and the canceler block power-0 moves, which are
+// exactly Showdown's Status moves; the residual counts it down. Log: Start
+// Taunt, or Fail.
+template <typename O>
+constexpr void taunt(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& t = battle.side(foe(player)).active;
+  const uint32_t calc = t.taunt != 0 ? 0 : accuracy(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  t.taunt = 2;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectRefresh (bs1:2520), Cmd_cureifburnedparalyzedorpoisoned
 // (bsc:9119): the user's poison, burn or paralysis is cured; otherwise it
 // fails (asleep, frozen or healthy). Showdown agrees. Log: CureStatus, or
@@ -3242,7 +3264,7 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Spikes || heals(effect) ||
          effect == Effect::BatonPass || effect == Effect::Wish ||
          effect == Effect::LeechSeed || effect == Effect::Refresh ||
-         effect == Effect::HealBell;
+         effect == Effect::HealBell || effect == Effect::Taunt;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3285,6 +3307,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::LeechSeed) return leech_seed(battle, player, m, options);
   if (effect == Effect::Refresh) return refresh(battle, player, m, options);
   if (effect == Effect::HealBell) return heal_bell(battle, player, m, options);
+  if (effect == Effect::Taunt) return taunt(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
