@@ -265,6 +265,10 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   `tools/damage_cases.inc`. Regenerate it with `node
   tools/damage_oracle.cjs > tools/damage_cases.inc` (needs ADV-Simulator's
   pinned Showdown, or its path as the argument).
+- `soak`: random self-play between random team pairs, checking `valid()`
+  and the probability after every update; a crash prints the game's seed,
+  and `--replay SEED` plays that game alone. Run it by hand in debug for
+  long soaks (`--games N --seed N`).
 - `check_frame`: the turn frame (start, order, Quick Claw and speed-tie rolls
   with Chance and Calc, trapping, faint requests and resuming, the turn cap),
   a few step-3 scenarios (a forced plain hit and its probability, PP, an
@@ -299,6 +303,7 @@ tools/
   check_teams.cpp     parses teams/adv/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
   check_frame.cpp     the turn frame and step 3, plus a self-play soak
+  soak.cpp            long random self-play runs, replayable by seed
   damage_oracle.cjs   writes damage_cases.inc from Showdown
 ```
 
@@ -569,6 +574,12 @@ feels like progress; every later mechanic inherits the frame.
   `Effect::Recoil` (Struggle), the attack canceler, accuracy, PP, crit,
   the roll, Focus Band, fainting (`faint()`), Spikes on every switch-in, and
   the battle start traced (its abilities wait for step 4).
+
+- Plan step 4, begun (branch `step4`): `tools/soak` (random self-play,
+  replayable per-game seeds, a 100-game `ctest` case); status and flinch
+  secondaries, Tri Attack, Hidden Power, Earthquake, Thunder, Sky Uppercut,
+  Double-Edge, Explosion, Seismic Toss and Night Shade. About two thirds of
+  the damaging move slots in `teams/` now work.
 
 **Not started:** every other move effect (they only use PP), switch-in
 abilities and items, the residuals, the ability and item dispatchers,
