@@ -275,6 +275,37 @@ constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
   return index;
 }
 
+// Starf Berry's stat: uniform over the stats below +6 among Atk, Def, Spe,
+// SpA and SpD (the decomp's rejection loop, util:3462; Showdown's onEat
+// samples the same set). Returns the stat, 1-5 in that order (STAT_ATK to
+// STAT_SPDEF). Called only when one is below +6.
+template <typename O>
+constexpr uint8_t starf(Battle& battle, Player p, O& options) {
+  const Boosts& b = battle.side(p).active.boosts;
+  const int8_t stages[5] = {b.atk, b.def, b.spe, b.spa, b.spd};
+  uint8_t open = 0;
+  for (const int8_t s : stages) open += s < 6;
+  assert(open != 0);
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).starf;
+  assert(forced <= 5 && (forced == 0 || stages[forced - 1] < 6));
+  uint8_t stat = forced;
+  if (stat == 0) {
+    uint8_t k = uint8_t(battle.rng.range(open));
+    for (uint8_t i = 0; i < 5; i++) {
+      if (stages[i] < 6 && k-- == 0) {
+        stat = uint8_t(i + 1);
+        break;
+      }
+    }
+  }
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).starf, stat);
+    observe(options, 1, open);
+  }
+  return stat;
+}
+
 // A hidden counter's tick, observed: whether the effect ends now. The battle
 // holds the true counter, so nothing is drawn; this records the outcome, its
 // probability given the public count, and the new count. Callers guard it
@@ -1047,10 +1078,99 @@ constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
   return dealt;
 }
 
+// ---------------------------------------------------------------------------
+// Held items (ItemBattleEffects, util:3243): one function per mode, called
+// where the decomp calls it (decided 2026-10-07).
+// ---------------------------------------------------------------------------
+
+// Cmd_removeitem (bsc:5901): the item is used up, and Recycle remembers it.
+constexpr void consume_item(Side& side) {
+  side.recycle_item = side.get(1).item;
+  side.get(1).item = Item::None;
+}
+
+// The cures ITEMEFFECT_NORMAL (util:3485-3606) and ITEMEFFECT_MOVE_END
+// (util:3627-3752) share, and White Herb, which both run too. Cured sleep
+// and confusion are public, so their counts reset. Returns whether the item
+// was used.
+template <typename O>
+constexpr bool item_cure(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  Pokemon& mon = side.get(1);
+  ActivePokemon& a = side.active;
+  Volatiles& v = a.volatiles;
+  const auto wake = [&] {
+    v.nightmare = false;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+  };
+  const auto unconfuse = [&] {
+    v.confusion = 0;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).confusion = 0;
+  };
+  switch (item_data(mon.item).effect) {
+  case HoldEffect::CurePar:
+    if (!mon.status.paralyzed()) return false;
+    mon.status = Status::none();
+    break;
+  case HoldEffect::CurePsn:
+    if (!mon.status.poisoned()) return false;
+    mon.status = Status::none();
+    a.toxic = 0;
+    break;
+  case HoldEffect::CureBrn:
+    if (!mon.status.burned()) return false;
+    mon.status = Status::none();
+    break;
+  case HoldEffect::CureFrz:
+    if (!mon.status.frozen()) return false;
+    mon.status = Status::none();
+    break;
+  case HoldEffect::CureSlp:
+    if (!mon.status.asleep()) return false;
+    mon.status = Status::none();
+    wake();
+    break;
+  case HoldEffect::CureConfusion:
+    if (v.confusion == 0) return false;
+    unconfuse();
+    break;
+  case HoldEffect::CureStatus:
+    if (!mon.status.any() && v.confusion == 0) return false;
+    if (mon.status.asleep()) wake();
+    mon.status = Status::none();
+    a.toxic = 0;
+    unconfuse();
+    break;
+  case HoldEffect::CureAttract:
+    if (!v.infatuated) return false;
+    v.infatuated = false;
+    break;
+  case HoldEffect::RestoreStats: {
+    // White Herb: every lowered stage back to 0.
+    bool lowered = false;
+    const auto reset = [&](int8_t& b) {
+      if (b < 0) {
+        b = 0;
+        lowered = true;
+      }
+    };
+    Boosts& b = a.boosts;
+    reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
+    reset(b.acc), reset(b.eva);
+    if (!lowered) return false;
+    break;
+  }
+  default:
+    return false;
+  }
+  consume_item(side);
+  return true;
+}
+
 // Cmd_moveend (bsc:4210) with moveendall: the cases in the decomp's order.
 template <typename O>
 constexpr void moveend(Battle& battle, Player player, const MoveState& m,
-                       O&) {
+                       O& options) {
   Side& side = battle.side(player);
   ActivePokemon& a = side.active;
   Side& target_side = m.self ? side : battle.side(foe(player));
@@ -1103,8 +1223,14 @@ constexpr void moveend(Battle& battle, Player player, const MoveState& m,
     a.volatiles.underwater = false;
   }
 
-  // TODO(plan step 4): MOVEEND_ITEM_EFFECTS_ALL and KINGSROCK_SHELLBELL
-  // (ItemBattleEffects).
+  // MOVEEND_ITEM_EFFECTS_ALL: ITEMEFFECT_MOVE_END's cures. The decomp
+  // stops at the first Pokémon whose item acts (util:3740); Showdown's
+  // onUpdate cures both, and this follows it.
+  for (const Player p : {Player::P1, Player::P2}) {
+    if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
+  }
+
+  // TODO(plan step 4): MOVEEND_KINGSROCK_SHELLBELL (ItemBattleEffects).
 
   // MOVEEND_SUBSTITUTE
   for (Side& s : battle.sides) {
@@ -1866,6 +1992,70 @@ constexpr uint16_t residual_damage(Battle& battle, Player player,
   return dealt;
 }
 
+// ITEMEFFECT_NORMAL (util:3317) for p's active Pokémon, at
+// ENDTURN_ITEMS1 (move_turn false) and ENDTURN_ITEMS2 (true). Leftovers,
+// the HP berries and the pinch berries need move_turn false, so they act
+// only once per end of turn; on the cartridge and in Showdown's gen3 mod
+// (onResidual, data/mods/gen3/items.ts) they don't act right after a hit.
+// TODO(plan step 4): Leppa Berry (RESTORE_PP) and the flavor berries
+// (CONFUSE_*, which read the nature); none is on the teams.
+template <typename O>
+constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
+                             O& options) {
+  Side& side = battle.side(player);
+  Pokemon& mon = side.get(1);
+  ActivePokemon& a = side.active;
+  if (mon.fainted()) return;
+  const ItemData item = item_data(mon.item);
+  switch (item.effect) {
+  case HoldEffect::RestoreHp:
+    // Oran, Sitrus (30 HP in Gen III) and Berry Juice: a fixed amount.
+    if (move_turn || mon.hp > mon.stats.hp / 2) return;
+    heal(mon, item.param);
+    consume_item(side);
+    return;
+  case HoldEffect::Leftovers:
+    if (!move_turn && mon.hp != mon.stats.hp) heal(mon, fraction(mon, 16));
+    return;
+  case HoldEffect::AttackUp:
+  case HoldEffect::DefenseUp:
+  case HoldEffect::SpeedUp:
+  case HoldEffect::SpAttackUp:
+  case HoldEffect::SpDefenseUp: {
+    // TRY_EAT_STAT_UP_BERRY (util:3230): +1 at max HP / param (4) or less.
+    if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    const uint8_t stat = uint8_t(item.effect) - uint8_t(HoldEffect::AttackUp);
+    int8_t& b = stage(a.boosts, stat);
+    if (b >= 6) return;
+    b++;
+    consume_item(side);
+    return;
+  }
+  case HoldEffect::CriticalUp:
+    // Lansat Berry: Focus Energy (util:3441).
+    if (move_turn || mon.hp > mon.stats.hp / item.param ||
+        a.volatiles.focus_energy) {
+      return;
+    }
+    a.volatiles.focus_energy = true;
+    consume_item(side);
+    return;
+  case HoldEffect::RandomStatUp: {
+    // Starf Berry: +2 to a random stat below +6 (util:3450).
+    if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    const Boosts& b = a.boosts;
+    if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) return;
+    int8_t& s = stage(a.boosts, uint8_t(rolls::starf(battle, player, options) - 1));
+    s = s + 2 > 6 ? 6 : int8_t(s + 2);
+    consume_item(side);
+    return;
+  }
+  default:
+    item_cure(battle, player, options);
+    return;
+  }
+}
+
 // DoFieldEndTurnEffects (util:1181), after ENDTURN_ORDER: the side timers
 // (P1's side, then P2's, each in turn), Wish in the residual order, then
 // the weather. Sand and hail hurt each Pokémon in the residual order
@@ -1939,8 +2129,7 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
 // rest, as each case checks its HP. Returns the end of the battle if a
 // residual KO ends it.
 //
-// TODO(plan step 4): ENDTURN_ITEMS1's berries and ENDTURN_ITEMS2
-// (ItemBattleEffects, ITEMEFFECT_NORMAL); ENDTURN_UPROAR and ENDTURN_THRASH
+// TODO(plan step 4): ENDTURN_UPROAR and ENDTURN_THRASH
 // (they read WasUnableToUseMove, README decision 2); ENDTURN_YAWN (with
 // sleep and Sleep Clause).
 template <typename O>
@@ -1984,10 +2173,8 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
     }
   }
 
-  // ENDTURN_ITEMS1: ITEMEFFECT_NORMAL's Leftovers (util:3386).
-  if (alive() && holds(side, HoldEffect::Leftovers) && mon.hp != mon.stats.hp) {
-    heal(mon, fraction(mon, 16));
-  }
+  // ENDTURN_ITEMS1 (util:1496)
+  item_end_turn(battle, player, false, options);
 
   // ENDTURN_LEECH_SEED (util:1501): max HP / 8 from the seeded Pokémon, then
   // the seeder (the foe's active Pokémon) gains what was lost, or loses it
@@ -2103,6 +2290,10 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   if (v.lock_on != 0) v.lock_on--;
   if (a.charge_timer != 0 && --a.charge_timer == 0) v.charged_up = false;
   if (a.taunt != 0) a.taunt--;
+
+  // ENDTURN_ITEMS2 (util:1501): the cures again, for statuses the passes
+  // above set.
+  item_end_turn(battle, player, true, options);
   return std::nullopt;
 }
 

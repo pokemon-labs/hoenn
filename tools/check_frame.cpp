@@ -734,6 +734,77 @@ void check_residuals() {
   }
 }
 
+void check_items() {
+  helpers::Pokemon plain = IDLE;
+  plain.ability = Ability::ThickFat;
+  const helpers::Pokemon toxer = {
+      .species = Species::Gengar,
+      .moves = {Move::Toxic, Move::Splash},
+      .ability = Ability::Levitate,
+      .gender = Gender::Male,
+  };
+  Null null{};
+  {
+    // Lum Berry cures Toxic right after the move, and is used up.
+    Battle b = started({toxer}, {holding(plain, Item::LumBerry)});
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(!b.sides[1].get(1).status.any());
+    CHECK(b.sides[1].get(1).item == Item::None);
+    CHECK(b.sides[1].recycle_item == Item::LumBerry);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+  }
+  {
+    // Sitrus Berry: 30 HP at end of turn once at half or less.
+    Battle b = started({holding(plain, Item::SitrusBerry)}, {IDLE});
+    Pokemon& m = b.sides[0].get(1);
+    m.hp = uint16_t(m.stats.hp / 2 + 1);
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(m.item == Item::SitrusBerry);
+    m.hp = uint16_t(m.stats.hp / 2);
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(m.hp == m.stats.hp / 2 + 30 && m.item == Item::None);
+  }
+  {
+    // Salac Berry: +1 Speed at end of turn at a quarter or less; not at +6.
+    Battle b = started({holding(plain, Item::SalacBerry)}, {IDLE});
+    Pokemon& m = b.sides[0].get(1);
+    m.hp = uint16_t(m.stats.hp / 4);
+    b.sides[0].active.boosts.spe = 6;
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(m.item == Item::SalacBerry);
+    b.sides[0].active.boosts.spe = 0;
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].active.boosts.spe == 1 && m.item == Item::None);
+  }
+  {
+    // Starf Berry: +2 to the forced stat, recorded with 1/k over the stats
+    // below +6 (here Def is maxed, so 1/4), times the 1/2 move-order tie.
+    Battle b = started({holding(plain, Item::StarfBerry)}, {IDLE});
+    b.sides[0].get(1).hp = 1;
+    b.sides[0].active.boosts.def = 6;
+    Observed o{};
+    o.calc.overrides.p1.starf = 4; // SpA
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[0].active.boosts.spa == 2);
+    CHECK(o.chance.actions.p1.starf == 4);
+    o.chance.probability.reduce();
+    CHECK(o.chance.probability.p == 1 && o.chance.probability.q == 8);
+  }
+  {
+    // Chesto Berry wakes the holder at the end of the turn it fell asleep in
+    // (here set directly), resetting the public sleep count.
+    Battle b = started({holding(plain, Item::ChestoBerry)}, {IDLE});
+    b.sides[0].get(1).status = Status::slp(3);
+    Observed o{};
+    o.chance.durations.p1.sleep[0] = 1;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(!b.sides[0].get(1).status.any());
+    CHECK(b.sides[0].get(1).item == Item::None);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -845,6 +916,7 @@ int main(int argc, char** argv) {
   check_confuse();
   check_status_moves();
   check_residuals();
+  check_items();
   check_accuracy();
   check_turn_cap();
 

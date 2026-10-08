@@ -648,11 +648,20 @@ adapted (see Interface).
   order can matter (`residual_order_matters`). `soak` now builds in
   release. About 3.5% of random soak games reach the turn cap: Struggle
   against Leftovers stalls, once every move is out of PP.
-- **Then:** the item dispatcher (`ItemBattleEffects`: the berries in
-  `teams/` are Salac, Lum, Liechi, Petaya, Chesto; end of turn and after
-  damage), with `moveend`'s ability dispatcher (Synchronize, Static...);
-  the switch-in abilities (Intimidate, Sand Stream, Drizzle); Uproar,
-  Thrash and Yawn residuals. Then the status moves by `tools/coverage`'s
+- Decided (2026-10-07): the dispatchers are one plain function per
+  decomp mode (`item_cure`, `item_end_turn`, then `ability_on_damage`,
+  `synchronize`...), called at the decomp's sites. Where the decomp's
+  `ITEMEFFECT_MOVE_END` cures only the first Pokémon, follow Showdown (both).
+- Done (2026-10-07): held items. Status berries and White Herb after every
+  move and at end of turn; Leftovers, Sitrus and the pinch berries (Salac,
+  Liechi, Petaya, Lansat, Starf) at end of turn only, as on the cartridge
+  and in Showdown's gen3 mod. Not yet: Leppa, the flavor berries, King's
+  Rock, Shell Bell.
+- **Then** (approved order): `moveend`'s abilities (Synchronize, Effect
+  Spore without sleep until Sleep Clause is designed, Flame Body, Static,
+  Poison Point, Rough Skin, the immunity cures); the absorbing abilities
+  (Volt Absorb, Water Absorb, Flash Fire); then a proposal for switch-in
+  abilities and Natural Cure. Uproar, Thrash and Yawn residuals wait. Then the status moves by `tools/coverage`'s
   order (Roar, Calm Mind, Rest, Substitute, Protect, Spikes...).
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.

@@ -228,7 +228,8 @@ namespace pkmn::gen3 {
 //                                                            side. No crit.
 // Shed Skin               1/3                         1     util:2607
 // Starf Berry stat        uniform over non-maxed      1     util:3462
-//                         stats (Atk-SpD, Acc, Eva)
+//                         stats (Atk-SpD; Showdown
+//                         samples the same five)
 //
 // Per player, hidden durations ending (no draw here, but observed)
 // ---------------------------------------------------------------
@@ -295,7 +296,8 @@ struct Action {
                        // user's side
   HitDraws future;       // crit stays None: future attacks don't crit
   Optional shed_skin;  // util:2607
-  uint8_t starf;       // the stat Starf Berry raises, 1-7 (util:3462)
+  uint8_t starf;       // the stat Starf Berry raises, 1-5: Atk, Def, Spe,
+                       // SpA, SpD (util:3462)
 
   // Hidden durations at their tick: True = ended, False = continued.
   Optional sleep;
