@@ -690,6 +690,18 @@ constexpr void consume_item(Side& side) {
   side.get(1).item = Item::None;
 }
 
+// What ending p's active Pokémon's sleep clears besides the status: the
+// Nightmare, the Sleep Talk turns kept for switch-out (sleep_skipped, which
+// a later sleep mustn't inherit) and, since the cure is public, the sleep
+// count. Callers clear the status.
+template <typename O>
+constexpr void wake(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  a.volatiles.nightmare = false;
+  a.sleep_skipped = 0;
+  if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+}
+
 // The cures ITEMEFFECT_NORMAL (util:3485-3606) and ITEMEFFECT_MOVE_END
 // (util:3627-3752) share, and White Herb, which both run too. Cured sleep
 // and confusion are public, so their counts reset. Returns whether the item
@@ -700,10 +712,6 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
   Pokemon& mon = side.get(1);
   ActivePokemon& a = side.active;
   Volatiles& v = a.volatiles;
-  const auto wake = [&] {
-    v.nightmare = false;
-    if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
-  };
   const auto unconfuse = [&] {
     v.confusion = 0;
     if constexpr (CHANCE<O>) options.chance.durations.get(player).confusion = 0;
@@ -729,7 +737,7 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
   case HoldEffect::CureSlp:
     if (!mon.status.asleep()) return false;
     mon.status = Status::none();
-    wake();
+    wake(battle, player, options);
     break;
   case HoldEffect::CureConfusion:
     if (v.confusion == 0) return false;
@@ -737,7 +745,7 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     break;
   case HoldEffect::CureStatus:
     if (!mon.status.any() && v.confusion == 0) return false;
-    if (mon.status.asleep()) wake();
+    if (mon.status.asleep()) wake(battle, player, options);
     mon.status = Status::none();
     a.toxic = 0;
     unconfuse();
@@ -1230,8 +1238,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
                         a.ability != Ability::Soundproof;
     if (uproar) {
       mon.status = Status::none();
-      v.nightmare = false;
-      if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+      wake(battle, player, options);
     } else {
       const uint8_t by = a.ability == Ability::EarlyBird ? 2 : 1;
       const bool rest = mon.status.self_inflicted();
@@ -3107,6 +3114,57 @@ constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectRefresh (bs1:2520), Cmd_cureifburnedparalyzedorpoisoned
+// (bsc:9119): the user's poison, burn or paralysis is cured; otherwise it
+// fails (asleep, frozen or healthy). Showdown agrees. Log: CureStatus, or
+// Fail.
+template <typename O>
+constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Pokemon& mon = battle.side(player).get(1);
+  if (!mon.status.poisoned() && !mon.status.burned() && !mon.status.paralyzed()) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  mon.status = Status::none();
+  battle.side(player).active.toxic = 0; // status1 holds the counter
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectHealBell (bs1:1361), Cmd_healpartystatus (bsc:8370),
+// for Heal Bell and Aromatherapy: every Pokémon on the user's side is
+// cured, the active one's Nightmare too, except that Heal Bell skips
+// Soundproof ones (the active one by its battle ability, the others by
+// their own). It never fails. Showdown's gen4 versions agree. Cured sleeps
+// are public, so their counts reset. Log: Activate Heal Bell (and Immune
+// for Soundproof) or CureTeam.
+template <typename O>
+constexpr void heal_bell(Battle& battle, Player player, MoveState& m,
+                         O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& side = battle.side(player);
+  const bool bell = m.move == Move::HealBell;
+  for (uint8_t s = 1; s <= 6; s++) {
+    Pokemon& mon = side.get(s);
+    if (mon.species == Species::None) continue;
+    const Ability ability = s == 1 ? side.active.ability : mon.ability;
+    if (bell && ability == Ability::Soundproof) continue;
+    if (s == 1) {
+      if (mon.status.asleep()) wake(battle, player, options);
+      side.active.volatiles.nightmare = false;
+      side.active.toxic = 0;
+    } else if constexpr (CHANCE<O>) {
+      options.chance.durations.get(player).sleep[s - 1] = 0;
+    }
+    mon.status = Status::none();
+  }
+  moveend(battle, player, m, options);
+}
+
 // The healing moves' effects (heal_move).
 constexpr bool heals(Effect effect) {
   return effect == Effect::RestoreHp || effect == Effect::Softboiled ||
@@ -3127,7 +3185,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Protect || effect == Effect::Endure ||
          effect == Effect::Spikes || heals(effect) ||
          effect == Effect::BatonPass || effect == Effect::Wish ||
-         effect == Effect::LeechSeed;
+         effect == Effect::LeechSeed || effect == Effect::Refresh ||
+         effect == Effect::HealBell;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3168,6 +3227,8 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::BatonPass) return baton_pass(battle, player, m, options);
   if (effect == Effect::Wish) return wish(battle, player, m, options);
   if (effect == Effect::LeechSeed) return leech_seed(battle, player, m, options);
+  if (effect == Effect::Refresh) return refresh(battle, player, m, options);
+  if (effect == Effect::HealBell) return heal_bell(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
@@ -3483,9 +3544,8 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
       // sleep too, which is public, so the sleep count just resets.
       if (mon.status.any() &&
           rolls::coin(battle, player, &Action::shed_skin, 1, 3, options)) {
+        if (mon.status.asleep()) wake(battle, player, options);
         mon.status = Status::none();
-        v.nightmare = false;
-        if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
       }
       break;
     case Ability::SpeedBoost:

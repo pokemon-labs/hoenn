@@ -751,12 +751,18 @@ adapted (see Interface).
   the status moves). Open, for the log: Showdown draws accuracy before
   the Substitute and already-statused checks, so it can log a miss where
   this fails; the state is the same. 92% (14502 of 15696 slots).
+- Done (2026-10-07): Refresh, Heal Bell and Aromatherapy (the decomp and
+  Showdown agree). Fixed: every end of sleep now goes through `wake()`,
+  which also clears `sleep_skipped`; a cure other than waking used to
+  leave it for the next sleep. 94%.
+- **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
+  written, start the realizability test (see Testing).
 - Noted for Counter and Mirror Coat: Showdown's gen3 protect flag is on
   them (the decomp's isn't), and the decomp counts Hidden Power as
   physical whatever its type where Showdown uses the type. Follow
   Showdown; they'll need physical and special damage in `Turn`.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Refresh, Aromatherapy, Counter, Giga Drain, Taunt...). Uproar and Thrash (with the
+  (Counter, Giga Drain, Taunt, Sunny Day, Rain Dance...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

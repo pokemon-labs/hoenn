@@ -966,6 +966,61 @@ void check_leech_seed() {
   }
 }
 
+// Refresh cures poison, burn and paralysis and fails otherwise; Heal Bell
+// and Aromatherapy cure the whole side, Heal Bell sparing Soundproof ones,
+// and reset the cured sleep counts; a Sleep Talk turn kept for switch-out
+// doesn't outlive the cure.
+void check_cures() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[0] = Move::Refresh;
+  user.moves[1] = Move::HealBell;
+  user.moves[2] = Move::Aromatherapy;
+  user.moves[3] = Move::SleepTalk;
+  user.ability = Ability::ThickFat; // not Immunity, which cures poison itself
+  helpers::Pokemon proof = JOLTEON;
+  proof.species = Species::Exploud;
+  proof.ability = Ability::Soundproof;
+  {
+    Battle b = started({user}, {IDLE});
+    b.sides[0].get(1).status = Status::tox();
+    b.sides[0].active.toxic = 4;
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(!b.sides[0].get(1).status.any() && b.sides[0].active.toxic == 0);
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Refresh, 3) - 2);
+  }
+  {
+    Battle b = started({user}, {IDLE});
+    b.sides[0].get(1).status = Status::slp(3);
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].get(1).status.asleep()); // Refresh fails
+  }
+  for (const uint8_t slot : {2, 3}) {
+    Battle b = started({user, JOLTEON, proof}, {IDLE});
+    b.sides[0].get(1).status = Status::par();
+    b.sides[0].get(2).status = Status::slp(3);
+    b.sides[0].get(3).status = Status::brn();
+    Observed o{};
+    o.chance.durations.p1.sleep[1] = 2;
+    update(b, Choice::move(slot), Choice::move(1), o);
+    CHECK(!b.sides[0].get(1).status.any() && !b.sides[0].get(2).status.any());
+    CHECK(o.chance.durations.p1.sleep[1] == 0);
+    CHECK(b.sides[0].get(3).status.burned() == (slot == 2));
+  }
+  // Asleep, Sleep Talk calls Heal Bell: the kept turn goes with the sleep.
+  {
+    Battle b = started({user, JOLTEON}, {IDLE});
+    b.sides[0].get(1).status = Status::slp(3);
+    Observed o{};
+    o.calc.overrides.p1.move_slot = 2; // Heal Bell
+    update(b, Choice::move(4), Choice::move(1), o);
+    CHECK(!b.sides[0].get(1).status.any());
+    CHECK(b.sides[0].active.sleep_skipped == 0);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -1878,6 +1933,7 @@ int main(int argc, char** argv) {
   check_baton_pass();
   check_wish();
   check_leech_seed();
+  check_cures();
   check_substitute();
   check_protect();
   check_spikes_and_heals();
