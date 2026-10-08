@@ -309,6 +309,7 @@ tools/
   check_damage.cpp    damage.hpp against damage_cases.inc
   check_frame.cpp     the turn frame and step 3, plus a self-play soak
   soak.cpp            long random self-play runs, replayable by seed
+  coverage.cpp        which moves on the teams have a written mechanic
   damage_oracle.cjs   writes damage_cases.inc from Showdown
 ```
 
