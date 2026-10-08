@@ -631,7 +631,7 @@ feels like progress; every later mechanic inherits the frame.
   while the battle isn't over, the turn cap).
 - **A benchmark** against ADV-Simulator's 19k iterations/s.
 
-## Status (2026-10-07)
+## Status (2026-10-08)
 
 **Done** (details in the header comments and `src/gen3/README.md`):
 
@@ -845,9 +845,24 @@ adapted (see Interface).
   charging Pokémon left a forced choice with no lock (now, as Showdown, the
   lock stays until the move is aborted). `soak` now reports the game seed
   on a release segfault.
-- **Gate reached. Resume here:** the realizability test against Showdown
-  (see Testing), not started. Uproar and Thrash (with the
-  `WasUnableToUseMove` question, README decision 2) wait: no team uses them.
+- **Gate reached. Resume here: the realizability test** against Showdown
+  (see Testing), not started. Decide with the user before building:
+  - how to find our matching branch (Testing: infer and force, search at
+    random, or the recommended hybrid);
+  - compare state or log lines (our log isn't written; state first is
+    recommended);
+  - which `@pkmn/sim` to pin (libpkmn's harness uses 0.9.31; `showdown/`
+    is 0.11.11; `check_damage` uses ADV-Simulator's 0.11.10);
+  - how Node and C++ talk (a C++ driver reading Showdown's states and
+    logs from a file or pipe, or a Node addon).
+  Start from libpkmn's `src/test/integration.ts` and `showdown.ts`
+  (`~/oak/cpp/extern/engine`). Ban Quick Claw (Showdown doesn't log it).
+  The shortlist of known differences is in the README, "Mechanics".
+- Speed, for reference: about 1.1M `update`/s in the release soak (random
+  choices, Chance and Calc on, one thread). Not yet compared like for like
+  with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.
+- Uproar and Thrash (with the `WasUnableToUseMove` question, README
+  decision 2) wait: no team uses them.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 
