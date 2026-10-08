@@ -1328,6 +1328,49 @@ void check_multi_hit() {
   }
 }
 
+// Mimic: Mimic's slot takes the target's last move with min(5, base PP),
+// the party keeps Mimic, and it fails with no last move, on a Substitute,
+// or on a move the user knows.
+void check_mimic() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::Mimic;
+  user.moves[1] = Move::Splash;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Splash;
+  Null null{};
+  {
+    Battle b = started({user}, {target});
+    // Faster, so the target has no last move yet.
+    update(b, Choice::move(1), Choice::move(3), null);
+    CHECK(b.sides[0].active.moves[0].id == Move::Mimic);
+    // Quick Attack goes first and is copied.
+    update(b, Choice::move(1), Choice::move(2), null);
+    const MoveSlot& ms = b.sides[0].active.moves[0];
+    CHECK(ms.id == Move::QuickAttack && ms.pp == 5);
+    CHECK(b.sides[0].get(1).moves[0].id == Move::Mimic);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic, 3) - 2);
+    // Using the copy spends its PP only.
+    update(b, Choice::move(1), Choice::move(3), null);
+    CHECK(b.sides[0].active.moves[0].pp == 4);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic, 3) - 2);
+  }
+  {
+    // A move the user knows can't be copied.
+    Battle b = started({user}, {target});
+    update(b, Choice::move(2), Choice::move(3), null);
+    update(b, Choice::move(1), Choice::move(3), null);
+    CHECK(b.sides[0].active.moves[0].id == Move::Mimic);
+  }
+  {
+    Battle b = started({user}, {target});
+    update(b, Choice::move(2), Choice::move(2), null);
+    b.sides[1].active.volatiles.substitute = true;
+    b.sides[1].active.substitute_hp = 100;
+    update(b, Choice::move(1), Choice::move(3), null);
+    CHECK(b.sides[0].active.moves[0].id == Move::Mimic);
+  }
+}
+
 // The weather moves: 5 turns counting this one, replacing an ability's
 // permanent weather, failing on the same weather.
 void check_weather_moves() {
@@ -2553,6 +2596,7 @@ int main(int argc, char** argv) {
   check_solar_beam();
   check_destiny_bond();
   check_multi_hit();
+  check_mimic();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();

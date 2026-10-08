@@ -815,11 +815,11 @@ adapted (see Interface).
   per hit, and no stop after Endure or Focus Band (the decomp stops).
   Effect Spore's status moved into `HitDraws` (per hit), so `Actions` grew
   to 121 B.
+- Done (2026-10-08): Mimic (the decomp and Showdown agree).
 - **Then (resume here):** the moves on `teams/adv/` still missing, by
   `tools/coverage` (7848 slots without `all.txt`; the older 15696 counted
   it twice, and the older "six left" missed seven single-slot moves):
-  Mimic 2, then Water
-  Spout, Imprison, Memento, Fake Out, Pain Split, Nightmare and Gust at 1
+  Water Spout, Imprison, Memento, Fake Out, Pain Split, Nightmare and Gust at 1
   each. Then the realizability test (see Testing), not started. Uproar and
   Thrash (with the `WasUnableToUseMove` question, README decision 2) wait:
   no team uses them.

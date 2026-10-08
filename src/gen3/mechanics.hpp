@@ -3754,6 +3754,42 @@ constexpr void destiny_bond(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectMimic (bs1:1134), Cmd_mimicattackcopy (bsc:7844):
+// after attackstring and ppreduce it fails (ButItFailed) on a Substitute,
+// then on Protect or a semi-invulnerable target unless Locked-On, with no
+// accuracy roll (NO_ACC_CALC_CHECK_LOCK_ON); then if the user is
+// transformed, the target has no last move, the move can't be mimicked
+// (Metronome, Struggle, Sketch, Mimic) or the user knows it already.
+// Otherwise Mimic's slot holds the move with min(5, base PP) until the user
+// leaves the field (`mimicked`; pp_reduce leaves the party's PP alone).
+// Showdown's gen3 (gen4's onHit, data/mods/gen4/moves.ts:882) agrees,
+// on the target's lastMove (last_move follows it; see moveend). Log:
+// Activate Mimic + move, or Fail.
+template <typename O>
+constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& a = battle.side(player).active;
+  const ActivePokemon& t = battle.side(foe(player)).active;
+  const Move last = t.last_move;
+  bool known = false;
+  for (const MoveSlot& ms : a.moves) known |= ms.id == last;
+  if (t.volatiles.substitute || protected_from(m, player) ||
+      (t.volatiles.semi_invulnerable() && t.volatiles.lock_on == 0) ||
+      a.volatiles.transformed || last == Move::None ||
+      (get(last).extra & Extra::NoMimic) || known) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  assert(m.slot < 4);
+  const uint8_t base = get(last).pp;
+  a.moves[m.slot].id = last;
+  a.moves[m.slot].pp = base < 5 ? base : 5;
+  a.mimicked = uint8_t(a.mimicked | 1 << m.slot);
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectRefresh (bs1:2520), Cmd_cureifburnedparalyzedorpoisoned
 // (bsc:9119): the user's poison, burn or paralysis is cured; otherwise it
 // fails (asleep, frozen or healthy). Showdown agrees. Log: CureStatus, or
@@ -3832,7 +3868,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Tickle || effect == Effect::Haze ||
          effect == Effect::PsychUp || effect == Effect::Reflect ||
          effect == Effect::LightScreen || effect == Effect::MeanLook ||
-         effect == Effect::Encore || effect == Effect::DestinyBond;
+         effect == Effect::Encore || effect == Effect::DestinyBond ||
+         effect == Effect::Mimic;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3890,6 +3927,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::MeanLook) return mean_look(battle, player, m, options);
   if (effect == Effect::Encore) return encore(battle, player, m, options);
   if (effect == Effect::DestinyBond) return destiny_bond(battle, player, m, options);
+  if (effect == Effect::Mimic) return mimic(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
