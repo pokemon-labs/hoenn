@@ -436,7 +436,7 @@ main = `src/battle_main.c`.
     (main:3220) and end of turn decrements it (main:4875). Fake Out needs it
     nonzero (bsc:6790); Speed Boost needs it not 2 (util:2629).
 
-Packing comes last: natural alignment for now (`Battle` is 808 B against a
+Packing comes last: natural alignment for now (`Battle` is 816 B against a
 ~700 B target). Revisit padding and `has_unique_object_representations_v`
 once the layout is settled.
 
@@ -529,6 +529,7 @@ the changes.
 | `isFirstTurn` | `first_turn` | u8 0–2 | | | decision 14 |
 | `truantCounter` | `truant` | bool | | | switch-in sets 1; flips at end of turn |
 | `truantSwitchInHack` | — | | | | dropped (Battle Arena only) |
+| — | `sleep_skipped` | u8 0–4 | | | Showdown's gen3 `skippedTime`: Sleep Talk/Snore attempts since the last asleep turn that did nothing; given back to the sleep counter on switch-out (the cartridge writes status1 to the party only at util:2259) |
 | `mimickedMoves` | `mimicked` | u4 mask | | | slots Mimic replaced; blocks the PP write-back |
 | `rechargeTimer` | `recharge_timer` | u8 0–2 | | | set 2 (bsc:2730) |
 | every `*StartValue`, `tauntTimer2`, fillers | — | | | | dropped (write-only) |

@@ -889,8 +889,7 @@ void check_move_abilities() {
     CHECK(m.hp == m.stats.hp - m.stats.hp / 16);
   }
   {
-    // Effect Spore: 1/10, then the forced pick. Poison takes; sleep doesn't
-    // yet (Sleep Clause pending).
+    // Effect Spore: 1/10, then the forced pick: poison, or sleep.
     const helpers::Pokemon breloom =
         mon(Species::Breloom, Ability::EffectSpore, {Move::Splash});
     Battle b = started({slammer}, {breloom});
@@ -905,7 +904,7 @@ void check_move_abilities() {
       o.calc.overrides.p1.hits[0].contact = Optional::True;
       o.calc.overrides.p1.spore = 1;
     });
-    CHECK(!c.sides[0].get(1).status.any());
+    CHECK(c.sides[0].get(1).status.asleep());
   }
   {
     // Immunity cures a poison it got before (set here directly) at the
@@ -1050,6 +1049,154 @@ void check_switch_ins() {
   }
 }
 
+void check_sleep() {
+  // Faster than the Snorlax targets, so a sleep lands before they move.
+  const helpers::Pokemon sporer =
+      mon(Species::Jolteon, Ability::VoltAbsorb,
+          {Move::Spore, Move::Yawn, Move::Splash});
+  helpers::Pokemon plain = IDLE;
+  plain.ability = Ability::ThickFat;
+  Null null{};
+  const auto spore = [&](Battle& b) {
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return o;
+  };
+  {
+    // Spore: a 2-5 sleep, ticked once by the target's own attempt this
+    // turn, so 1-4 left and a public count of 2.
+    Battle b = started({sporer}, {plain});
+    const Observed o = spore(b);
+    const Status st = b.sides[1].get(1).status;
+    CHECK(st.asleep() && !st.self_inflicted() && st.sleep() >= 1 && st.sleep() <= 4);
+    CHECK(o.chance.durations.p2.sleep[0] == 2);
+  }
+  {
+    // Sleep Clause: not while a foe-inflicted sleeper stands on that side;
+    // a Rest sleeper doesn't count.
+    Battle b = started({sporer}, {plain, plain});
+    b.sides[1].get(2).status = Status::slp(3);
+    spore(b);
+    CHECK(!b.sides[1].get(1).status.any());
+    Battle c = started({sporer}, {plain, plain});
+    c.sides[1].get(2).status = Status::slf(2);
+    spore(c);
+    CHECK(c.sides[1].get(1).status.asleep());
+  }
+  {
+    // Insomnia, Uproar, Substitute, Safeguard, another status.
+    const auto fails = [&](helpers::Pokemon foe, auto&& setup) {
+      Battle b = started({sporer}, {foe});
+      setup(b);
+      spore(b);
+      return !b.sides[1].get(1).status.asleep();
+    };
+    const helpers::Pokemon hypno = mon(Species::Hypno, Ability::Insomnia, {Move::Splash});
+    CHECK(fails(hypno, [](Battle&) {}));
+    CHECK(fails(plain, [](Battle& b) { b.sides[1].active.volatiles.uproar = 3; }));
+    CHECK(fails(plain, [](Battle& b) {
+      b.sides[1].active.volatiles.substitute = true;
+      b.sides[1].active.substitute_hp = 10;
+    }));
+    CHECK(fails(plain, [](Battle& b) { b.sides[1].conditions.safeguard = 5; }));
+    CHECK(fails(plain, [](Battle& b) { b.sides[1].get(1).status = Status::par(); }));
+  }
+  {
+    // Rest: full HP, 3 turns of self-inflicted sleep, burn replaced; it
+    // fails at full HP.
+    const helpers::Pokemon rester =
+        mon(Species::Snorlax, Ability::ThickFat, {Move::Rest, Move::SleepTalk, Move::BodySlam});
+    Battle b = started({rester}, {IDLE});
+    Pokemon& m = b.sides[0].get(1);
+    m.hp = 10;
+    m.status = Status::brn();
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(m.hp == m.stats.hp && m.status.self_inflicted() &&
+          m.status.sleep() == Status::REST_SLEEP);
+    Battle c = started({rester}, {IDLE});
+    update(c, Choice::move(1), Choice::move(1), null);
+    CHECK(!c.sides[0].get(1).status.any());
+  }
+  {
+    // Yawn: asleep at the end of the next turn; not under Sleep Clause.
+    Battle b = started({sporer}, {plain});
+    update(b, Choice::move(2), Choice::move(1), null);
+    CHECK(b.sides[1].active.volatiles.yawn == 1 && !b.sides[1].get(1).status.any());
+    update(b, Choice::move(3), Choice::move(1), null);
+    CHECK(b.sides[1].get(1).status.asleep());
+    Battle c = started({sporer}, {plain, plain});
+    c.sides[1].get(2).status = Status::slp(3);
+    update(c, Choice::move(2), Choice::move(1), null);
+    update(c, Choice::move(3), Choice::move(1), null);
+    CHECK(!c.sides[1].get(1).status.any());
+  }
+  {
+    // Sleep Talk: a forced pick among the callable slots (Rest and Body Slam,
+    // 1/2), no PP for the called move, Sleep Talk recorded as the last move.
+    const helpers::Pokemon talker =
+        mon(Species::Snorlax, Ability::ThickFat, {Move::SleepTalk, Move::BodySlam, Move::Rest});
+    Battle b = started({talker}, {plain});
+    b.sides[0].get(1).status = Status::slp(4);
+    Observed o{};
+    o.calc.overrides.p1.move_slot = 2;
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    o.calc.overrides.p1.hits[0].damage = 100;
+    o.calc.overrides.p1.secondary = Optional::False;
+    o.calc.overrides.turn.speed_tie = 1;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[1].get(1).hp < b.sides[1].get(1).stats.hp);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::SleepTalk, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::BodySlam, 3));
+    CHECK(b.sides[0].active.last_move == Move::SleepTalk);
+    CHECK(o.chance.actions.p1.move_slot == 2);
+    CHECK(b.sides[0].active.sleep_skipped == 1);
+    // A pick with no PP fails.
+    Battle c = started({talker}, {plain});
+    c.sides[0].get(1).status = Status::slp(4);
+    c.sides[0].active.moves[1].pp = 0;
+    Observed q{};
+    q.calc.overrides.p1.move_slot = 2;
+    update(c, Choice::move(1), Choice::move(1), q);
+    CHECK(c.sides[1].get(1).hp == c.sides[1].get(1).stats.hp);
+    // Not while awake.
+    Battle d = started({talker}, {plain});
+    update(d, Choice::move(1), Choice::move(1), null);
+    CHECK(d.sides[1].get(1).hp == d.sides[1].get(1).stats.hp);
+  }
+  {
+    // Snore only while asleep.
+    const helpers::Pokemon snorer = mon(Species::Snorlax, Ability::ThickFat, {Move::Snore});
+    Battle b = started({snorer}, {plain});
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+    Battle c = started({snorer}, {plain});
+    c.sides[0].get(1).status = Status::slp(4);
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    update(c, Choice::move(1), Choice::move(1), o);
+    CHECK(c.sides[1].get(1).hp < c.sides[1].get(1).stats.hp);
+  }
+  {
+    // Showdown's gen3 skippedTime: a Sleep Talk turn goes back on the sleep
+    // counter and off the public count on switching out.
+    const helpers::Pokemon talker =
+        mon(Species::Snorlax, Ability::ThickFat, {Move::SleepTalk, Move::Splash});
+    Battle b = started({talker, plain}, {IDLE});
+    b.sides[0].get(1).status = Status::slp(4);
+    Observed o{};
+    o.chance.durations.p1.sleep[0] = 1;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).status.sleep() == 3);
+    CHECK(o.chance.durations.p1.sleep[0] == 2);
+    Observed q{};
+    q.chance.durations = o.chance.durations;
+    update(b, Choice::swap(2), Choice::move(1), q);
+    CHECK(b.sides[0].get(2).status.sleep() == 4);
+    CHECK(q.chance.durations.p1.sleep[1] == 1);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -1165,6 +1312,7 @@ int main(int argc, char** argv) {
   check_move_abilities();
   check_absorbing();
   check_switch_ins();
+  check_sleep();
   check_accuracy();
   check_turn_cap();
 

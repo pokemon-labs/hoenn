@@ -275,6 +275,34 @@ constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
   return index;
 }
 
+// Sleep Talk's pick: uniform over the move slots in `mask` (Showdown's
+// sample; the decomp redraws Random() % 4 until it hits one, bsc:8266).
+// Returns the slot, 0-3; Actions holds it as 1-4.
+template <typename O>
+constexpr uint8_t sleep_talk(Battle& battle, Player p, uint8_t mask,
+                             O& options) {
+  assert(mask != 0 && mask < 16);
+  const uint8_t n = uint8_t((mask & 1) + (mask >> 1 & 1) + (mask >> 2 & 1) + (mask >> 3 & 1));
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).move_slot;
+  assert(forced <= 4 && (forced == 0 || (mask >> (forced - 1) & 1)));
+  uint8_t slot = uint8_t(forced - 1);
+  if (forced == 0) {
+    uint8_t k = uint8_t(battle.rng.range(n));
+    for (uint8_t i = 0; i < 4; i++) {
+      if ((mask >> i & 1) && k-- == 0) {
+        slot = i;
+        break;
+      }
+    }
+  }
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).move_slot, uint8_t(slot + 1));
+    observe(options, 1, n);
+  }
+  return slot;
+}
+
 // Effect Spore's status: Random() & 3 redrawn while 0, so 1 sleep, 2
 // poison, 3 paralysis (MOVE_EFFECT_BURN replaced, util:2776); Showdown
 // samples the same three.
@@ -870,6 +898,17 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options) {
     out.status = Status::none();
     if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
   }
+  // Showdown's gen3 skippedTime (README, field map): the Sleep Talk and
+  // Snore turns go back on the sleep counter, and off the public count.
+  if (const uint8_t k = side.active.sleep_skipped; k != 0 && out.status.asleep()) {
+    assert(out.status.sleep() + k <= Status::MAX_SLEEP);
+    out.status.bits = uint8_t(out.status.bits + k);
+    if constexpr (CHANCE<O>) {
+      uint8_t& count = options.chance.durations.get(player).sleep[0];
+      assert(count == 0 || count > k);
+      if (count != 0) count = uint8_t(count - k);
+    }
+  }
   ActivePokemon& f = battle.side(foe(player)).active;
   f.volatiles.infatuated = false;
   f.volatiles.wrapped = 0;
@@ -966,7 +1005,8 @@ inline constexpr Move UNAVAILABLE = Move::None;
 
 // MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
 enum class Secondary : uint8_t {
-  None, Poison, Burn, Freeze, Paralysis, Toxic, Confusion, Flinch, TriAttack,
+  None, Sleep, Poison, Burn, Freeze, Paralysis, Toxic, Confusion, Flinch,
+  TriAttack,
   // MOVE_EFFECT_*_MINUS_1 on the target, in Boosts order (atk-acc), then
   // MOVE_EFFECT_ATK_PLUS_1 and DEF_PLUS_1 with MOVE_EFFECT_AFFECTS_USER.
   AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
@@ -978,7 +1018,9 @@ enum class Secondary : uint8_t {
 // State; HandleAction_ActionFinished (util:661) clears the hit markers
 // between actions.
 struct MoveState {
-  Move move;         // gCurrentMove, which is also gChosenMove here
+  Move move;         // gCurrentMove
+  Move chosen;       // gChosenMove: the move itself, or Sleep Talk for the
+                     // move Sleep Talk calls
   uint8_t slot;      // gCurrMovePos, 0-3, or NO_SLOT
   uint8_t result;    // gMoveResultFlags (MoveResult)
   uint16_t hp_dealt; // gHpDealt: HP the target or its Substitute lost
@@ -995,6 +1037,10 @@ struct MoveState {
   // toxic, paralysis or burn this move's execution set (bsc:2503), for
   // moveend's Synchronize cases. None when not armed.
   Secondary synchronize;
+  // Called by Sleep Talk: the attack canceler already ran for Sleep Talk
+  // (its tracker stays at CANCELER_END, as Showdown's useMove skips
+  // BeforeMove), and the move uses no PP.
+  bool called;
 
   static constexpr uint8_t NO_SLOT = 4;
 };
@@ -1015,6 +1061,11 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   Volatiles& v = a.volatiles;
   // A faint ends the actions, so the attacker is never fainted here.
   assert(!mon.fainted());
+  // A move Sleep Talk calls: Sleep Talk's canceler already ran.
+  if (m.called) {
+    m.obeys = true;
+    return true;
+  }
 
   // CANCELER_FLAGS
   v.destiny_bond = false;
@@ -1044,11 +1095,17 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
                     rest ? Status::REST_SLEEP : Status::MAX_SLEEP, by,
                     options);
       }
+      // Showdown's gen3 skippedTime: Sleep Talk and Snore attempts since
+      // the last asleep turn that did nothing (README, field map).
       if (woke) {
         v.nightmare = false;
+        a.sleep_skipped = 0;
       } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
+        a.sleep_skipped = 0;
         m.unable = true;
         return false;
+      } else {
+        a.sleep_skipped++;
       }
     }
   }
@@ -1421,6 +1478,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::DefenseUpHit:
   case Effect::RapidSpin:
   case Effect::BrickBreak:
+  case Effect::Snore:
     return true;
   default:
     return false;
@@ -1453,7 +1511,8 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::ParalyzeHit:
   case Effect::Thunder: return Secondary::Paralysis;
   case Effect::ConfuseHit: return Secondary::Confusion;
-  case Effect::FlinchHit: return Secondary::Flinch;
+  case Effect::FlinchHit:
+  case Effect::Snore: return Secondary::Flinch;
   case Effect::TriAttack: return Secondary::TriAttack;
   case Effect::AttackDownHit: return Secondary::AtkDown;
   case Effect::DefenseDownHit: return Secondary::DefDown;
@@ -1465,6 +1524,27 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::DefenseUpHit: return Secondary::DefUp;
   default: return Secondary::None;
   }
+}
+
+// Whether an Uproar is going on. Showdown's uproar blocks every sleep
+// (onAnySetStatus, data/moves.ts:20253); the decomp exempts Soundproof
+// (UproarWakeUpCheck, bsc:6807, and SetMoveEffect, bsc:2273), which Gen 3 OU
+// bans anyway.
+constexpr bool uproar(const Battle& battle) {
+  return battle.sides[0].active.volatiles.uproar != 0 ||
+         battle.sides[1].active.volatiles.uproar != 0;
+}
+
+// Sleep Clause Mod (Smogon, always on: Showdown's sleepclausemod,
+// data/rulesets.ts:1379): a sleep from the foe fails while a Pokémon on
+// `target`'s side is alive and asleep from the foe. Rest's sleep (Status
+// EXT) doesn't count; it also isn't from the foe, so the clause never stops
+// it.
+constexpr bool sleep_clause(const Battle& battle, Player target) {
+  for (const Pokemon& p : battle.side(target).pokemon) {
+    if (!p.fainted() && p.status.asleep() && !p.status.self_inflicted()) return true;
+  }
+  return false;
 }
 
 // Whether a major status `s` can take hold on `target`'s active Pokémon:
@@ -1494,6 +1574,10 @@ constexpr bool can_status(const Battle& battle, Player target, Secondary s) {
   }
   case Secondary::Paralysis:
     return t.ability != Ability::Limber;
+  case Secondary::Sleep:
+    // SetMoveEffect's sleep case (bsc:2273): Uproar, Vital Spirit, Insomnia.
+    return t.ability != Ability::VitalSpirit && t.ability != Ability::Insomnia &&
+           !uproar(battle);
   default:
     assert(false && "not a major status");
     return false;
@@ -1501,21 +1585,30 @@ constexpr bool can_status(const Battle& battle, Player target, Secondary s) {
 }
 
 // Whether a move's major status `s` takes hold on p's foe: Safeguard, then
-// can_status.
+// can_status, then Sleep Clause for a sleep.
 constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
   return battle.side(foe(player)).conditions.safeguard == 0 &&
-         can_status(battle, foe(player), s);
+         can_status(battle, foe(player), s) &&
+         !(s == Secondary::Sleep && sleep_clause(battle, foe(player)));
 }
 
 // Sets a major status on `target`, as SetMoveEffect does once statusChanged
 // (bsc:2476): freezing also cancels its multi-turn move, and poison, toxic,
 // paralysis and burn arm Synchronize (bsc:2503). Changing the status
 // restarts the toxic counter (data.hpp, Status).
+template <typename O>
 constexpr void inflict(Battle& battle, Player target, Secondary s,
-                       MoveState& m) {
+                       MoveState& m, O& options) {
   Side& side = battle.side(target);
   Status& status = side.get(1).status;
   switch (s) {
+  case Secondary::Sleep:
+    // (Random() & 3) + 2 turns, hidden, so drawn without Chance; the public
+    // count starts at 1. Sleep cancels a multi-turn move (bsc:2296).
+    status = Status::slp(uint8_t(Status::MIN_SLEEP + battle.rng.range(4)));
+    side.active.cancel_multi_turn_moves();
+    if constexpr (CHANCE<O>) options.chance.durations.get(target).sleep[0] = 1;
+    break;
   case Secondary::Poison: status = Status::psn(); break;
   case Secondary::Toxic: status = Status::tox(); break;
   case Secondary::Burn: status = Status::brn(); break;
@@ -1527,7 +1620,7 @@ constexpr void inflict(Battle& battle, Player target, Secondary s,
   default: assert(false && "not a major status");
   }
   side.active.toxic = 0;
-  if (s != Secondary::Freeze) m.synchronize = s;
+  if (s != Secondary::Freeze && s != Secondary::Sleep) m.synchronize = s;
 }
 
 // MOVE_EFFECT_CONFUSION taking hold on `target` (bsc:2541): the counter is
@@ -1652,18 +1745,18 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
     constexpr Secondary TRI[3] = {Secondary::Burn, Secondary::Freeze,
                                   Secondary::Paralysis};
     const Secondary which = TRI[rolls::tri_attack(battle, player, options) - 1];
-    if (status_takes(battle, player, which)) inflict(battle, foe(player), which, m);
+    if (status_takes(battle, player, which)) inflict(battle, foe(player), which, m, options);
     break;
   }
   case Secondary::Toxic:
     if (status_takes(battle, player, s)) {
-      inflict(battle, foe(player), s, m);
+      inflict(battle, foe(player), s, m, options);
     } else {
       m.result |= MoveResult::DOESNT_AFFECT_FOE;
     }
     break;
   default:
-    inflict(battle, foe(player), s, m);
+    inflict(battle, foe(player), s, m, options);
   }
 }
 
@@ -1712,7 +1805,9 @@ constexpr bool absorbed(Battle& battle, Player player, MoveState& m) {
 // arms it again for the next case. The cartridge skips Safeguard here
 // (HITMARKER_STATUS_ABILITY_EFFECT); Showdown's Safeguard blocks it
 // (data/moves.ts:15598), and this follows Showdown.
-constexpr void synchronize(Battle& battle, Player holder, MoveState& m) {
+template <typename O>
+constexpr void synchronize(Battle& battle, Player holder, MoveState& m,
+                           O& options) {
   if (battle.side(holder).active.ability != Ability::Synchronize ||
       m.synchronize == Secondary::None) {
     return;
@@ -1722,7 +1817,7 @@ constexpr void synchronize(Battle& battle, Player holder, MoveState& m) {
   m.synchronize = Secondary::None;
   const Player other = foe(holder);
   if (battle.side(other).conditions.safeguard == 0 && can_status(battle, other, s)) {
-    inflict(battle, other, s, m);
+    inflict(battle, other, s, m, options);
   }
 }
 
@@ -1730,8 +1825,8 @@ constexpr void synchronize(Battle& battle, Player holder, MoveState& m) {
 // contact ability acting on the attacker (p). Only after the target's own
 // HP took damage from a move with an effect, so never on a self-targeting
 // move or a confusion self-hit. Statuses skip Safeguard on the cartridge;
-// Showdown's Safeguard blocks them, and this follows Showdown.
-// TODO(plan step 4): Effect Spore's sleep, with Sleep Clause.
+// Showdown's Safeguard blocks them, and this follows Showdown. Effect
+// Spore's sleep is subject to Sleep Clause, as Showdown's onSetStatus.
 template <typename O>
 constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
                                  O& options) {
@@ -1754,7 +1849,8 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
   Pokemon& user = side.get(1);
   if (user.fainted() || !(data.flags & Flag::MakesContact)) return;
   const auto takes = [&](Secondary s) {
-    return side.conditions.safeguard == 0 && can_status(battle, player, s);
+    return side.conditions.safeguard == 0 && can_status(battle, player, s) &&
+           !(s == Secondary::Sleep && sleep_clause(battle, player));
   };
   Secondary s = Secondary::None;
   switch (t.ability) {
@@ -1762,12 +1858,16 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
     passive_damage(battle, player, fraction(user, 16), options);
     return;
   case Ability::EffectSpore: {
-    if (!takes(Secondary::Poison) && !takes(Secondary::Paralysis)) return;
+    if (!takes(Secondary::Sleep) && !takes(Secondary::Poison) &&
+        !takes(Secondary::Paralysis)) {
+      return;
+    }
     if (!rolls::contact(battle, player, 0, 10, options)) return;
     const uint8_t which = rolls::spore(battle, player, options);
-    if (which == 1) return;
-    s = which == 2 ? Secondary::Poison : Secondary::Paralysis;
-    if (takes(s)) inflict(battle, player, s, m);
+    s = which == 1   ? Secondary::Sleep
+        : which == 2 ? Secondary::Poison
+                     : Secondary::Paralysis;
+    if (takes(s)) inflict(battle, player, s, m, options);
     return;
   }
   case Ability::PoisonPoint: s = Secondary::Poison; break;
@@ -1789,7 +1889,7 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
     return;
   }
   if (takes(s) && rolls::contact(battle, player, 0, 3, options)) {
-    inflict(battle, player, s, m);
+    inflict(battle, player, s, m, options);
   }
 }
 
@@ -1871,18 +1971,18 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // MOVEEND_SYNCHRONIZE_TARGET, ON_DAMAGE_ABILITIES, IMMUNITY_ABILITIES,
   // SYNCHRONIZE_ATTACKER. No self-targeting move arms Synchronize (Rest's
   // sleep doesn't), so its target case is the foe's.
-  if (!m.self) synchronize(battle, foe(player), m);
+  if (!m.self) synchronize(battle, foe(player), m, options);
   ability_on_damage(battle, player, m, options);
   ability_immunity(battle, options);
-  synchronize(battle, player, m);
+  synchronize(battle, player, m, options);
 
   // MOVEEND_CHOICE_MOVE. A Baton Pass that worked doesn't lock, and skips
   // the check that the locked move is still known.
   bool skip = false;
   if (m.obeys && holds(side, HoldEffect::ChoiceBand) &&
-      m.move != Move::Struggle && a.choice_move == Move::None) {
-    skip = m.move == Move::BatonPass && !(m.result & MoveResult::FAILED);
-    if (!skip) a.choice_move = m.move;
+      m.chosen != Move::Struggle && a.choice_move == Move::None) {
+    skip = m.chosen == Move::BatonPass && !(m.result & MoveResult::FAILED);
+    if (!skip) a.choice_move = m.chosen;
   }
   if (!skip) {
     bool known = false;
@@ -1914,10 +2014,12 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     if (s.active.substitute_hp == 0) s.active.volatiles.substitute = false;
   }
 
-  // MOVEEND_UPDATE_LAST_MOVES
-  if (m.attackstring) a.last_printed_move = m.move;
-  if (data.effect != Effect::BatonPass) {
-    a.last_move = m.obeys ? m.move : UNAVAILABLE;
+  // MOVEEND_UPDATE_LAST_MOVES: gChosenMove (Sleep Talk for its called move)
+  // for the printed and last moves and Mirror Move, gCurrentMove for the
+  // resulting and landed ones.
+  if (m.attackstring) a.last_printed_move = m.chosen;
+  if (get(m.chosen).effect != Effect::BatonPass) {
+    a.last_move = m.obeys ? m.chosen : UNAVAILABLE;
     a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
     if (m.obeys && !no_effect) {
       t.last_landed_move = m.move;
@@ -1928,9 +2030,9 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   }
 
   // MOVEEND_MIRROR_MOVE
-  if ((data.flags & Flag::MirrorMoveAffected) && m.obeys && !m.self &&
+  if ((get(m.chosen).flags & Flag::MirrorMoveAffected) && m.obeys && !m.self &&
       !target.fainted() && !no_effect) {
-    t.last_taken_move = m.move;
+    t.last_taken_move = m.chosen;
   }
 }
 
@@ -1948,6 +2050,15 @@ template <typename O>
 constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   const Effect effect = get(m.move).effect;
+  // BattleScript_EffectSnore (bs1:1257): only while asleep, which the
+  // canceler has just ticked (a Pokémon that woke can't Snore). Showdown's
+  // onTry agrees.
+  if (effect == Effect::Snore && !battle.side(player).get(1).status.asleep()) {
+    m.attackstring = true;
+    pp_reduce(battle, player, m);
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
   Pokemon& user = battle.side(player).get(1);
 
   // Explosion (bs1:374): attackstring and ppreduce come first, which
@@ -2133,13 +2244,15 @@ constexpr Secondary primary_status(Effect effect) {
   case Effect::Toxic: return Secondary::Toxic;
   case Effect::Paralyze: return Secondary::Paralysis;
   case Effect::WillOWisp: return Secondary::Burn;
+  case Effect::Sleep: return Secondary::Sleep;
   default: return Secondary::None;
   }
 }
 
 // The primary status moves: BattleScript_EffectPoison (bs1:986), Toxic
-// (bs1:686), Paralyze (bs1:1007; Thunder Wave, Stun Spore, Glare) and
-// Will-O-Wisp (bs1:2174). After the canceler, attackstring and ppreduce,
+// (bs1:686), Paralyze (bs1:1007; Thunder Wave, Stun Spore, Glare),
+// Will-O-Wisp (bs1:2174) and Sleep (bs1:284; Spore, Hypnosis, Sleep Powder,
+// Lovely Kiss, Sing, Grass Whistle). After the canceler, attackstring and ppreduce,
 // each script runs its checks in its own order, then accuracy, then
 // Safeguard, then seteffectprimary. The order only changes the result
 // flags, which moveend reads: the "already statused" and ability scripts
@@ -2196,6 +2309,16 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
       if (t.ability == Ability::WaterVeil) return NONE;
       if (status.any()) return MoveResult::FAILED;
       return 0;
+    case Secondary::Sleep:
+      // BattleScript_EffectSleep (bs1:284): jumpifcantmakeasleep is
+      // Uproar, Vital Spirit and Insomnia.
+      if (t.volatiles.substitute) return MoveResult::FAILED;
+      if (status.asleep()) return NONE;
+      if (!can_status(battle, foe(player), Secondary::Sleep) && !status.any()) {
+        return NONE;
+      }
+      if (status.any()) return MoveResult::FAILED;
+      return 0;
     default:
       assert(false && "not a primary status");
       return MoveResult::FAILED;
@@ -2214,19 +2337,170 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
   // accuracycheck's JumpIfMoveFailed: the absorbing abilities. Of the
   // status moves only Will-O-Wisp can be taken, by Flash Fire.
   if (absorbed(battle, player, m)) return moveend(battle, player, m, options);
-  if (foe_side.conditions.safeguard != 0) {
+  // Sleep Clause (Smogon) fails the move after the accuracy check, as
+  // Showdown's onSetStatus.
+  if (foe_side.conditions.safeguard != 0 ||
+      (s == Secondary::Sleep && sleep_clause(battle, foe(player)))) {
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  inflict(battle, foe(player), s, m);
+  inflict(battle, foe(player), s, m, options);
   moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectRest (bs1:735): it fails while asleep, under Uproar,
+// with Vital Spirit or Insomnia, and at full HP (Cmd_trysetrest); otherwise
+// 3 turns of self-inflicted sleep (Status::slf), any other status replaced,
+// and full HP. Showdown agrees (Rest's onTry and onHit; Sleep Clause skips
+// a sleep from the Pokémon itself).
+template <typename O>
+constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& side = battle.side(player);
+  Pokemon& mon = side.get(1);
+  const ActivePokemon& a = side.active;
+  if (mon.status.asleep() || uproar(battle) || a.ability == Ability::VitalSpirit ||
+      a.ability == Ability::Insomnia || mon.hp == mon.stats.hp) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  mon.status = Status::slf(Status::REST_SLEEP);
+  side.active.toxic = 0;
+  mon.hp = mon.stats.hp;
+  if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 1;
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectYawn (bs1:2451): it fails against Vital Spirit or
+// Insomnia, a Substitute, Safeguard, a semi-invulnerable target (accuracy
+// check without a roll, NO_ACC_CALC_CHECK_LOCK_ON; Showdown's accuracy is
+// true), a status, or a Yawn already pending (Cmd_setyawn). The cartridge
+// also fails it during an Uproar (jumpifcantmakeasleep); Showdown doesn't
+// (Yawn's onTryHit checks only the status and sleep immunity), and this
+// follows Showdown. ENDTURN_YAWN puts the target to sleep (battler_residuals).
+template <typename O>
+constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& foe_side = battle.side(foe(player));
+  ActivePokemon& t = foe_side.active;
+  if (t.ability == Ability::VitalSpirit || t.ability == Ability::Insomnia) {
+    return moveend(battle, player, m, options);
+  }
+  if (t.volatiles.substitute || foe_side.conditions.safeguard != 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (accuracy(battle, player, m) == 0) {
+    m.result |= MoveResult::MISSED | MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (foe_side.get(1).status.any() || t.volatiles.yawn != 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  t.volatiles.yawn = 2;
+  moveend(battle, player, m, options);
+}
+
+// Whether Sleep Talk can't call `move`, as Showdown's gen3 Sleep Talk: the
+// nosleeptalk and charge flags, which are the decomp's list
+// (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
+// IsTwoTurnsMove) except that Showdown's gen3 Bide drops its flags
+// (data/mods/gen3/moves.ts) and Showdown adds Mimic, Nature Power and
+// Sketch.
+constexpr bool sleep_talk_banned(Move move) {
+  if (move == Move::Bide) return false;
+  if (move == Move::Mimic || move == Move::NaturePower || move == Move::Sketch) {
+    return true;
+  }
+  return get(move).extra & Extra::NoSleepTalk;
+}
+
+template <typename O>
+constexpr void execute(Battle& battle, Player player, MoveState& m, O& options);
+
+// BattleScript_EffectSleepTalk (bs1:1311), as Showdown's gen3 Sleep Talk
+// (data/mods/gen3/moves.ts:557, with gen4's onTryHit): only while asleep;
+// it fails under a Choice Band lock or Encore (on the cartridge too, through
+// CheckMoveLimitations); it picks uniformly among the move slots Sleep Talk
+// may call, and fails if the pick has no PP. The cartridge instead leaves
+// out disabled, taunted, tormented and imprisoned moves and calls a move
+// with no PP (bsc:8241); this follows Showdown. The called move uses no PP
+// and skips the attack canceler (MoveState::called), and its moveend
+// records Sleep Talk as the chosen move.
+template <typename O>
+constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
+                          O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const ActivePokemon& a = battle.side(player).active;
+  uint8_t mask = 0;
+  for (uint8_t i = 0; i < 4; i++) {
+    const Move move = a.moves[i].id;
+    if (move != Move::None && !sleep_talk_banned(move)) mask |= uint8_t(1 << i);
+  }
+  if (!battle.side(player).get(1).status.asleep() || a.choice_move != Move::None ||
+      a.encore_timer != 0 || mask == 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const uint8_t slot = rolls::sleep_talk(battle, player, mask, options);
+  if (a.moves[slot].pp == 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  MoveState c{};
+  c.move = a.moves[slot].id;
+  c.chosen = Move::SleepTalk;
+  c.slot = slot;
+  c.no_pp = true;
+  c.called = true;
+  c.first = m.first;
+  assert(get(c.move).effect != Effect::SleepTalk);
+  execute(battle, player, c, options);
 }
 
 // Whether use_move runs the effect's script (tools/coverage counts these);
 // every other effect only uses PP for now.
 constexpr bool handled(Effect effect) {
   return plain_hit(effect) || effect == Effect::Confuse ||
-         primary_status(effect) != Secondary::None;
+         primary_status(effect) != Secondary::None || effect == Effect::Rest ||
+         effect == Effect::Yawn || effect == Effect::SleepTalk;
+}
+
+// The move's script, by effect: m.move set, m.chosen and the hit markers
+// filled in here.
+template <typename O>
+constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) {
+  assert(m.move != Move::None);
+  if (m.chosen == Move::None) m.chosen = m.move;
+  m.self = get(m.move).target == Target::User;
+  const Effect effect = get(m.move).effect;
+  m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut;
+  m.ignore_underground = effect == Effect::Earthquake;
+
+  if (plain_hit(effect)) return hit(battle, player, m, options);
+  if (effect == Effect::Confuse) return confuse_move(battle, player, m, options);
+  if (const Secondary s = primary_status(effect); s != Secondary::None) {
+    return status_move(battle, player, m, s, options);
+  }
+  if (effect == Effect::Rest) return rest(battle, player, m, options);
+  if (effect == Effect::Yawn) return yawn(battle, player, m, options);
+  if (effect == Effect::SleepTalk) return sleep_talk(battle, player, m, options);
+
+  // TODO(plan step 4): every other effect. Until then the move only uses
+  // its PP (decided): the attack canceler, attackstring and ppreduce, then
+  // moveend.
+  if (cancel(battle, player, m, options)) {
+    m.attackstring = true;
+    pp_reduce(battle, player, m);
+  }
+  moveend(battle, player, m, options);
 }
 
 // HandleAction_UseMove (util:78): which move and slot the action uses, then
@@ -2272,26 +2546,8 @@ constexpr void use_move(Battle& battle, Player player, bool first,
     m.move = a.moves[m.slot].id;
   }
   assert(m.move != Move::None);
-  m.self = get(m.move).target == Target::User;
   m.first = first;
-  const Effect effect = get(m.move).effect;
-  m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut;
-  m.ignore_underground = effect == Effect::Earthquake;
-
-  if (plain_hit(get(m.move).effect)) return hit(battle, player, m, options);
-  if (effect == Effect::Confuse) return confuse_move(battle, player, m, options);
-  if (const Secondary s = primary_status(effect); s != Secondary::None) {
-    return status_move(battle, player, m, s, options);
-  }
-
-  // TODO(plan step 4): every other effect. Until then the move only uses
-  // its PP (decided): the attack canceler, attackstring and ppreduce, then
-  // moveend.
-  if (cancel(battle, player, m, options)) {
-    m.attackstring = true;
-    pp_reduce(battle, player, m);
-  }
-  moveend(battle, player, m, options);
+  execute(battle, player, m, options);
 }
 
 // RunTurnActionsFunctions (main:4937) from action `from` (0, or after a
@@ -2496,8 +2752,7 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
 // residual KO ends it.
 //
 // TODO(plan step 4): ENDTURN_UPROAR and ENDTURN_THRASH
-// (they read WasUnableToUseMove, README decision 2); ENDTURN_YAWN (with
-// sleep and Sleep Clause).
+// (they read WasUnableToUseMove, README decision 2).
 template <typename O>
 constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
@@ -2656,6 +2911,17 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   if (v.lock_on != 0) v.lock_on--;
   if (a.charge_timer != 0 && --a.charge_timer == 0) v.charged_up = false;
   if (a.taunt != 0) a.taunt--;
+
+  // ENDTURN_YAWN (util:1752): the Pokémon falls asleep the turn after,
+  // unless it has a status, Vital Spirit or Insomnia, or an Uproar is on.
+  // Safeguard doesn't stop it, but Sleep Clause does (Showdown's yawn ends
+  // with trySetStatus from the user, which the clause checks).
+  if (v.yawn != 0 && --v.yawn == 0 && alive() &&
+      can_status(battle, player, Secondary::Sleep) &&
+      !sleep_clause(battle, player)) {
+    MoveState none{};
+    inflict(battle, player, Secondary::Sleep, none, options);
+  }
 
   // ENDTURN_ITEMS2 (util:1501): the cures again, for statuses the passes
   // above set.

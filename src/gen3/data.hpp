@@ -506,6 +506,11 @@ struct ActivePokemon {
   uint8_t recharge_timer;   // 0-2
   uint8_t mimicked;         // mimickedMoves: a 4-bit mask of move slots
   bool truant;              // truantCounter
+  // Showdown's gen3 skippedTime: move attempts spent asleep on Sleep Talk or
+  // Snore since the last that did nothing, 0-4. The cartridge writes the
+  // sleep counter back to the party only when the canceler stops the move
+  // or the Pokémon wakes (util:2259), so a switch-out gives these back.
+  uint8_t sleep_skipped;
 
   static constexpr uint8_t MAX_TOXIC = 15;
 
@@ -539,6 +544,7 @@ struct ActivePokemon {
       if (!detail::valid(m.id) || m.pp_ups > 3) return false;
     }
     return boosts.valid() && volatiles.valid() && toxic <= MAX_TOXIC &&
+           sleep_skipped <= Status::MAX_SLEEP - 1 &&
            disable_timer <= 5 && encore_timer <= 6 && encored_slot <= 3 &&
            stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
@@ -643,11 +649,11 @@ static_assert(sizeof(MoveSlot) == 4);
 static_assert(sizeof(Pokemon) == 42);
 static_assert(sizeof(Volatiles) == 35);
 static_assert(sizeof(Boosts) == 7);
-static_assert(sizeof(ActivePokemon) == 116);
+static_assert(sizeof(ActivePokemon) == 120);
 static_assert(sizeof(SideConditions) == 8);
-static_assert(sizeof(Side) == 392);
+static_assert(sizeof(Side) == 396);
 static_assert(sizeof(Field) == 3);
-static_assert(sizeof(Battle) == 808);
+static_assert(sizeof(Battle) == 816);
 
 static_assert(std::is_trivially_copyable_v<Battle>);
 static_assert(std::is_trivial_v<Battle> && std::is_standard_layout_v<Battle>);

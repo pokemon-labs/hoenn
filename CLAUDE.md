@@ -447,21 +447,26 @@ unchecked claims.
   - If the passer had locked on to the foe, the foe's lock resets to 2
     (main:3178–3186) *(verify against Showdown)*.
   - It doesn't cancel the foe's queued action: the request resumes at it.
-- **Sleep Talk** picks a random usable move other than itself (a
-  `move_slot` chance action); the ban list is `Extra::NoSleepTalk` plus
-  `CheckMoveLimitations` ignoring PP. The called move uses no PP. Fails if
-  nothing can be called. Only usable asleep; the sleep counter keeps ticking.
-  Encore shouldn't redirect the called move *(verify)*. Whether the called
-  move re-runs the attack canceler (a second sleep step) is unverified.
+- **Sleep Talk** (`sleep_talk`, tested), as Showdown's gen3: only asleep;
+  fails under a Choice Band lock or Encore (the cartridge agrees); picks
+  uniformly among the slots `sleep_talk_banned` allows (a `move_slot` chance
+  action) and fails if the pick has no PP. The cartridge also leaves out
+  disabled, taunted, tormented and imprisoned moves and calls 0-PP moves.
+  The called move uses no PP and doesn't re-run the canceler (the decomp's
+  tracker stays at its end; Showdown's useMove skips BeforeMove).
+  Sleep Talk and Snore turns go back on the counter at switch-out
+  (`sleep_skipped`, Showdown's gen3 `skippedTime`, a real cartridge quirk).
 - **Roar and Whirlwind.** Priority −6. The replacement is a random
   non-fainted bench Pokémon (a chance action, no request). Fails with no
   bench, against Suction Cups, against Ingrain. The dragged-in Pokémon takes
   Spikes and doesn't act. Protect and Substitute interaction *(verify)*.
 - **Sleep Clause and Freeze Clause** are Smogon rules, always on, so
-  compile-time constants with no field. A sleep move fails if the foe already
-  has a Pokémon put to sleep by this player; Rest (`Status::EXT`) doesn't
-  count; Yawn does *(verify)*. Freeze Clause likewise (every freeze in
-  singles comes from the foe).
+  compile-time constants with no field (Gen 3 OU has Sleep Clause Mod and
+  Freeze Clause Mod). A foe's sleep fails while a living Pokémon on the
+  target's side is asleep from the foe (`sleep_clause`); Rest
+  (`Status::EXT`) doesn't count. It stops sleep moves after the accuracy
+  check, Yawn's sleep and Effect Spore's sleep (verified in Showdown's
+  `sleepclausemod`, tested). Freeze Clause likewise.
 
 To add when they come up: Pursuit on a switching target, Choice Band
 locking, Focus Punch, Truant, Destiny Bond and Perish Song endgames,
@@ -565,7 +570,7 @@ feels like progress; every later mechanic inherits the frame.
   (`tools/generate.py`), hand-written natures and misc tables.
 - `common/`: `Player`, `Choice`, `Result`, the RNG, `Rational`, `Options`,
   the log plumbing.
-- `gen3/data.hpp`: the full `Battle` draft (808 B, unpacked) with `valid()`,
+- `gen3/data.hpp`: the full `Battle` draft (816 B, unpacked) with `valid()`,
   including the turn-0 rule; `calc_stats`, `hidden_power`, `max_pp`.
 - `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (101 B) and
   `Durations` (22 B).
@@ -672,11 +677,13 @@ adapted (see Interface).
   and Natural Cure; simultaneous switch-ins arrive in speed order. Fixed:
   two switch actions now count Quick Claw (gen3 Showdown's
   `getActionSpeed`); the old code and test said Showdown ignored it.
-- **Then** (needs a proposal): sleep (sleep moves, Rest, Yawn, Sleep Clause,
-  Effect Spore's sleep); Uproar, Thrash and Yawn residuals; then the status
-  moves by `tools/coverage`'s order (Roar, Calm Mind, Substitute, Protect,
-  Spikes...). Then the status moves by `tools/coverage`'s
-  order (Roar, Calm Mind, Rest, Substitute, Protect, Spikes...).
+- Done (2026-10-07, following Showdown): sleep. Sleep moves, Rest, Yawn,
+  Snore, Sleep Talk, Effect Spore's sleep, Sleep Clause, `sleep_skipped`
+  (`Battle` is now 816 B). `tools/coverage`: 69% of move slots.
+- **Then:** Uproar and Thrash (with the `WasUnableToUseMove` question,
+  README decision 2); then the status moves by `tools/coverage`'s order
+  (Roar, Calm Mind, Substitute, Protect, Spikes, Focus Punch, Dragon Dance,
+  Soft-Boiled, Recover, Baton Pass...).
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 
