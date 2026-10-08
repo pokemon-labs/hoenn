@@ -278,8 +278,10 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   and the probability after every update; a crash prints the game's seed,
   and `--replay SEED` plays that game alone. Run it by hand in debug for
   long soaks (`--games N --seed N`).
-- `check_chance`: the chance-key test (see Testing); `--games N
-  --samples N`, `--replay SEED`. Run it in release for long runs.
+- `check_chance`: the chance-key test and probability calibration (see
+  Testing); `--games N --samples N --replays N`, `--unmask NAME`,
+  `--replay SEED`. Run it in release for long runs.
+  `check_chance_unmasked` is the seed ablation and must fail.
 - `check_frame`: the turn frame (start, order, Quick Claw and speed-tie rolls
   with Chance and Calc, trapping, faint requests and resuming, the turn cap),
   a few step-3 scenarios (a forced plain hit and its probability, PP, an
@@ -313,9 +315,11 @@ tools/
   check_data.cpp      static_asserts on the generated tables
   check_teams.cpp     parses teams/adv/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
-  check_chance.cpp    (c1, c2, Actions) determines the result
+  check_chance.cpp    (c1, c2, Actions) determines the result; calibration
   check_frame.cpp     the turn frame and step 3, plus a self-play soak
   soak.cpp            long random self-play runs, replayable by seed
+  bench.cpp           updates/s, null log, Chance on (release)
+  libpkmn_bench.zig   the same for libpkmn's Gen I (+ _options.zig)
   coverage.cpp        which moves on the teams have a written mechanic
   damage_oracle.cjs   writes damage_cases.inc from Showdown
   protocol_survey.cjs Showdown's gen3 log messages (README, "Protocol")
@@ -408,11 +412,11 @@ unchecked claims.
     order, and kept in `Request` (the padding byte) so the end-of-turn order
     reuses it across a request (decided). Two holders share the one draw, so
     both proccing is a speed tie. Showdown agrees, and its 1/5 is used.
-  - End of turn re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`, util:1209):
-    an independent speed-tie draw, the same Quick Claw value, and the
-    chosen moves' priority (`ignoreChosenMoves` is FALSE). *(verify)* Which
-    move it reads after a mid-turn replacement: `moves[chosenMovePosition]`
-    of whoever is active.
+  - End of turn: the decomp re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`,
+    util:1209) with the chosen moves' priority and the turn's Quick Claw.
+    Showdown orders residuals by Speed alone, and the code follows it
+    (found by `check_showdown`, 2026-10-08): Speed, then an independent tie
+    draw.
   - `DoFieldEndTurnEffects`: screens, Mist, Safeguard, Wish (util:1173),
     weather and so on. `DoBattlerEndTurnEffects`, in speed order: Ingrain,
     Leftovers, Leech Seed, poison, burn, Nightmare, Curse, binding, Uproar,
@@ -443,8 +447,9 @@ unchecked claims.
   every handler (`sim/battle.ts:569`); the decomp's Leech Seed script has
   no `checkteamslost`, and the code follows Showdown there (tested in
   `check_frame`). Audit Explosion, Self-Destruct, Destiny Bond, recoil and
-  Perish Song the same way *(verify tie rules against Showdown)*. Open:
-  sand or hail KOing both last Pokémon at once may be a tie in Showdown.
+  Perish Song the same way *(verify tie rules against Showdown)*. Sand,
+  hail and Perish Song hurt both first, so both last fainting is a tie
+  (Showdown; README shortlist).
 - **Baton Pass** (`baton_pass`, `baton_pass_in`, tested in `check_frame`)
   has its own switch-in (main:3158–3217, bsc:4648; README decision 5).
   - Passes: stat stages; confusion (with its counter), Focus Energy,
@@ -486,7 +491,7 @@ unchecked claims.
   check, Yawn's sleep and Effect Spore's sleep (verified in Showdown's
   `sleepclausemod`, tested). Freeze Clause likewise.
 
-To add when they come up: Pursuit on a switching target, Choice Band
+To add when they come up: Choice Band
 locking, Focus Punch, Truant, Destiny Bond and Perish Song endgames,
 Self-Destruct and Explosion halving Defense, Struggle, running out of PP.
 
@@ -576,7 +581,25 @@ feels like progress; every later mechanic inherits the frame.
   battle under `mask_hidden` (no seed, hidden counters set to 1 if active),
   the `Durations`, the `Result` and the probability. It finds collisions
   only among branches the samples reach; mutating the damage-roll or the
-  sleep-end record is caught.
+  sleep-end record is caught. Since 2026-10-08:
+  - **Forced replays:** each key found is replayed with its `Actions`
+    forced through Calc, so a key the free samples saw once is still
+    compared. About 0.1% of keys stay uncompared: the hidden ends (sleep,
+    confusion, binding) aren't forceable, so their replays can land
+    elsewhere.
+  - **Probability calibration:** per pair, each key's free count fits its
+    probability (Chernoff, 1e-10), the keys' sum is at most 1, and held-out
+    draws landing on unfound keys fit 1 − sum. Over the run, held-out hits
+    are binned by key probability (powers of 2, plus "unseen") and each
+    bin's z must be under 6. The per-pair tests alone are too weak (they
+    missed rolls reported at 1/17); the run-wide bins catch it. Because
+    samples go through `randomize_hidden`, this also checks it against the
+    reported probabilities (consistency, not truth). Mutations caught:
+    crits reported at 1/4, rolls at 1/17, crit yes/no swapped.
+  - **Mask ablation** (`--unmask`): seed collides in every game, sleep in
+    19 of 50, Encore in 4 of 50, confusion in 30 of 30 mirror games of the
+    one Confuse Ray team. Binding, Uproar, Thrash and Disable can't be
+    ablated: nothing sets those counters yet (no move written).
 - **For now, testing is random battles in debug** (`soak`, decided
   2026-10-07): run many games under ASan/UBSan after each change.
 - **Matching Showdown** is the target. Once the mechanics and the log are
@@ -602,34 +625,83 @@ feels like progress; every later mechanic inherits the frame.
     `problematic`), and dumps the history on failure. Unlike libpkmn, it
     can't share Showdown's PRNG, so the comparison is "realizable", not
     equal.
-  - Open: how to find the branch of ours that matches a Showdown turn (we
-    can't share its PRNG, so we search our outcomes for one that matches):
-    1. **Infer and force.** Read the random events off Showdown's log
-       (crit, miss, the damage roll from the HP lost, a secondary, full
-       paralysis...), write them into a Calc `Actions`, run `update` once,
-       compare. Deterministic, one run, and a mismatch is a bug. Costs a
-       parser from every log line to the `Actions` field behind it, and
-       depends on our log, which isn't written.
-    2. **Search at random.** Rerun `update` from fresh seeds (and
-       `randomize_hidden`) until one matches, up to a cap. No inference
-       code. Rare branches exceed any sane cap (a crit and a min roll and
-       a 10% secondary is about 1 in 2,500), and a failure can't tell a bug
-       from bad luck.
-    Recommended (not decided): a hybrid. Infer and force the yes/no events
-    (hit, crit, secondaries, full paralysis, the duration ticks), and
-    enumerate the 16 damage rolls per hit instead of inferring them. Until
-    our log exists, compare state (HP, status, boosts, volatiles) instead
-    of log lines.
+  - Decided (2026-10-08):
+    - **Search at random** for our matching branch: rerun `update` from
+      fresh seeds (and `randomize_hidden`) until one matches, up to a cap.
+      No inference code. Known cost: rare branches (a crit, a min roll
+      and a 10% secondary is about 1 in 2,500) can exceed the cap, and a
+      failure can't tell a bug from bad luck. The fallback if that bites:
+      enumerate the 16 damage rolls inside the search, or infer the
+      yes/no events from Showdown's log (which needs Showdown's log, not
+      ours) and force them through Calc.
+    - **Compare log lines, so the test waits for our log** (opcodes and
+      the formatter); no interim state comparison.
+    - **Pin `showdown/` (0.11.11, `c046106`)**, the source our
+      mechanics notes cite, not `@pkmn/sim` (needs `npm install` and a
+      build there; `@pkmn/protocol` may still parse lines).
+    - **Offline trace files:** a Node script plays seeded Showdown games
+      on `teams/adv/` pairs with random choices and writes JSONL traces
+      (teams, seed, each side's choice set, the chosen pair, the log
+      chunk); a C++ `check_showdown` replays them under ASan. Showdown
+      picks the choices, so no lockstep is needed; failing traces become
+      fixtures.
   - Also open: the reverse
     direction (our outcomes realizable in Showdown) and comparing branch
-    frequencies with Chance's `probability`. Which `@pkmn/sim` version to
-    pin, and whether `check_damage` moves to it.
+    frequencies with Chance's `probability`. Whether `check_damage` moves
+    to `showdown/`.
 - **Differential runs against ADV-Simulator** from one C++ driver,
   comparing outcome distributions over the same team pairs.
 - **Soak runs** of millions of random self-play games under ASan/UBSan,
   checking invariants (HP in range, PP never negative, `choices()` non-empty
   while the battle isn't over, the turn cap).
-- **A benchmark** against ADV-Simulator's 19k iterations/s.
+- **A benchmark** against ADV-Simulator's 19k iterations/s. `tools/bench`
+  (release, null log, Chance on, Calc off; battles built before timing):
+  about 3.2M updates/s on `teams/adv/all.txt`. `tools/libpkmn_bench.zig`
+  is the same frame for libpkmn's Gen I (random teams; build command in its
+  header): about 9.0M/s. ADV-Simulator's update was about 1.4 µs, no LTO
+  (`../docs/adv-sim-vs-libpkmn.md`). None of these is like for like.
+
+**Is realizability enough for "good enough for search and RL"?** (asked
+2026-10-08; answer recorded, nothing decided). No, but it's the right core.
+It checks only that Showdown's outcome is in our support. Search, unlike RL,
+doesn't average bugs away: it steers into them and exploits them. Gaps, most
+important for search first:
+
+1. **Support, not probability.** A wrong rate (a 30% secondary instead of
+   10%, a skewed sleep length) passes. Search weights chance nodes by it.
+   Compare branch frequencies with `probability`, ours and Showdown's.
+2. **Damage hides in the 16 rolls.** An error of a few points usually still
+   matches some roll, at the wrong index, which moves KO thresholds.
+   `check_damage` covers only 74 fixed cases, not in-battle inputs.
+   *(unverified: no example produced)*
+3. **Random branch search** can't tell a rare branch from a bug. Fix for 2
+   and 3: the trace script records Showdown's public draws (roll, crit,
+   secondaries) by wrapping its PRNG, tagged by call site, and the checker
+   forces them through Calc. Hidden counters stay sampled. This would
+   revise the "search at random" decision.
+4. **One direction only.** Branches we have and Showdown doesn't (a move
+   that works where it should fail) are what search exploits. A statistical
+   version of the reverse test is cheaper than replaying into Showdown.
+5. **Random choices miss the states search steers to** (Perish traps, Baton
+   Pass chains, Substitute stalls, berry thresholds, endgames). Add traces
+   with one side driven by a cheap policy.
+6. **The log hides state** (PP, toxic counter, Protect's count, last-move
+   fields, Counter's damage, Truant). Keep the state guard alongside the
+   log comparison rather than replacing it; it found the Sleep Talk PP bug.
+7. **`randomize_hidden`'s distribution is untested.** Realizability passes
+   a resampler that's too loose. Over self-play, compare the true counter
+   given `Durations` with what `randomize_hidden` samples.
+
+Suggested order: 1, 3, 6, 7, 5, 4.
+
+Gap 1, our side: done in `check_chance` (2026-10-08, see the chance-key
+test above). Showdown's side: wrap `random`, `randomChance`, `sample` and `shuffle` to
+multiply a per-update probability. Caveat (the user's): Showdown's
+probability is per draw path, ours per `Actions` key, and many paths map to
+one observable outcome: a `shuffle` of tied speeds whose orders look alike,
+draws we skip because they can't matter, two rolls giving the same damage.
+So compare at the level of the observed outcome (the log chunk), by
+frequency over many seeds from one state, not path by path.
 
 ## Status (2026-10-08)
 
@@ -845,19 +917,27 @@ adapted (see Interface).
   charging Pokémon left a forced choice with no lock (now, as Showdown, the
   lock stays until the move is aborted). `soak` now reports the game seed
   on a release segfault.
-- **Gate reached. Resume here: the realizability test** against Showdown
-  (see Testing), not started. Decide with the user before building:
-  - how to find our matching branch (Testing: infer and force, search at
-    random, or the recommended hybrid);
-  - compare state or log lines (our log isn't written; state first is
-    recommended);
-  - which `@pkmn/sim` to pin (libpkmn's harness uses 0.9.31; `showdown/`
-    is 0.11.11; `check_damage` uses ADV-Simulator's 0.11.10);
-  - how Node and C++ talk (a C++ driver reading Showdown's states and
-    logs from a file or pipe, or a Node addon).
-  Start from libpkmn's `src/test/integration.ts` and `showdown.ts`
-  (`~/oak/cpp/extern/engine`). Ban Quick Claw (Showdown doesn't log it).
-  The shortlist of known differences is in the README, "Mechanics".
+- **Resume here (2026-10-08, uncommitted work on `main`).** Built the
+  realizability harness with a temporary state guard (decided with the
+  user; the log comparison replaces it later): `tools/showdown_traces.cjs`
+  (seeded Showdown 0.11.11 games over `teams/adv/all.txt`, teams through
+  the gen3ou validator, JSONL traces) and `tools/check_showdown.cpp` (+
+  `tools/json.hpp`; `--why`, `--game`, `--tries`; random branch search;
+  guard: HP, status, PP, items, boosts, main volatiles, Substitute HP, side
+  conditions, weather, residual timing). Not in ctest (traces aren't
+  committed). Run: `node tools/showdown_traces.cjs --games 1000 --seed 7 >
+  t.jsonl; build/release/check_showdown --quiet t.jsonl`. Now 958/1000
+  games match to the end. Fixed via it, all following Showdown (README
+  shortlist): Pressure on field-wide moves and Sleep Talk, Truant at the
+  battle start, Thief's Choice Band lock, Speed rounding, end-of-turn order
+  by Speed, sand/hail and Perish Song double KOs tie, Pursuit on a
+  switching target (`pursues()`, `MoveState::pursuing`). `calc_stats`
+  matches Showdown on every team. Open, next: (1) 24 PP mismatches, all
+  with Sleep Talk: we take one PP more than Showdown; (2) 11 turn-cap
+  games: Showdown ties a step later (at turn 1001's start); (3) a few
+  singletons (Protect failing then hit, a tox, Sleep Talk requests).
+  Then the log (opcodes, formatter; README "Protocol"), replacing the
+  guard with line comparison. Nothing from this session is committed.
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.

@@ -460,22 +460,27 @@ namespace detail {
 
 // The speed GetWhoStrikesFirst compares (main:4595), before Quick Claw:
 // Swift Swim and Chlorophyll in effective weather, the stage, Macho Brace,
-// paralysis. The badge boost is off in link battles.
+// paralysis. The badge boost is off in link battles. The decomp floors after
+// each factor (the weather doubling before the stage). This follows
+// Showdown's arithmetic instead, which changes the order: the stage first
+// (getStat, floored), then the modifiers chained in 4096ths and rounded
+// once, half down (ModifySpe: Swift Swim and Chlorophyll 2, Macho Brace 0.5,
+// gen4 mod's paralysis 0.25; Battle.modify). All are powers of two, so the
+// chain is exact. Paralysis differs most: 147 and 149 both give 37.
 constexpr uint32_t speed(const Battle& battle, Player player) {
   const Side& side = battle.side(player);
   const ActivePokemon& active = side.active;
   const Weather weather = effective_weather(battle);
-  const uint32_t weather_mul =
-      (active.ability == Ability::SwiftSwim && weather == Weather::Rain) ||
-              (active.ability == Ability::Chlorophyll &&
-               weather == Weather::Sun)
-          ? 2
-          : 1;
   const Fraction& stage = STAT_STAGE_RATIOS[unsigned(active.boosts.spe + 6) % 13];
-  uint32_t spe = active.stats.spe * weather_mul * stage.num / stage.den;
-  if (holds(side, HoldEffect::MachoBrace)) spe /= 2;
-  if (side.get(1).status.paralyzed()) spe /= 4;
-  return spe;
+  const uint32_t spe = active.stats.spe * stage.num / stage.den;
+  uint32_t modifier = 4096;
+  if ((active.ability == Ability::SwiftSwim && weather == Weather::Rain) ||
+      (active.ability == Ability::Chlorophyll && weather == Weather::Sun)) {
+    modifier *= 2;
+  }
+  if (holds(side, HoldEffect::MachoBrace)) modifier /= 2;
+  if (side.get(1).status.paralyzed()) modifier /= 4;
+  return (spe * modifier + 2047) / 4096;
 }
 
 // What GetWhoStrikesFirst reads, taken at one moment so a lazy draw later
@@ -936,7 +941,10 @@ template <typename O>
 constexpr void arrive(Battle& battle, Player player, O& options) {
   if (spikes(battle, player, options)) return;
   ActivePokemon& a = battle.side(player).active;
-  if (a.ability == Ability::Truant) a.truant = true; // bsc:5258
+  // bsc:5258. The battle start doesn't run switchineffects, so a Truant
+  // Pokémon that starts the battle acts on turn 1 (Showdown's gen3
+  // onSwitchIn agrees: truantTurn = turn !== 0).
+  if (a.ability == Ability::Truant) a.truant = battle.turn != 0;
   ability_switch_in(battle, player, options);
   item_switch_in(battle, player, options);
 }
@@ -1200,6 +1208,9 @@ struct MoveState {
   // (its tracker stays at CANCELER_END, as Showdown's useMove skips
   // BeforeMove), and the move uses no PP.
   bool called;
+  // Pursuit on a target switching out (pursue()): double power, and it
+  // can't miss.
+  bool pursuing;
   // Roar or Whirlwind worked: the target is dragged out after the action,
   // as Showdown's forceSwitchFlag (sim/battle.ts:2828).
   bool drag;
@@ -1535,6 +1546,9 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   // JumpIfMoveAffectedByProtect (bsc:1041), before anything else: the foe
   // protected itself and the move has the protect flag, so it misses.
   if (protected_from(m, player)) return 0;
+  // Pursuit on a switching target can't miss (Showdown's onModifyMove sets
+  // accuracy true; the decomp's script has no accuracycheck).
+  if (m.pursuing) return 100;
   // Lock-On and Mind Reader: the only possible locker in singles is the
   // attacker.
   if (f.volatiles.lock_on != 0) return 100;
@@ -1585,21 +1599,51 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   return double(floor) == acc ? floor : floor + 1;
 }
 
-// Cmd_ppreduce (bsc:1205): one PP, or two into Pressure, unless the move
-// uses none (Struggle). A move that isn't Mimic's or Transform's
-// (MOVE_IS_PERMANENT) writes the PP back to the party.
-constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m) {
-  if (m.no_pp || m.slot == MoveState::NO_SLOT) return;
+// Whether the foe's Pressure takes an extra PP from `move`, aimed at the
+// user if `self` (MoveState::self). Cmd_ppreduce (bsc:1205) takes none from
+// a move aimed at the user. Showdown takes it from any move whose targets
+// include the foe (getMoveTargets, sim/pokemon.ts:791; gen3 scripts.ts:173),
+// which adds the field-wide moves the decomp aims at the user (Showdown's
+// target 'all': Haze, Perish Song, Mud Sport, Water Sport and the weathers)
+// and Conversion 2 ('normal'). This follows Showdown.
+constexpr bool pressure_applies(const Battle& battle, Player player, Move move,
+                                bool self) {
+  if (battle.side(foe(player)).active.ability != Ability::Pressure) return false;
+  if (!self) return true;
+  switch (move) {
+  case Move::Haze:
+  case Move::PerishSong:
+  case Move::MudSport:
+  case Move::WaterSport:
+  case Move::RainDance:
+  case Move::SunnyDay:
+  case Move::Sandstorm:
+  case Move::Hail:
+  case Move::Conversion2: return true;
+  default: return false;
+  }
+}
+
+// Takes `n` PP (at most what's left) from the active Pokémon's move slot. A
+// move that isn't Mimic's or Transform's (MOVE_IS_PERMANENT) writes the PP
+// back to the party.
+constexpr void deduct_pp(Battle& battle, Player player, uint8_t slot, uint8_t n) {
   Side& side = battle.side(player);
   ActivePokemon& a = side.active;
-  MoveSlot& ms = a.moves[m.slot];
-  if (ms.pp == 0) return;
-  const uint8_t deduct =
-      1 + (!m.self && battle.side(foe(player)).active.ability == Ability::Pressure);
-  ms.pp = ms.pp > deduct ? uint8_t(ms.pp - deduct) : 0;
-  if (!a.volatiles.transformed && !(a.mimicked & (1 << m.slot))) {
-    side.get(1).moves[m.slot].pp = ms.pp;
+  MoveSlot& ms = a.moves[slot];
+  ms.pp = ms.pp > n ? uint8_t(ms.pp - n) : 0;
+  if (!a.volatiles.transformed && !(a.mimicked & (1 << slot))) {
+    side.get(1).moves[slot].pp = ms.pp;
   }
+}
+
+// Cmd_ppreduce (bsc:1205): one PP, or two into Pressure
+// (pressure_applies), unless the move uses none (Struggle).
+constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m) {
+  if (m.no_pp || m.slot == MoveState::NO_SLOT) return;
+  if (battle.side(player).active.moves[m.slot].pp == 0) return;
+  deduct_pp(battle, player, m.slot,
+            uint8_t(1 + pressure_applies(battle, player, m.move, m.self)));
 }
 
 // Cmd_datahpupdate (bsc:1844) on p's target, for a move's damage: a
@@ -2252,6 +2296,13 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   ability_immunity(battle, options);
   synchronize(battle, player, m, options);
 
+  // MOVEEND_CHANGED_ITEMS (Thief and Covet; Trick is TODO(plan step 4)),
+  // which the decomp runs after MOVEEND_CHOICE_MOVE, so a Choice Band taken
+  // with Thief doesn't lock its new holder. Showdown's lock comes after the
+  // move (gen4 items.ts onAfterMove) and locks it into Thief; this follows
+  // Showdown.
+  if (m.stolen != Item::None) side.get(1).item = m.stolen;
+
   // MOVEEND_CHOICE_MOVE. A Baton Pass that worked doesn't lock, and skips
   // the check that the locked move is still known.
   bool skip = false;
@@ -2265,9 +2316,6 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
     if (!known) a.choice_move = Move::None;
   }
-
-  // MOVEEND_CHANGED_ITEMS (Thief and Covet; Trick is TODO(plan step 4)).
-  if (m.stolen != Item::None) side.get(1).item = m.stolen;
 
   // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends the
   // attacker's semi-invulnerable turn.
@@ -2465,6 +2513,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   Pokemon& target = foe_side.get(1);
   const MoveData& data = get(m.move);
   Hit h = Hit::of(m.move);
+  // Pursuit on a switching target: Showdown doubles the base power
+  // (basePowerCallback); the decomp doubles the final damage
+  // (dmgMultiplier, bs1:3091). This follows Showdown's arithmetic.
+  if (m.pursuing) h.power = uint16_t(h.power * 2);
   // hiddenpowercalc (bsc:8889): the type is in the move ID, the power on the
   // Pokémon.
   if (data.effect == Effect::HiddenPower) {
@@ -2611,8 +2663,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // empty-handed user takes the target's item, unless the target's Sticky
   // Hold keeps it (also when fainted: Showdown's gen4 onTakeItem runs before
   // the faint is processed). The target's Choice Band lock ends (bsc:2799);
-  // the user gets the item at MOVEEND_CHANGED_ITEMS, after its own Choice
-  // Band check, so it isn't locked into Thief. A Knocked Off item can't be
+  // the user gets the item at MOVEEND_CHANGED_ITEMS (see moveend for its
+  // Choice Band lock). A Knocked Off item can't be
   // taken, nor can a user whose item was knocked off take one (Showdown's
   // takeItem, gen <= 4). Showdown's gen3 doesn't keep the decomp's Enigma
   // Berry and Mail out, and this follows it. Log: EndItem [silent] and Item
@@ -3550,6 +3602,15 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
+  // Showdown charges Sleep Talk Pressure's PP for the move it calls
+  // (callerMoveForPressure, gen3 scripts.ts:174); the cartridge doesn't.
+  const Move called = a.moves[slot].id;
+  const bool self = get(called).target == Target::User ||
+                    (called == Move::Curse && !has_type(a, Type::Ghost));
+  if (pressure_applies(battle, player, called, self) &&
+      m.slot != MoveState::NO_SLOT) {
+    deduct_pp(battle, player, m.slot, 1);
+  }
   MoveState c{};
   c.move = a.moves[slot].id;
   c.chosen = Move::SleepTalk;
@@ -3707,9 +3768,8 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
 // the user. It fails only if nothing was missed, blocked or started. The
 // decomp's Cmd_trysetperishsong (bsc:8508) skips the user's Soundproof too,
 // ignores semi-invulnerability, and fails when every Pokémon is Soundproof
-// or counting. Pressure takes no extra PP here (Target::User); the decomp
-// takes one (PressurePPLoseOnUsingPerishSong), Showdown's is unverified
-// *(verify)*. Log: FieldActivate Perish
+// or counting. Pressure takes an extra PP (pressure_applies; the decomp's
+// PressurePPLoseOnUsingPerishSong agrees). Log: FieldActivate Perish
 // Song, Immune for Soundproof, Miss, or Fail.
 template <typename O>
 constexpr void perish_song(Battle& battle, Player player, MoveState& m,
@@ -4106,7 +4166,7 @@ enum class After : uint8_t {
 
 template <typename O>
 constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
-                        O& options) {
+                        O& options, bool pursuing = false) {
   const Request& r = battle.request;
   const uint8_t i = index(player);
   ActivePokemon& a = battle.side(player).active;
@@ -4145,9 +4205,25 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   assert(m.move != Move::None);
   m.first = first;
   m.turn = &turn;
+  m.pursuing = pursuing;
   execute(battle, player, m, options);
   assert(!(m.drag && m.pass));
   return m.drag ? After::Drag : m.pass ? After::Pass : After::None;
+}
+
+// Whether `player`, who acts after the foe's switch, uses Pursuit on the
+// switching Pokémon first: it chose Pursuit (Encore and Choice Band applied
+// at selection) and isn't fainted, asleep, frozen or loafing (Truant).
+// Showdown's gen3 condition (data/mods/gen3/moves.ts:486) and the decomp's
+// Cmd_jumpifnopursuitswitchdmg (bsc:8723) agree on these.
+constexpr bool pursues(const Battle& battle, Player player) {
+  const Request& r = battle.request;
+  const uint8_t i = index(player);
+  const Side& side = battle.side(player);
+  const Pokemon& mon = side.get(1);
+  return r.choice[i].type() == Choice::Move && r.move[i] == Move::Pursuit &&
+         !mon.fainted() && !mon.status.asleep() && !mon.status.frozen() &&
+         !(side.active.ability == Ability::Truant && side.active.truant);
 }
 
 // RunTurnActionsFunctions (main:4937) from action `from` (0, or after a
@@ -4162,14 +4238,31 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
 // A Baton Pass that worked asks its side for the recipient, after the faint
 // check (Showdown's switch requests, sim/battle.ts:2844), and the actions
 // resume at the next one (update's BatonPass case).
+//
+// Pursuit on a switching target (BattleScript_ActionSwitch, bs1:3088; as
+// Showdown's gen3 onFoeBeforeSwitchOut): before a switch action, a foe that
+// pursues() uses Pursuit on the Pokémon leaving, and its own action is used
+// up. It goes through the whole move, as Showdown's useMove: the attack
+// canceler (paralysis, confusion, infatuation can stop it; the decomp's
+// script skips it), double base power (pursuing), the full moveend (a
+// Choice Band locks it). If it KOs the switching Pokémon, the chosen switch
+// still happens, in both (Showdown requeues it in gen 2-4,
+// sim/battle.ts:2772). Not on Baton Pass, Roar or a faint replacement.
+// Log: Activate Pursuit, then the move with [from] Pursuit.
 template <typename O>
 constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
   Turn turn{};
+  bool pursued = false;
   for (uint8_t i = from; i < Request::END_OF_ACTIONS; i++) {
     const Player p = i == 0 ? battle.request.first : foe(battle.request.first);
     const Choice c = battle.request.choice[index(p)];
     After after = After::None;
+    if (pursued) continue; // the pursuer's action was its Pursuit
     if (c.type() == Choice::Switch) {
+      if (i == 0 && pursues(battle, foe(p))) {
+        use_move(battle, foe(p), false, turn, options, true);
+        pursued = true;
+      }
       switch_to(battle, p, c.data(), options);
     } else {
       after = use_move(battle, p, i == 0, turn, options);
@@ -4197,7 +4290,10 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
 // that leaves a side with nothing, as Showdown (fieldEvent checks after
 // every handler, sim/battle.ts:569) and the decomp's checkteamslost after
 // each damage script; the decomp's Leech Seed script has none (bs1:3283),
-// and this follows Showdown there too.
+// and this follows Showdown there too. Two exceptions, as Showdown: sand
+// and hail hurt both Pokémon first (one field handler), and both Perish
+// Song counts run first (a duration's end skips the faint check); so both
+// last Pokémon fainting there is a tie.
 //
 // Showdown runs the per-Pokémon residuals in the same order: they share
 // onResidualOrder 10 and comparePriority sorts by speed before subOrder
@@ -4337,7 +4433,11 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
   // SandStormHailEnds), as in Showdown (fieldEvent ends the effect and moves
   // on, sim/battle.ts:519). Otherwise they hurt each Pokémon in the residual
   // order if the weather has effect (Cmd_weatherdamage, bsc:7602: not under
-  // Cloud Nine or Air Lock); the timer runs either way.
+  // Cloud Nine or Air Lock); the timer runs either way. The decomp's loop
+  // stops once a side is out (bs1:3219), so the faster of two last Pokémon
+  // dies first and loses. Showdown's weather is one field handler that hurts
+  // both before its faint queue and checkWin run (sim/battle.ts:2539, 2610),
+  // so both last Pokémon fainting is a tie; this follows Showdown.
   Field& field = battle.field;
   if (field.weather == Weather::None) return std::nullopt;
   if (!field.permanent && --field.weather_turns == 0) {
@@ -4361,9 +4461,8 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
              : has_type(a, Type::Ice));
     if (immune) continue;
     passive_damage(battle, p, fraction(side.get(1), 16), options);
-    if (Flow over = outcome(battle)) return over;
   }
-  return std::nullopt;
+  return outcome(battle);
 }
 
 // DoBattlerEndTurnEffects (util:1460) for p's active Pokémon: every case for
@@ -4554,22 +4653,23 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
 // per-Pokémon residuals and in their order, so its faints are replaced with
 // theirs. The decomp's HandleWishPerishSongOnTurnEnd (util:1825) runs it
 // after the residual faints are replaced, with a request of its own. The
-// count shows 3, 2, 1; at 0 the Pokémon faints, and the battle can end
-// there. Showdown runs Speed Boost, Truant's toggle and White Herb after it
+// count shows 3, 2, 1; at 0 the Pokémon faints. Both counts run before the
+// battle can end: Showdown's fieldEvent skips faintMessages after a
+// handler whose duration ends (sim/battle.ts:519), and the count's faint is
+// its onEnd (data/moves.ts:13263), so two last Pokémon at 0 tie. Showdown runs Speed Boost, Truant's toggle and White Herb after it
 // (order 27-29); that changes only the log. Log: Start perishN, or the
 // faint.
 template <typename O>
-constexpr Flow perish_count(Battle& battle, Player player, O& options) {
+constexpr void perish_count(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   Pokemon& mon = battle.side(player).get(1);
-  if (!a.volatiles.perish_song || mon.fainted()) return std::nullopt;
+  if (!a.volatiles.perish_song || mon.fainted()) return;
   if (a.perish_song_timer != 0) {
     a.perish_song_timer--;
-    return std::nullopt;
+    return;
   }
   a.volatiles.perish_song = false;
   passive_damage(battle, player, mon.hp, options);
-  return outcome(battle);
 }
 
 // HandleEndTurn_ContinueBattle (main:3932), then BattleTurnPassed's residuals
@@ -4583,22 +4683,22 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     // inflict()). TODO(plan step 4): check Showdown's lockedmove for
     // Thrash and Uproar when they are written.
   }
-  // ENDTURN_ORDER (util:1209): GetWhoStrikesFirst with the chosen moves'
-  // priority and the turn's Quick Claw draw, and its own tie draw, taken
-  // only when the order can matter.
-  const Request& r = battle.request;
+  // ENDTURN_ORDER (util:1209) runs GetWhoStrikesFirst with the chosen
+  // moves' priority and the turn's Quick Claw draw. Showdown sorts its
+  // residual handlers by Speed alone (the handlers have no move priority),
+  // and this follows it: Speed, then its own tie draw, taken only when the
+  // order can matter.
   const Player first =
       residual_order_matters(battle)
-          ? detail::first(battle, speeds(battle, r.move[0], r.move[1], true),
+          ? detail::first(battle, speeds(battle, Move::None, Move::None, false),
                           true, options)
           : Player::P1;
   if (Flow over = field_residuals(battle, first, options)) return over;
   for (const Player p : {first, foe(first)}) {
     if (Flow over = battler_residuals(battle, p, options)) return over;
   }
-  for (const Player p : {first, foe(first)}) {
-    if (Flow over = perish_count(battle, p, options)) return over;
-  }
+  for (const Player p : {first, foe(first)}) perish_count(battle, p, options);
+  if (Flow over = outcome(battle)) return over;
   return faints(battle, Phase::FaintAfterResiduals);
 }
 

@@ -212,6 +212,14 @@ is the same and only the messages differ.
 | Nightmare | no Protect check | Protect blocks it |
 | Leech Seed, Taunt, Encore vs Protect/evasion | fail before the accuracy draw | draw first, so a miss is logged (log only) |
 | Quick Claw activation | — | not logged by Showdown's gen3 (log only) |
+| Pressure on field-wide moves | none (`MOVE_TARGET_USER`): weathers, Haze, Perish Song... | an extra PP (target `'all'` includes the foe); Conversion 2 too |
+| Sleep Talk into Pressure | no extra PP | the called move's Pressure PP comes off Sleep Talk |
+| Thief taking a Choice Band | not locked (item arrives after `MOVEEND_CHOICE_MOVE`) | locked into Thief |
+| Speed | floors per factor; weather ×2 before the stage | stage, then modifiers chained and rounded once (paralysis 147 and 149 both 37) |
+| End-of-turn order | `GetWhoStrikesFirst`: move priority, Quick Claw | Speed alone |
+| Sand or hail KOs both last Pokémon | faster faints first and loses | both hit, then a tie |
+| Perish Song KOs both last Pokémon | — | both counts, then a tie |
+| Pursuit on a switching target | final damage ×2; no attack canceler; partial moveend | base power ×2; canceler (paralysis...) and full moveend |
 
 Not yet compared with Showdown: everything not on `teams/adv/` (Uproar,
 Thrash, Bide, Future Sight, Transform...).
@@ -376,16 +384,33 @@ bs1:3394), and the frame raises another request in the same phase.
 ## Protocol
 
 The plan for the binary log (`common/protocol.hpp`); nothing is written yet.
-It comes from a survey of Showdown 0.11.10 (ADV-Simulator's pinned copy):
+It comes from a survey of Showdown 0.11.10 (ADV-Simulator's pinned copy),
+redone on `showdown/` 0.11.11 (see below):
 the `add(...)` calls of every gen3 move, ability, item, condition, the gen3
 scripts and the sim core, plus 3,000 random gen3 OU games over `teams/adv/`
 and 4,000 `gen3randombattle` games, collecting every message shape
 (`tools/protocol_survey.cjs`). Random
 play reaches what's common, not everything; Lock-On, Uproar, Thrash, Bide,
-Future Sight, Hail and Disable come from the static scan only. Redo the
-survey on the `@pkmn/sim` version the realizability test pins (CLAUDE.md,
-Testing): versions already differ (master's gen4 Natural Cure adds
-`[silent]`, `data/mods/gen4/abilities.ts:295`; 0.11.10's doesn't).
+Future Sight, Hail and Disable come from the static scan only.
+
+Redone (2026-10-08) on `showdown/` (0.11.11, `c046106`), which the
+realizability test pins (CLAUDE.md, Testing): the static scan, and 3,000
+gen3 OU games over `teams/adv/` on each version with the same seed. The
+table below follows 0.11.11, which differs from 0.11.10 in:
+
+- Trace prints the old ability: `-ability|P|NEW|Trace|[from] ability:
+  Trace|[of] P` (`sim/pokemon.ts` `setAbility`).
+- Natural Cure's `-curestatus` adds `[silent]` (gen4 mod).
+- Recoil's `-damage` has no `[of]`.
+- Hyper Cutter's `-fail|P|unboost` names the stat by ID (`atk`).
+- `move`'s `[from]` has a space: `[from] Sleep Talk`, `[from] lockedmove`,
+  `[from] Pursuit`.
+- `move: Light Screen` in `-sidestart` and `-sideend` (Reflect stays
+  `Reflect`); `Mud Sport` in `-start`; `Disable` in `-end`.
+- Beat Up's `-activate` is `move: Beat Up|[of] NAME`.
+
+Random play on 0.11.11 also reached `cant|P|move: Imprison|MOVE` and
+`-activate|P|ability: Immunity`, both already in the table.
 
 Decided (2026-10-07):
 
@@ -402,7 +427,16 @@ Decided (2026-10-07):
 - **HP is exact** (hp, max HP, status). The formatter writes both lines of
   the `|split|` triplet, including HP Percentage Mod's public percentage.
 - **The formatter needs the nicknames**, which `Battle` doesn't hold: Wish's
-  `[wisher]` and Beat Up print them.
+  `[wisher]` and Beat Up print them. They're a separate formatter input,
+  built from the `helpers::Pokemon` teams (2026-10-08), so `Battle` stays
+  free of strings.
+- **The buffer can't fill** (2026-10-08): it is sized for the most one
+  `update` can write, and debug asserts the bound; release checks nothing,
+  as "don't hold it wrong". So `update` never returns `Result::Error`. The
+  bound is derived once the opcodes are in (a soak measures the largest
+  update meanwhile).
+- **`-nothing`, `-notarget` and `-anim` get opcodes** (2026-10-08), after
+  libpkmn's values, so the log mirrors Showdown line for line.
 - **Dropped, as libpkmn's `FILTER`:** `t:`, `gametype`, `player`,
   `teamsize`, `gen`, `tier`, `rule`, `start`, `upkeep`, `message`,
   `-message`, `-hint`, `bigerror`, `debug`. Not needed in gen3 singles: the
@@ -421,35 +455,31 @@ The inventory (reasons in *italics* are new over libpkmn's gen1 and gen2):
 | `Switch`, `Drag` | species, level, gender, hp, max HP, status; *`[from] Baton Pass`* |
 | `Cant` | slp, frz, par, flinch, recharge, Attract, *Truant*, *Focus Punch*, *Taunt* + move, Disable + move, *Imprison* + move, nopp + move, *Damp* + move + of |
 | `Faint`, `Turn`, `Win`, `Tie` | as libpkmn |
-| `Damage` | plain, silent, psn, brn, confusion, Leech Seed + of, Recoil + of, Spikes, Sandstorm, *Hail*, Curse, Nightmare, partiallytrapped + move, *ability* + of (Rough Skin, Liquid Ooze) |
+| `Damage` | plain, silent, psn, brn, confusion, Leech Seed + of, Recoil, Spikes, Sandstorm, *Hail*, Curse, Nightmare, partiallytrapped + move, *ability* + of (Rough Skin, Liquid Ooze) |
 | `Heal` | plain, silent (Rest), drain + of, item (Leftovers, Sitrus...), *ability* + of (Volt Absorb, Water Absorb, Rain Dish), *Wish* + wisher, *Ingrain* |
 | `SetHP` | Pain Split, plain and silent |
 | `Status` | plain; *`[from] move`* on every sleep (Rest, Spore...); *`[from] ability`* + of (Synchronize, Static, Poison Point, Flame Body, Effect Spore) |
-| `CureStatus` | msg, silent, *Natural Cure*, *a thawing move* (Sacred Fire) |
+| `CureStatus` | msg, silent, *Natural Cure* (silent), *a thawing move* (Sacred Fire) |
 | `CureTeam` | Aromatherapy |
 | `Boost` | signed amount, plain or *item* (Salac, Liechi, Petaya...) |
 | `SetBoost`, `CopyBoost`, `ClearAllBoost`, `ClearNegativeBoost` | Belly Drum, Psych Up, Haze, White Herb (silent) |
 | `Fail` | plain, status, heal, Substitute (+ weak), *unboost [+ stat] from an ability* + of (Clear Body, Hyper Cutter, White Smoke, Keen Eye), *Uproar slp*, *Rest from Insomnia or Vital Spirit* |
 | `Miss`, `HitCount`, `Prepare`, `MustRecharge`, `OHKO`, `Crit`, `SuperEffective`, `Resisted` | as libpkmn (Bide's `Miss` has no target) |
 | `Immune` | plain, ohko, *`[from] ability`* (Levitate, Wonder Guard, the absorbers, the status immunities, Soundproof, Flash Fire, Sturdy, Oblivious) |
-| `Activate` | Protect, Substitute damage, confusion, trapped, Focus Band, Destiny Bond, Endure, Heal Bell, Mimic + move, Pursuit, Spite + move + n, Magnitude + n, Bide, Mist, Safeguard, Lock-On / Mind Reader + of, Attract + of, Trick + of, binding + of, Ingrain, Snatch + of, Grudge + move, Leppa + move, Skill Swap, Beat Up + name, *ability activations* (Shed Skin, Suction Cups, Sticky Hold, the status cures) |
+| `Activate` | Protect, Substitute damage, confusion, trapped, Focus Band, Destiny Bond, Endure, Heal Bell, Mimic + move, Pursuit, Spite + move + n, Magnitude + n, Bide, Mist, Safeguard, Lock-On / Mind Reader + of, Attract + of, Trick + of, binding + of, Ingrain, Snatch + of, Grudge + move, Leppa + move, Skill Swap, Beat Up + of name, *ability activations* (Shed Skin, Suction Cups, Sticky Hold, the status cures) |
 | `FieldActivate` | Perish Song, Pay Day |
 | `Start` | confusion (+ fatigue), Substitute, Leech Seed, Curse + of, Nightmare, Encore, Disable + move, Taunt, Torment, Yawn + of, Attract (+ Cute Charm + of), Foresight, Imprison, Ingrain, Mud Sport, Water Sport, Charge, Uproar (+ upkeep), Bide, *Flash Fire*, *typechange* + type (Color Change, Conversion, Conversion 2, Camouflage), *stockpile1-3*, Future Sight, Doom Desire, perish0-3 (+ silent) |
 | `End` | the matching ends, many silent; Leech Seed from Rapid Spin + of; Attract from Oblivious or Mental Herb; partiallytrapped + move; Future Sight and Doom Desire on the target |
 | `SingleMove`, `SingleTurn` | Destiny Bond, Grudge, Rage; Protect, Endure, Focus Punch, Snatch |
 | `SideStart`, `SideEnd` | Reflect, Light Screen, Spikes, Safeguard (+ persistent), Mist; Spikes from Rapid Spin + of |
 | `Weather` | type, none, upkeep, *`[from] ability`* + of (Sand Stream, Drizzle, Drought) |
-| *`Ability`* | Intimidate and Speed Boost (boost), *Trace* + of, *Pressure* (silent, split) |
+| *`Ability`* | Intimidate and Speed Boost (boost), *Trace* + old ability + of, *Pressure* (silent, split) |
 | `Item`, `EndItem` | eat, Knock Off + of, Thief / Covet + of, Trick (silent), plain (White Herb, Mental Herb) |
 | *`FormeChange`*, `Transform` | Castform's Forecast; Transform |
 
 Open:
 
-- `-nothing` (Splash), `-notarget` and `-anim` (Solar Beam in sun) have no
-  libpkmn opcode: add opcodes, or drop them in the comparison's filter.
-- The buffer size per update (libpkmn derives a maximum), once the
-  mechanics are written.
-- The `@pkmn/sim` version the formatter mirrors.
+- The opcode values for `-nothing`, `-notarget` and `-anim`.
 
 ## Teams
 

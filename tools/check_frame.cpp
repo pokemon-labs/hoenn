@@ -1598,7 +1598,8 @@ void check_knock_off() {
 }
 
 // Thief: an empty-handed user takes the item after a hit on the target
-// itself, ending the target's Choice Band lock without locking the user.
+// itself, ending the target's Choice Band lock; a Choice Band taken locks
+// the user into Thief, as Showdown.
 // Sticky Hold, a Substitute or the user's own item stop it.
 void check_thief() {
   helpers::Pokemon user = JOLTEON;
@@ -1619,7 +1620,7 @@ void check_thief() {
       b.sides[1].active.choice_move = Move::Splash;
     });
     CHECK(b.sides[0].get(1).item == Item::ChoiceBand);
-    CHECK(b.sides[0].active.choice_move == Move::None);
+    CHECK(b.sides[0].active.choice_move == Move::Thief);
     CHECK(b.sides[1].get(1).item == Item::None);
     CHECK(b.sides[1].active.choice_move == Move::None);
   }
@@ -1644,7 +1645,7 @@ void check_thief() {
 }
 
 // Perish Song: both count 3, 2, 1, then faint at the fourth end of turn;
-// both last Pokémon perishing ends it on the faster one's side first.
+// both last Pokémon perishing is a tie, as Showdown.
 void check_perish_song() {
   helpers::Pokemon singer = JOLTEON;
   singer.moves[0] = Move::PerishSong;
@@ -1664,7 +1665,7 @@ void check_perish_song() {
     Battle b = started({singer}, {IDLE});
     Result r = Result::start();
     for (int i = 0; i < 4; i++) r = update(b, Choice::move(i == 0 ? 1 : 2), Choice::move(1), null);
-    CHECK(r.type() == Result::Lose); // Jolteon is faster and perishes first
+    CHECK(r.type() == Result::Tie);
   }
 }
 

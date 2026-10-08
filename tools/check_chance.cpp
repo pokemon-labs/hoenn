@@ -10,12 +10,27 @@
 // a collision: some draw that changes the state isn't in Actions, or two
 // draws share a field.
 //
-// It can only find collisions among branches the samples reach.
+// It can only find collisions among branches the samples reach. Each key
+// found is then replayed with its Actions forced through Calc, so a branch
+// the free samples saw once is still compared (the hidden ends aren't
+// forceable, so a replay may land elsewhere; `untested` counts what stays
+// uncompared). The free samples also test the probabilities: the keys'
+// probabilities sum to at most 1 and leave little unseen, and each key's
+// frequency is consistent with its probability. As the samples go through
+// randomize_hidden, that also checks it against the probabilities `update`
+// reports (consistency, not truth: both could share one wrong belief).
 //
-// Usage: check_chance [--seed N] [--games N] [--samples N] [--every N]
-//                     [--replay GAME_SEED] team files...
+// --unmask NAME (seed, sleep, confusion, binding, uproar, thrash, disable,
+// encore; repeatable) leaves that part out of mask_hidden, an ablation that
+// should produce collisions wherever the effect is active.
+//
+// Usage: check_chance [--seed N] [--games N] [--samples N] [--replays N]
+//                     [--every N] [--unmask NAME]... [--replay GAME_SEED]
+//                     team files...
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +43,7 @@
 
 #include "common/options.hpp"
 #include "common/protocol.hpp"
+#include "gen3/calc.hpp"
 #include "gen3/data/names.hpp"
 #include "gen3/helpers.hpp"
 #include "gen3/mechanics.hpp"
@@ -42,6 +58,8 @@ namespace {
 using Teams = std::vector<std::vector<helpers::Pokemon>>;
 using Observed = Options<protocol::NullLog, Chance<>, NullCalc>;
 
+// Raw bytes, as search keys on them, so no padding may differ.
+static_assert(std::has_unique_object_representations_v<Actions>);
 using Key = std::tuple<uint8_t, uint8_t, std::array<uint8_t, sizeof(Actions)>>;
 
 struct Value {
@@ -53,15 +71,44 @@ struct Value {
   friend bool operator==(const Value&, const Value&) = default;
 };
 
-struct Stats {
+struct Totals {
   uint64_t states = 0;
   uint64_t pairs = 0;
   uint64_t keys = 0;
   uint64_t max_keys = 0;
   uint64_t collisions = 0;
+  // Keys compared with nothing: seen once, and no forced replay reached them.
+  uint64_t untested = 0;
+  // Forced replays that reached another key: the hidden ticks (sleep,
+  // confusion and binding ends) aren't forced, and randomize_hidden varies.
+  uint64_t unreproduced = 0;
+  // Probability failures: the sum over a pair's keys (against held-out
+  // draws), a key's frequency.
+  uint64_t mass = 0;
+  uint64_t frequency = 0;
+  // The probability the keys found (before the held-out draws) missed,
+  // summed over pairs.
+  double missing = 0;
+  // Calibration over the whole run. Per bin, the held-out draws that landed
+  // on a key with probability in [2^-(b+1), 2^-b), and the binomial mean and
+  // variance of that count; the last bin is the keys not yet found, whose
+  // mass is 1 - sum. The held-out draws are independent of how the keys
+  // were found, so the count is Binomial(samples, the bin's mass) in each
+  // pair, and the sums over pairs are close to normal.
+  static constexpr int BINS = 42;
+  static constexpr int UNSEEN = BINS - 1;
+  double observed[BINS] = {};
+  double expected[BINS] = {};
+  double variance[BINS] = {};
 };
 
-Stats stats;
+constexpr int bin(double p) {
+  int b = 0;
+  while (b < Totals::UNSEEN - 1 && p < 0.5) p *= 2, b++;
+  return b;
+}
+
+Totals stats;
 
 void print_key(const Key& key) {
   std::printf("  choices %u %u, Actions (offset:value)",
@@ -128,43 +175,203 @@ void print_diff(const Value& a, const Value& b) {
   std::printf("\n");
 }
 
-// Every choice pair at one state, `samples` times each. Returns false on a
-// collision.
+// The hidden parts of the battle the value leaves out, as mask_hidden, each
+// of which --unmask can leave in. An ablation: leaving one in should make
+// collisions appear wherever that effect is active, which shows the test can
+// see it.
+enum Mask : uint16_t {
+  SEED = 1 << 0,
+  SLEEP = 1 << 1,
+  CONFUSION = 1 << 2,
+  BINDING = 1 << 3,
+  UPROAR = 1 << 4,
+  THRASH = 1 << 5,
+  DISABLE = 1 << 6,
+  ENCORE = 1 << 7,
+  ALL = (1 << 8) - 1,
+};
+
+constexpr std::pair<const char*, Mask> MASK_NAMES[] = {
+    {"seed", SEED},       {"sleep", SLEEP},   {"confusion", CONFUSION},
+    {"binding", BINDING}, {"uproar", UPROAR}, {"thrash", THRASH},
+    {"disable", DISABLE}, {"encore", ENCORE},
+};
+
+uint16_t masked = ALL;
+
+void mask(Battle& battle) {
+  if (masked == ALL) return mask_hidden(battle);
+  const auto one = [](uint8_t c) { return uint8_t(c != 0); };
+  if (masked & SEED) battle.rng = {};
+  for (Side& side : battle.sides) {
+    if (masked & SLEEP) {
+      for (Pokemon& mon : side.pokemon) {
+        if (mon.status.asleep() && !mon.status.self_inflicted()) {
+          mon.status = Status::slp(1);
+        }
+      }
+    }
+    ActivePokemon& a = side.active;
+    Volatiles& v = a.volatiles;
+    if (masked & CONFUSION) v.confusion = one(v.confusion);
+    if (masked & BINDING) v.wrapped = one(v.wrapped);
+    if (masked & UPROAR) v.uproar = one(v.uproar);
+    if (masked & THRASH) v.thrash = one(v.thrash);
+    if (masked & DISABLE) a.disable_timer = one(a.disable_timer);
+    if (masked & ENCORE) a.encore_timer = one(a.encore_timer);
+  }
+}
+
+// One update from the state, from a fresh seed after randomize_hidden.
+template <typename O>
+std::pair<Key, Value> sample(const Battle& battle, const Durations& durations,
+                             Choice x, Choice y, RNG& rng, O& o) {
+  Battle copy = battle;
+  copy.rng.seed = rng.next();
+  randomize_hidden(copy, durations);
+  o.chance.durations = durations;
+  const Result result = update(copy, x, y, o);
+  mask(copy);
+  Key key{x.bits, y.bits, {}};
+  std::memcpy(std::get<2>(key).data(), &o.chance.actions, sizeof(Actions));
+  return {key, Value{copy, o.chance.durations, result,
+                     o.chance.probability.p / o.chance.probability.q}};
+}
+
+using Forced = Options<protocol::NullLog, Chance<>, Calc>;
+
+// The chance of a Binomial(n, p) count at least as far from n * p as k, at
+// most exp(-n KL(k/n || p)) (the Chernoff bound, either tail).
+double tail(uint32_t k, uint32_t n, double p) {
+  const double x = double(k) / double(n);
+  const auto term = [](double a, double b) {
+    return a == 0 ? 0.0 : a * std::log(a / b);
+  };
+  if (p >= 1) return k == n ? 1.0 : 0.0;
+  if (p <= 0) return k == 0 ? 1.0 : 0.0;
+  const double kl = term(x, p) + term(1 - x, 1 - p);
+  return std::exp(-double(n) * kl);
+}
+
+// The false-alarm rate allowed per check: millions of checks per run.
+constexpr double ALPHA = 1e-10;
+
+// Every choice pair at one state. First `samples` free updates, which give
+// the frequencies; then each key found is replayed `replays` times with its
+// Actions forced through Calc, so that a key the free samples saw once is
+// still compared. Then the probabilities: each key's free count must be
+// consistent with its probability, and the keys found (disjoint branches)
+// must sum to at most 1. The mass they leave, 1 - sum, can be large (many
+// small branches go unseen), so it's tested on `samples` held-out draws: the
+// number landing on a key not yet found must be consistent with it. Returns
+// false on a failure.
 bool check_state(const Battle& battle, const Durations& durations, Result r,
-                 RNG& rng, uint32_t samples, uint64_t game_seed) {
+                 RNG& rng, uint32_t samples, uint32_t replays,
+                 uint64_t game_seed) {
   std::array<Choice, MAX_CHOICES> c1{}, c2{};
   const uint8_t n1 = choices(battle, Player::P1, r.p1(), c1);
   const uint8_t n2 = choices(battle, Player::P2, r.p2(), c2);
   stats.states++;
-  bool ok = true;
   for (uint8_t i = 0; i < n1; i++) {
     for (uint8_t j = 0; j < n2; j++) {
-      std::map<Key, Value> seen;
+      struct Entry {
+        Value value;
+        uint32_t free = 0;
+        uint32_t total = 0;
+        // Found before the held-out draws, which are classified against
+        // only these.
+        bool before = false;
+      };
+      std::map<Key, Entry> seen;
+      const auto add = [&](const std::pair<Key, Value>& kv, bool free) {
+        auto [it, inserted] = seen.try_emplace(kv.first, Entry{kv.second});
+        it->second.total++;
+        if (free) it->second.free++;
+        if (inserted || it->second.value == kv.second) return true;
+        std::printf("game %llu, turn %u: collision%s\n",
+                    (unsigned long long)game_seed, battle.turn,
+                    free ? "" : " (forced replay)");
+        print_state(battle, durations);
+        print_key(kv.first);
+        print_diff(it->second.value, kv.second);
+        stats.collisions++;
+        return false;
+      };
+
       for (uint32_t k = 0; k < samples; k++) {
-        Battle copy = battle;
-        copy.rng.seed = rng.next();
-        randomize_hidden(copy, durations);
         Observed o{};
-        o.chance.durations = durations;
-        const Result result = update(copy, c1[i], c2[j], o);
-        mask_hidden(copy);
-        Key key{c1[i].bits, c2[j].bits, {}};
-        std::memcpy(std::get<2>(key).data(), &o.chance.actions,
-                    sizeof(Actions));
-        const Value value{copy, o.chance.durations, result,
-                          o.chance.probability.p / o.chance.probability.q};
-        const auto [it, inserted] = seen.try_emplace(key, value);
-        if (!inserted && !(it->second == value)) {
-          std::printf("game %llu, turn %u: collision\n",
-                      (unsigned long long)game_seed, battle.turn);
-          print_state(battle, durations);
-          print_key(key);
-          print_diff(it->second, value);
-          stats.collisions++;
-          ok = false;
-          break;
+        if (!add(sample(battle, durations, c1[i], c2[j], rng, o), true)) {
+          return false;
         }
       }
+      std::vector<Key> keys;
+      for (const auto& [key, e] : seen) keys.push_back(key);
+      for (const Key& key : keys) {
+        for (uint32_t k = 0; k < replays; k++) {
+          Forced o{};
+          std::memcpy(&o.calc.overrides, std::get<2>(key).data(),
+                      sizeof(Actions));
+          const auto kv = sample(battle, durations, c1[i], c2[j], rng, o);
+          if (kv.first != key) stats.unreproduced++;
+          if (!add(kv, false)) return false;
+        }
+      }
+
+      double total = 0;
+      bool ok = true;
+      for (const auto& [key, e] : seen) {
+        total += e.value.probability;
+        if (e.total == 1) stats.untested++;
+        // One sighting of an unlikely key isn't evidence: a move like Beat
+        // Up has about 10^9 keys, so some key that unlikely turns up.
+        const bool once = e.free == 1 && samples * e.value.probability < 1;
+        if (!once && tail(e.free, samples, e.value.probability) < ALPHA) {
+          std::printf("game %llu, turn %u: key seen %u of %u free samples, "
+                      "probability %g\n",
+                      (unsigned long long)game_seed, battle.turn, e.free,
+                      samples, e.value.probability);
+          print_state(battle, durations);
+          print_key(key);
+          stats.frequency++;
+          ok = false;
+        }
+      }
+      const double rest = std::clamp(1 - total, 0.0, 1.0);
+      double mass[Totals::BINS] = {};
+      for (auto& [key, e] : seen) {
+        mass[bin(e.value.probability)] += e.value.probability;
+        e.before = true;
+      }
+      mass[Totals::UNSEEN] = rest;
+      uint32_t hits[Totals::BINS] = {};
+      for (uint32_t k = 0; k < samples; k++) {
+        Observed o{};
+        const auto kv = sample(battle, durations, c1[i], c2[j], rng, o);
+        const auto it = seen.find(kv.first);
+        hits[it == seen.end() || !it->second.before
+                 ? Totals::UNSEEN
+                 : bin(it->second.value.probability)]++;
+        if (!add(kv, false)) return false;
+      }
+      const uint32_t fresh = hits[Totals::UNSEEN];
+      for (int b = 0; b < Totals::BINS; b++) {
+        const double m = std::min(mass[b], 1.0);
+        stats.observed[b] += hits[b];
+        stats.expected[b] += samples * m;
+        stats.variance[b] += samples * m * (1 - m);
+      }
+      if (total > 1 + 1e-9 || tail(fresh, samples, rest) < ALPHA) {
+        std::printf("game %llu, turn %u: choices %u %u, the %zu keys' "
+                    "probabilities sum to %.12g, and %u of %u held-out "
+                    "samples found new keys\n",
+                    (unsigned long long)game_seed, battle.turn,
+                    unsigned(c1[i].bits), unsigned(c2[j].bits), seen.size(),
+                    total, fresh, samples);
+        print_state(battle, durations);
+        stats.mass++;
+        ok = false;
+      }
+      stats.missing += 1 - total;
       stats.pairs++;
       stats.keys += seen.size();
       if (seen.size() > stats.max_keys) stats.max_keys = seen.size();
@@ -177,7 +384,7 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
 // One game from its seed, checking every `every`th state. Stops at the
 // first collision.
 void play(const Teams& teams, uint64_t game_seed, uint32_t samples,
-          uint32_t every) {
+          uint32_t replays, uint32_t every) {
   RNG rng{game_seed};
   const uint32_t a = rng.range(uint32_t(teams.size()));
   const uint32_t b = rng.range(uint32_t(teams.size()));
@@ -189,7 +396,7 @@ void play(const Teams& teams, uint64_t game_seed, uint32_t samples,
   for (uint32_t n = 0; !r.over(); n++) {
     if (n % every == 0 &&
         !check_state(battle, o.chance.durations, r, sampler, samples,
-                     game_seed)) {
+                     replays, game_seed)) {
       return;
     }
     const uint8_t n1 = choices(battle, Player::P1, r.p1(), c1);
@@ -220,6 +427,7 @@ int main(int argc, char** argv) {
   uint64_t seed = 1;
   uint64_t games = 10;
   uint32_t samples = 64;
+  uint32_t replays = 4;
   uint32_t every = 1;
   bool replay = false;
   uint64_t replay_seed = 0;
@@ -232,6 +440,18 @@ int main(int argc, char** argv) {
       games = std::strtoull(argv[++i], nullptr, 10);
     } else if (arg == "--samples" && i + 1 < argc) {
       samples = uint32_t(std::strtoul(argv[++i], nullptr, 10));
+    } else if (arg == "--replays" && i + 1 < argc) {
+      replays = uint32_t(std::strtoul(argv[++i], nullptr, 10));
+    } else if (arg == "--unmask" && i + 1 < argc) {
+      const std::string name = argv[++i];
+      bool found = false;
+      for (const auto& [n, m] : MASK_NAMES) {
+        if (name == n) masked &= uint16_t(~m), found = true;
+      }
+      if (!found) {
+        std::fprintf(stderr, "check_chance: unknown mask %s\n", name.c_str());
+        return 2;
+      }
     } else if (arg == "--every" && i + 1 < argc) {
       every = uint32_t(std::strtoul(argv[++i], nullptr, 10));
     } else if (arg == "--replay" && i + 1 < argc) {
@@ -250,10 +470,10 @@ int main(int argc, char** argv) {
   }
 
   if (replay) {
-    play(teams, replay_seed, samples, every);
+    play(teams, replay_seed, samples, replays, every);
   } else {
     RNG seeds{seed};
-    for (uint64_t i = 0; i < games; i++) play(teams, seeds.next(), samples, every);
+    for (uint64_t i = 0; i < games; i++) play(teams, seeds.next(), samples, replays, every);
   }
   std::printf("check_chance: %llu states, %llu choice pairs, %.1f keys per "
               "pair (max %llu), %llu collisions\n",
@@ -262,5 +482,38 @@ int main(int argc, char** argv) {
               stats.pairs ? double(stats.keys) / double(stats.pairs) : 0.0,
               (unsigned long long)stats.max_keys,
               (unsigned long long)stats.collisions);
-  return stats.collisions ? 1 : 0;
+  std::printf("  %llu keys never compared (%.2f%%), %llu forced replays "
+              "landed elsewhere\n",
+              (unsigned long long)stats.untested,
+              stats.keys ? 100.0 * double(stats.untested) / double(stats.keys)
+                         : 0.0,
+              (unsigned long long)stats.unreproduced);
+  std::printf("  probability: %llu sum failures, %llu frequency failures, "
+              "mean unseen mass per pair %.4f\n",
+              (unsigned long long)stats.mass,
+              (unsigned long long)stats.frequency,
+              stats.pairs ? stats.missing / double(stats.pairs) : 0.0);
+  // A bin fails if its count is more than Z standard deviations from its
+  // mean. With ~40 bins, |z| > 6 by chance is about 1e-7 per run.
+  constexpr double Z = 6;
+  int calibration = 0;
+  std::printf("  calibration of held-out draws (bin: observed / expected, z):\n");
+  for (int b = 0; b < Totals::BINS; b++) {
+    const double o = stats.observed[b], e = stats.expected[b];
+    const double v = stats.variance[b];
+    if (o == 0 && e < 0.5) continue;
+    const double z = v > 0 ? (o - e) / std::sqrt(v) : (o == e ? 0 : INFINITY);
+    const bool bad = std::fabs(z) > Z;
+    calibration += bad;
+    if (b == Totals::UNSEEN) {
+      std::printf("    unseen        %10.0f / %12.1f  z %+6.2f%s\n", o, e, z,
+                  bad ? "  FAIL" : "");
+    } else {
+      std::printf("    2^-%-2d..2^-%-2d %10.0f / %12.1f  z %+6.2f%s\n", b + 1,
+                  b, o, e, z, bad ? "  FAIL" : "");
+    }
+  }
+  return stats.collisions || stats.mass || stats.frequency || calibration
+             ? 1
+             : 0;
 }

@@ -57,9 +57,19 @@ target_link_libraries(check_frame PRIVATE pkmn_gen3 pkmn_warnings)
 add_executable(soak tools/soak.cpp)
 target_link_libraries(soak PRIVATE pkmn_gen3 pkmn_warnings)
 
+# Updates per second, null log, Chance on (tools/bench.cpp). Release only.
+add_executable(bench tools/bench.cpp)
+target_link_libraries(bench PRIVATE pkmn_gen3 pkmn_warnings)
+
 # The choices and Chance's Actions determine the result (tools/check_chance.cpp).
 add_executable(check_chance tools/check_chance.cpp)
 target_link_libraries(check_chance PRIVATE pkmn_gen3 pkmn_warnings)
+
+# The realizability test against Showdown's traces (tools/check_showdown.cpp,
+# traces from tools/showdown_traces.cjs). Run by hand: the traces aren't
+# committed.
+add_executable(check_showdown tools/check_showdown.cpp)
+target_link_libraries(check_showdown PRIVATE pkmn_gen3 pkmn_warnings)
 
 # Which moves on the teams have a written mechanic (tools/coverage.cpp).
 add_executable(coverage tools/coverage.cpp)
@@ -79,6 +89,12 @@ if(PKMN_TEAM_FILES)
   add_test(NAME soak COMMAND soak --games 100 ${PKMN_TEAM_FILES})
   add_test(NAME check_chance
            COMMAND check_chance --games 2 --samples 32 ${PKMN_TEAM_FILES})
+  # The ablation that must fail: the seed left in, every repeated key
+  # collides. Shows the comparison can see a difference.
+  add_test(NAME check_chance_unmasked
+           COMMAND check_chance --games 1 --samples 32 --unmask seed
+                   ${PKMN_TEAM_FILES})
+  set_tests_properties(check_chance_unmasked PROPERTIES WILL_FAIL TRUE)
 else()
   add_test(NAME check_frame COMMAND check_frame)
   message(WARNING "No teams in ${PKMN_TEAMS_DIR}; check_teams won't run")

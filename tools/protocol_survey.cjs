@@ -19,16 +19,16 @@
 // Pokémon, HP, numbers, moves and most item names with placeholders and keep
 // the effect names. Random play reaches what's common, not everything.
 //
-// The default path is ADV-Simulator's pinned copy (0.11.10). The sim core
-// files are read from the package's dist/sim/; another package layout
-// (@pkmn/sim) needs that path changed.
+// The default path is `showdown/` (0.11.11), the copy the realizability test
+// pins; build it first (`node build` there). The sim core files are read
+// from the package's dist/sim/; another package layout (@pkmn/sim) needs
+// that path changed.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 
 const [mode, ...rest] = process.argv.slice(2);
-const DEFAULT_PS =
-  path.join(__dirname, '../../ADV-Simulator/tools/showdown-oracle/node_modules/pokemon-showdown');
+const DEFAULT_PS = path.join(__dirname, '../showdown');
 
 function scanStatic(PS) {
   const {Dex} = require(PS);
@@ -185,9 +185,9 @@ function playGames(format, games, PS) {
 }
 
 if (mode === 'static') {
-  scanStatic(rest[0] || DEFAULT_PS);
+  scanStatic(path.resolve(rest[0] || DEFAULT_PS));
 } else if (mode === 'games' && rest.length >= 2) {
-  playGames(rest[0], +rest[1], rest[2] || DEFAULT_PS);
+  playGames(rest[0], +rest[1], path.resolve(rest[2] || DEFAULT_PS));
 } else {
   console.error('usage: protocol_survey.cjs static [ps] | games FORMAT N [ps]');
   process.exit(1);
