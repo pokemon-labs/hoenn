@@ -322,6 +322,84 @@ bsc:5180) hits every switch-in, faint replacements included; a Pokémon that
 faints to them skips its switch-in abilities (`tryfaintmon_spikes`,
 bs1:3394), and the frame raises another request in the same phase.
 
+## Protocol
+
+The plan for the binary log (`common/protocol.hpp`); nothing is written yet.
+It comes from a survey of Showdown 0.11.10 (ADV-Simulator's pinned copy):
+the `add(...)` calls of every gen3 move, ability, item, condition, the gen3
+scripts and the sim core, plus 3,000 random gen3 OU games over `teams/adv/`
+and 4,000 `gen3randombattle` games, collecting every message shape
+(`tools/protocol_survey.cjs`). Random
+play reaches what's common, not everything; Lock-On, Uproar, Thrash, Bide,
+Future Sight, Hail and Disable come from the static scan only. Redo the
+survey on the `@pkmn/sim` version the realizability test pins (CLAUDE.md,
+Testing): versions already differ (master's gen4 Natural Cure adds
+`[silent]`, `data/mods/gen4/abilities.ts:295`; 0.11.10's doesn't).
+
+Decided (2026-10-07):
+
+- **Opcodes are libpkmn's `ArgType` values, unchanged** (`protocol.zig`).
+  Its gen3 section already reserves `Block`, `Ability`, `EndAbility`,
+  `ClearNegativeBoost`, `FormeChange` and `LastNoTarget`. libpkmn has no
+  `Unboost`: `Boost` carries a signed amount.
+- **Sources are hybrid.** `[from]` is a closed reason per opcode for
+  conditions (psn, brn, Spikes, Sandstorm, Hail, Recoil, Leech Seed...),
+  plus `Ability`, `Item` and `Move` reasons carrying an ID; `[of]` is an
+  `ID` byte where Showdown prints one.
+- **Wider fields than libpkmn:** species and moves are 2 bytes (386 species,
+  354 moves); abilities and items 1.
+- **HP is exact** (hp, max HP, status). The formatter writes both lines of
+  the `|split|` triplet, including HP Percentage Mod's public percentage.
+- **The formatter needs the nicknames**, which `Battle` doesn't hold: Wish's
+  `[wisher]` and Beat Up print them.
+- **Dropped, as libpkmn's `FILTER`:** `t:`, `gametype`, `player`,
+  `teamsize`, `gen`, `tier`, `rule`, `start`, `upkeep`, `message`,
+  `-message`, `-hint`, `bigerror`, `debug`. Not needed in gen3 singles: the
+  gen4+ messages (`-center`, `swap`, `-mega`, `-primal`, `-burst`,
+  `-zpower`, `-terastallize`, `-candynamax`, `-clearpositiveboost`,
+  `typeadd`) and the doubles-only Follow Me, Helping Hand and `[spread]`.
+
+Pressure is written with `addSplit` and no public line, so it's in the
+omniscient stream only.
+
+The inventory (reasons in *italics* are new over libpkmn's gen1 and gen2):
+
+| ArgType | Showdown forms (gen3) |
+|---|---|
+| `Move` | plain, `[from]` *Sleep Talk*, *Pursuit*, *lockedmove*; `LastStill`, `LastMiss`, *`LastNoTarget`* |
+| `Switch`, `Drag` | species, level, gender, hp, max HP, status; *`[from] Baton Pass`* |
+| `Cant` | slp, frz, par, flinch, recharge, Attract, *Truant*, *Focus Punch*, *Taunt* + move, Disable + move, *Imprison* + move, nopp + move, *Damp* + move + of |
+| `Faint`, `Turn`, `Win`, `Tie` | as libpkmn |
+| `Damage` | plain, silent, psn, brn, confusion, Leech Seed + of, Recoil + of, Spikes, Sandstorm, *Hail*, Curse, Nightmare, partiallytrapped + move, *ability* + of (Rough Skin, Liquid Ooze) |
+| `Heal` | plain, silent (Rest), drain + of, item (Leftovers, Sitrus...), *ability* + of (Volt Absorb, Water Absorb, Rain Dish), *Wish* + wisher, *Ingrain* |
+| `SetHP` | Pain Split, plain and silent |
+| `Status` | plain; *`[from] move`* on every sleep (Rest, Spore...); *`[from] ability`* + of (Synchronize, Static, Poison Point, Flame Body, Effect Spore) |
+| `CureStatus` | msg, silent, *Natural Cure*, *a thawing move* (Sacred Fire) |
+| `CureTeam` | Aromatherapy |
+| `Boost` | signed amount, plain or *item* (Salac, Liechi, Petaya...) |
+| `SetBoost`, `CopyBoost`, `ClearAllBoost`, `ClearNegativeBoost` | Belly Drum, Psych Up, Haze, White Herb (silent) |
+| `Fail` | plain, status, heal, Substitute (+ weak), *unboost [+ stat] from an ability* + of (Clear Body, Hyper Cutter, White Smoke, Keen Eye), *Uproar slp*, *Rest from Insomnia or Vital Spirit* |
+| `Miss`, `HitCount`, `Prepare`, `MustRecharge`, `OHKO`, `Crit`, `SuperEffective`, `Resisted` | as libpkmn (Bide's `Miss` has no target) |
+| `Immune` | plain, ohko, *`[from] ability`* (Levitate, Wonder Guard, the absorbers, the status immunities, Soundproof, Flash Fire, Sturdy, Oblivious) |
+| `Activate` | Protect, Substitute damage, confusion, trapped, Focus Band, Destiny Bond, Endure, Heal Bell, Mimic + move, Pursuit, Spite + move + n, Magnitude + n, Bide, Mist, Safeguard, Lock-On / Mind Reader + of, Attract + of, Trick + of, binding + of, Ingrain, Snatch + of, Grudge + move, Leppa + move, Skill Swap, Beat Up + name, *ability activations* (Shed Skin, Suction Cups, Sticky Hold, the status cures) |
+| `FieldActivate` | Perish Song, Pay Day |
+| `Start` | confusion (+ fatigue), Substitute, Leech Seed, Curse + of, Nightmare, Encore, Disable + move, Taunt, Torment, Yawn + of, Attract (+ Cute Charm + of), Foresight, Imprison, Ingrain, Mud Sport, Water Sport, Charge, Uproar (+ upkeep), Bide, *Flash Fire*, *typechange* + type (Color Change, Conversion, Conversion 2, Camouflage), *stockpile1-3*, Future Sight, Doom Desire, perish0-3 (+ silent) |
+| `End` | the matching ends, many silent; Leech Seed from Rapid Spin + of; Attract from Oblivious or Mental Herb; partiallytrapped + move; Future Sight and Doom Desire on the target |
+| `SingleMove`, `SingleTurn` | Destiny Bond, Grudge, Rage; Protect, Endure, Focus Punch, Snatch |
+| `SideStart`, `SideEnd` | Reflect, Light Screen, Spikes, Safeguard (+ persistent), Mist; Spikes from Rapid Spin + of |
+| `Weather` | type, none, upkeep, *`[from] ability`* + of (Sand Stream, Drizzle, Drought) |
+| *`Ability`* | Intimidate and Speed Boost (boost), *Trace* + of, *Pressure* (silent, split) |
+| `Item`, `EndItem` | eat, Knock Off + of, Thief / Covet + of, Trick (silent), plain (White Herb, Mental Herb) |
+| *`FormeChange`*, `Transform` | Castform's Forecast; Transform |
+
+Open:
+
+- `-nothing` (Splash), `-notarget` and `-anim` (Solar Beam in sun) have no
+  libpkmn opcode: add opcodes, or drop them in the comparison's filter.
+- The buffer size per update (libpkmn derives a maximum), once the
+  mechanics are written.
+- The `@pkmn/sim` version the formatter mirrors.
+
 ## Teams
 
 `helpers.hpp` builds a battle from `helpers::Pokemon` sets, as libpkmn's

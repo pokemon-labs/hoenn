@@ -3,7 +3,9 @@
 // Only the plumbing is here for now: the fixed-buffer Writer, the null
 // writer, and the Log that wraps one of them. The message methods (move,
 // switch, damage and so on) and their encodings come last, after the
-// mechanics (see CLAUDE.md, "The log comes last").
+// mechanics (see CLAUDE.md, "The log comes last"). The opcodes are
+// libpkmn's ArgType values; the gen3 inventory and encoding decisions are in
+// src/gen3/README.md, "Protocol".
 //
 // The driver owns the buffer. A Writer only points into it, so it lives in
 // Options, never in Battle (which holds no pointers). Search runs with the

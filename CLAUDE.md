@@ -178,8 +178,10 @@ under `../cpp/include/`):
   `update` does with a full buffer (libpkmn returns `Result::Error`).
 - **The log is Showdown's omniscient log, built in two layers, as libpkmn**
   (decided):
-  - `update` writes compact binary opcodes (libpkmn's `protocol` ArgTypes)
-    into the `Log` buffer, for speed. It formats no text.
+  - `update` writes compact binary opcodes (libpkmn's `protocol` ArgTypes,
+    same values) into the `Log` buffer, for speed. It formats no text. The
+    gen3 inventory, the hybrid `[from]` encoding and what's open are in
+    `src/gen3/README.md`, "Protocol" (decided 2026-10-07).
   - A separate formatter turns that buffer into text that matches
     Showdown's protocol line for line.
   - The engine writes only the omniscient stream, including hidden
@@ -311,6 +313,7 @@ tools/
   soak.cpp            long random self-play runs, replayable by seed
   coverage.cpp        which moves on the teams have a written mechanic
   damage_oracle.cjs   writes damage_cases.inc from Showdown
+  protocol_survey.cjs Showdown's gen3 log messages (README, "Protocol")
 ```
 
 `pokeemerald/` is a depth-1 clone of pret/pokeemerald on the local branch
