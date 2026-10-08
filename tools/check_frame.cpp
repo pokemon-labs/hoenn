@@ -1139,6 +1139,28 @@ void check_taunt() {
   CHECK(b.sides[1].active.taunt == 0);
 }
 
+// The weather moves: 5 turns counting this one, replacing an ability's
+// permanent weather, failing on the same weather.
+void check_weather_moves() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::RainDance;
+  user.moves[1] = Move::SunnyDay;
+  Null null{};
+  Battle b = started({user}, {IDLE});
+  update(b, Choice::move(1), Choice::move(1), null);
+  CHECK(b.field.weather == Weather::Rain && b.field.weather_turns == 4);
+  update(b, Choice::move(1), Choice::move(1), null); // fails
+  CHECK(b.field.weather_turns == 3);
+  update(b, Choice::move(2), Choice::move(1), null); // replaces the rain
+  CHECK(b.field.weather == Weather::Sun && b.field.weather_turns == 4);
+  b.field = {Weather::Sun, 0, true};
+  update(b, Choice::move(2), Choice::move(1), null);
+  CHECK(b.field.weather == Weather::Sun && b.field.permanent);
+  update(b, Choice::move(1), Choice::move(1), null);
+  CHECK(b.field.weather == Weather::Rain && !b.field.permanent &&
+        b.field.weather_turns == 4);
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2055,6 +2077,7 @@ int main(int argc, char** argv) {
   check_counter();
   check_drain();
   check_taunt();
+  check_weather_moves();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

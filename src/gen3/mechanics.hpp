@@ -3170,6 +3170,41 @@ constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// The weather a weather move sets, or None.
+constexpr Weather move_weather(Effect effect) {
+  switch (effect) {
+  case Effect::RainDance: return Weather::Rain;
+  case Effect::SunnyDay: return Weather::Sun;
+  case Effect::Sandstorm: return Weather::Sandstorm;
+  case Effect::Hail: return Weather::Hail;
+  default: return Weather::None;
+  }
+}
+
+// BattleScript_EffectRainDance (bs1:1744), SunnyDay (bs1:1757), Sandstorm
+// and Hail: after the canceler, attackstring and ppreduce, Cmd_setrain
+// (bsc:6681), setsunny (bsc:8767) and the like fail (MISSED) if that
+// weather is up, an ability's permanent one included; otherwise it replaces
+// any weather for 5 turns, the field residual counting this one. Showdown's
+// setWeather agrees (it fails on the same weather after gen 2). Log:
+// Weather, or Fail.
+template <typename O>
+constexpr void weather_move(Battle& battle, Player player, MoveState& m,
+                            Weather w, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Field& field = battle.field;
+  if (field.weather == w) {
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  field.weather = w;
+  field.weather_turns = 5;
+  field.permanent = false;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
 // ppreduce, a missed accuracy check (Protect, evasion) or an existing
 // Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
@@ -3264,7 +3299,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Spikes || heals(effect) ||
          effect == Effect::BatonPass || effect == Effect::Wish ||
          effect == Effect::LeechSeed || effect == Effect::Refresh ||
-         effect == Effect::HealBell || effect == Effect::Taunt;
+         effect == Effect::HealBell || effect == Effect::Taunt ||
+         move_weather(effect) != Weather::None;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3308,6 +3344,9 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Refresh) return refresh(battle, player, m, options);
   if (effect == Effect::HealBell) return heal_bell(battle, player, m, options);
   if (effect == Effect::Taunt) return taunt(battle, player, m, options);
+  if (const Weather w = move_weather(effect); w != Weather::None) {
+    return weather_move(battle, player, m, w, options);
+  }
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then

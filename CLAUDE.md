@@ -764,10 +764,12 @@ adapted (see Interface).
   effect).
 - Done (2026-10-07): Taunt (the selection, canceler and residual were
   already there; power 0 matches Showdown's Status on every move).
+- Done (2026-10-07): Rain Dance, Sunny Day, Sandstorm and Hail (the decomp
+  and Showdown agree). 97%.
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Sunny Day, Rain Dance, Endeavor, Beat Up, Knock Off...). Uproar and Thrash (with the
+  (Endeavor, Beat Up, Knock Off, Perish Song, Superpower...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
