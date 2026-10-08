@@ -327,6 +327,32 @@ void check_moves() {
     CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BodySlam, 3));
   }
   {
+    // Explosion: the user faints whether or not it hits, here into a Ghost
+    // type, which takes nothing. Both last Pokémon down is a tie.
+    const helpers::Pokemon boomer = {
+        .species = Species::Snorlax,
+        .moves = {Move::Explosion},
+        .ability = Ability::Immunity,
+        .nature = Nature::Adamant,
+        .gender = Gender::Male,
+    };
+    const helpers::Pokemon gengar = {
+        .species = Species::Gengar,
+        .moves = {Move::Splash},
+        .ability = Ability::Levitate,
+        .gender = Gender::Male,
+    };
+    Null null{};
+    Battle b = started({boomer, SNORLAX}, {gengar});
+    const uint16_t hp = b.sides[1].get(1).hp;
+    Result r = update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
+    CHECK(b.sides[0].get(1).hp == 0 && b.sides[1].get(1).hp == hp);
+    Battle c = started({boomer}, {IDLE});
+    c.sides[1].get(1).hp = 1;
+    CHECK(update(c, Choice::move(1), Choice::move(1), null).type() == Result::Tie);
+  }
+  {
     // Spikes on a switch: 1/8, 1/6, 1/4 of max HP.
     for (uint8_t layers = 1; layers <= 3; layers++) {
       Battle b = started({SNORLAX, JOLTEON}, {IDLE});

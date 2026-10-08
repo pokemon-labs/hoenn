@@ -1046,6 +1046,9 @@ constexpr void moveend(Battle& battle, Player player, const MoveState& m,
 // (hiddenpowercalc, bs1:1740), Thunder and Sky Uppercut (IGNORE_ON_AIR) and
 // Earthquake (bs1:1834: PP before accuracy, which changes nothing in
 // singles, and IGNORE_UNDERGROUND; damage.hpp doubles it into Dig).
+// Double-Edge is MOVE_EFFECT_RECOIL_33 (bs1:2567). Explosion (bs1:374) and
+// Seismic Toss and Night Shade (Effect::LevelDamage, bs1:1195) are
+// variations on the same path, handled in hit().
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1056,6 +1059,9 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::QuickAttack:
   case Effect::Pursuit:
   case Effect::Recoil:
+  case Effect::DoubleEdge:
+  case Effect::Explosion:
+  case Effect::LevelDamage:
   case Effect::HiddenPower:
   case Effect::Thunder:
   case Effect::SkyUppercut:
@@ -1244,6 +1250,23 @@ static_assert([] {
 template <typename O>
 constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  const Effect effect = get(m.move).effect;
+  Pokemon& user = battle.side(player).get(1);
+
+  // Explosion (bs1:374): attackstring and ppreduce come first, which
+  // changes nothing; tryexplosion fails if any active Pokémon has Damp
+  // (BattleScript_DampStopsExplosion goes to moveend); otherwise the user's
+  // HP drops to 0 before the hit (setatkhptozero, bsc:6577) and it faints
+  // after moveend, whether or not the hit lands.
+  if (effect == Effect::Explosion) {
+    if (battle.sides[0].active.ability == Ability::Damp ||
+        battle.sides[1].active.ability == Ability::Damp) {
+      m.attackstring = true;
+      pp_reduce(battle, player, m);
+      return moveend(battle, player, m, options);
+    }
+    user.hp = 0;
+  }
 
   Side& side = battle.side(player);
   const Player defender = foe(player);
@@ -1272,7 +1295,9 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       m.result |= MoveResult::MISSED;
       m.attackstring = true;
       pp_reduce(battle, player, m);
-      return moveend(battle, player, m, options);
+      moveend(battle, player, m, options);
+      if (effect == Effect::Explosion) faint(battle, player, options);
+      return;
     }
   }
   // TODO(plan step 4): what JumpIfMoveFailed does after a hit (bsc:1009):
@@ -1287,12 +1312,18 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // then whatever lets the target survive at 1 HP (not behind a
     // Substitute). Focus Band is drawn only when the hit would be lethal,
     // and not for False Swipe, which spares the target anyway.
-    if (can_crit(battle, player)) {
-      h.crit = rolls::crit(battle, player, 0,
-                           crit_stage(battle, player, m.move), options);
+    // Seismic Toss and Night Shade: the user's level, with no crit or roll
+    // (dmgtolevel, then adjustsetdamage, bsc:5878, which has the same
+    // survival checks).
+    uint32_t d = user.level;
+    if (effect != Effect::LevelDamage) {
+      if (can_crit(battle, player)) {
+        h.crit = rolls::crit(battle, player, 0,
+                             crit_stage(battle, player, m.move), options);
+      }
+      d = apply_roll(damage(battle, player, h),
+                     rolls::damage(battle, player, 0, options));
     }
-    uint32_t d = apply_roll(damage(battle, player, h),
-                            rolls::damage(battle, player, 0, options));
     if (!foe_side.active.volatiles.substitute && target.hp <= d) {
       const ItemData item = item_data(target.item);
       bool survives = data.effect == Effect::FalseSwipe;
@@ -1308,14 +1339,16 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
 
   secondary(battle, player, m, options);
 
-  // seteffectwithchance: Effect::Recoil's certain MOVE_EFFECT_RECOIL_25, a
-  // quarter of the HP dealt, at least 1 (bsc:2636). Rock Head prevents it
-  // except for Struggle (BattleScript_MoveEffectRecoil, bs1:3938). The recoil
-  // script faints the user before the target's tryfaintmon below.
-  Pokemon& user = side.get(1);
-  if (data.effect == Effect::Recoil && affects &&
+  // seteffectwithchance: the certain recoil of Effect::Recoil
+  // (MOVE_EFFECT_RECOIL_25, a quarter of the HP dealt, bsc:2636) and
+  // Double-Edge (MOVE_EFFECT_RECOIL_33, a third, bsc:2843), at least 1.
+  // Rock Head prevents it except for Struggle (BattleScript_MoveEffectRecoil,
+  // bs1:3938). The recoil script faints the user before the target's
+  // tryfaintmon below.
+  if ((effect == Effect::Recoil || effect == Effect::DoubleEdge) && affects &&
       (m.move == Move::Struggle || side.active.ability != Ability::RockHead)) {
-    uint16_t recoil = uint16_t(m.hp_dealt / 4);
+    uint16_t recoil =
+        uint16_t(m.hp_dealt / (effect == Effect::DoubleEdge ? 3 : 4));
     if (recoil == 0) recoil = 1;
     user.hp = user.hp > recoil ? uint16_t(user.hp - recoil) : 0;
     if (user.fainted()) faint(battle, player, options);
@@ -1324,6 +1357,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // tryfaintmon
   if (target.fainted()) faint(battle, defender, options);
   moveend(battle, player, m, options);
+  if (effect == Effect::Explosion) faint(battle, player, options);
 }
 
 // HandleAction_UseMove (util:78): which move and slot the action uses, then
