@@ -1793,9 +1793,322 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
   return std::nullopt;
 }
 
+// ---------------------------------------------------------------------------
+// End of turn (BattleTurnPassed, main:3956): DoFieldEndTurnEffects
+// (util:1181), then DoBattlerEndTurnEffects (util:1460), written out in the
+// decomp's order (decided 2026-10-07: straight-line code, not a table).
+// Nothing suspends inside them, so no case tracker is kept: residual faints
+// are replaced after both passes. The battle ends at the first residual KO
+// that leaves a side with nothing, as Showdown (fieldEvent checks after
+// every handler, sim/battle.ts:569) and the decomp's checkteamslost after
+// each damage script; the decomp's Leech Seed script has none (bs1:3283),
+// and this follows Showdown there too.
+//
+// Showdown runs the per-Pokémon residuals in the same order: they share
+// onResidualOrder 10 and comparePriority sorts by speed before subOrder
+// (sim/battle.ts:408), so it is Pokémon-major as the decomp is.
+// ---------------------------------------------------------------------------
+
+// Whether some side could lose to the residuals: its only Pokémon left is
+// active and takes residual damage (over-approximated: immunities and
+// amounts are ignored).
+constexpr bool could_lose(const Battle& battle, Player player) {
+  const Side& side = battle.side(player);
+  const Pokemon& mon = side.get(1);
+  if (mon.fainted()) return false;
+  for (uint8_t s = 2; s <= 6; s++) {
+    const Pokemon& p = side.get(s);
+    if (p.species != Species::None && !p.fainted()) return false;
+  }
+  const Volatiles& v = side.active.volatiles;
+  return mon.status.poisoned() || mon.status.burned() || v.leech_seed ||
+         v.nightmare || v.cursed || v.wrapped != 0 ||
+         battle.field.weather == Weather::Sandstorm ||
+         battle.field.weather == Weather::Hail;
+}
+
+// Whether the residual order (ENDTURN_ORDER, util:1209) can change the
+// result, so that a speed tie needs its draw. The passes touch each side's
+// own Pokémon only, except Leech Seed (it heals or hurts the seeder); so
+// the order matters only through Leech Seed or the battle ending first on
+// one side. Over-approximated: a draw that turns out not to matter costs
+// search a chance node, never correctness.
+constexpr bool residual_order_matters(const Battle& battle) {
+  return battle.sides[0].active.volatiles.leech_seed ||
+         battle.sides[1].active.volatiles.leech_seed ||
+         could_lose(battle, Player::P1) || could_lose(battle, Player::P2);
+}
+
+// HP restored by datahpupdate with negative damage: capped at max HP.
+constexpr void heal(Pokemon& mon, uint32_t amount) {
+  const uint32_t room = uint32_t(mon.stats.hp - mon.hp);
+  mon.hp = uint16_t(mon.hp + (amount < room ? amount : room));
+}
+
+// Max HP / n, at least 1: every residual's fraction.
+constexpr uint32_t fraction(const Pokemon& mon, uint32_t n) {
+  const uint32_t d = mon.stats.hp / n;
+  return d == 0 ? 1 : d;
+}
+
+// A residual's damage to p's active Pokémon: datahpupdate under
+// HITMARKER_IGNORE_SUBSTITUTE | PASSIVE_HP_UPDATE, and IGNORE_BIDE
+// (util:1465), so no Substitute, Bide or Counter bookkeeping; then
+// tryfaintmon. Returns the HP lost (gHpDealt).
+template <typename O>
+constexpr uint16_t residual_damage(Battle& battle, Player player,
+                                   uint32_t damage, O& options) {
+  Pokemon& mon = battle.side(player).get(1);
+  assert(!mon.fainted());
+  const uint16_t dealt = mon.hp > damage ? uint16_t(damage) : mon.hp;
+  mon.hp = uint16_t(mon.hp - dealt);
+  if (mon.fainted()) faint(battle, player, options);
+  return dealt;
+}
+
+// DoFieldEndTurnEffects (util:1181), after ENDTURN_ORDER: the side timers
+// (P1's side, then P2's, each in turn), Wish in the residual order, then
+// the weather. Sand and hail hurt each Pokémon in the residual order
+// (BattleScript_DamagingWeatherLoop, bs1:3205) and stop once the battle is
+// over (bs1:3219).
+template <typename O>
+constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
+  // ENDTURN_REFLECT, LIGHT_SCREEN, MIST, SAFEGUARD (util:1218-1311): each
+  // is one pass over both sides.
+  for (Side& side : battle.sides) {
+    if (side.conditions.reflect != 0) side.conditions.reflect--;
+  }
+  for (Side& side : battle.sides) {
+    if (side.conditions.light_screen != 0) side.conditions.light_screen--;
+  }
+  for (Side& side : battle.sides) {
+    if (side.conditions.mist != 0) side.conditions.mist--;
+  }
+  for (Side& side : battle.sides) {
+    if (side.conditions.safeguard != 0) side.conditions.safeguard--;
+  }
+
+  // ENDTURN_WISH (util:1312): it lands on whoever is active, healing half of
+  // its max HP (trywish, bsc:9311), unless it has fainted.
+  for (const Player p : {first, foe(first)}) {
+    Side& side = battle.side(p);
+    SideConditions& c = side.conditions;
+    if (c.wish == 0 || --c.wish != 0) continue;
+    c.wisher = 0;
+    Pokemon& mon = side.get(1);
+    if (!mon.fainted()) heal(mon, mon.stats.hp / 2);
+  }
+
+  // ENDTURN_RAIN, SANDSTORM, SUN, HAIL (util:1331-1427): the timer, unless
+  // an ability set the weather (hail has no permanent form in Gen III). The
+  // turn it runs out, sand and hail deal no damage (BattleScript_
+  // SandStormHailEnds), as in Showdown (fieldEvent ends the effect and moves
+  // on, sim/battle.ts:519). Otherwise they hurt each Pokémon in the residual
+  // order if the weather has effect (Cmd_weatherdamage, bsc:7602: not under
+  // Cloud Nine or Air Lock); the timer runs either way.
+  Field& field = battle.field;
+  if (field.weather == Weather::None) return std::nullopt;
+  if (!field.permanent && --field.weather_turns == 0) {
+    field.weather = Weather::None;
+    return std::nullopt;
+  }
+  const Weather weather = field.weather;
+  if ((weather != Weather::Sandstorm && weather != Weather::Hail) ||
+      effective_weather(battle) == Weather::None) {
+    return std::nullopt;
+  }
+  for (const Player p : {first, foe(first)}) {
+    Side& side = battle.side(p);
+    const ActivePokemon& a = side.active;
+    if (side.get(1).fainted()) continue;
+    const bool immune =
+        a.volatiles.underground || a.volatiles.underwater ||
+        (weather == Weather::Sandstorm
+             ? has_type(a, Type::Rock) || has_type(a, Type::Steel) ||
+                   has_type(a, Type::Ground) || a.ability == Ability::SandVeil
+             : has_type(a, Type::Ice));
+    if (immune) continue;
+    residual_damage(battle, p, fraction(side.get(1), 16), options);
+    if (Flow over = outcome(battle)) return over;
+  }
+  return std::nullopt;
+}
+
+// DoBattlerEndTurnEffects (util:1460) for p's active Pokémon: every case for
+// one Pokémon before the next. A Pokémon that faints partway skips the
+// rest, as each case checks its HP. Returns the end of the battle if a
+// residual KO ends it.
+//
+// TODO(plan step 4): ENDTURN_ITEMS1's berries and ENDTURN_ITEMS2
+// (ItemBattleEffects, ITEMEFFECT_NORMAL); ENDTURN_UPROAR and ENDTURN_THRASH
+// (they read WasUnableToUseMove, README decision 2); ENDTURN_YAWN (with
+// sleep and Sleep Clause).
+template <typename O>
+constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  ActivePokemon& a = side.active;
+  Volatiles& v = a.volatiles;
+  Pokemon& mon = side.get(1);
+  const auto alive = [&] { return !mon.fainted(); };
+
+  // ENDTURN_INGRAIN (util:1476)
+  if (v.rooted && alive() && mon.hp != mon.stats.hp) heal(mon, fraction(mon, 16));
+
+  // ENDTURN_ABILITIES: ABILITYEFFECT_ENDTURN (util:2587).
+  if (alive()) {
+    switch (a.ability) {
+    case Ability::RainDish:
+      if (effective_weather(battle) == Weather::Rain && mon.hp != mon.stats.hp) {
+        heal(mon, fraction(mon, 16));
+      }
+      break;
+    case Ability::ShedSkin:
+      // Random() % 3 == 0, only with a status to cure (util:2607). It cures
+      // sleep too, which is public, so the sleep count just resets.
+      if (mon.status.any() &&
+          rolls::coin(battle, player, &Action::shed_skin, 1, 3, options)) {
+        mon.status = Status::none();
+        v.nightmare = false;
+        if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
+      }
+      break;
+    case Ability::SpeedBoost:
+      // Not on the turn it came in (isFirstTurn, decision 14).
+      if (a.boosts.spe < 6 && a.first_turn != 2) a.boosts.spe++;
+      break;
+    case Ability::Truant:
+      a.truant = !a.truant;
+      break;
+    default:
+      break;
+    }
+  }
+
+  // ENDTURN_ITEMS1: ITEMEFFECT_NORMAL's Leftovers (util:3386).
+  if (alive() && holds(side, HoldEffect::Leftovers) && mon.hp != mon.stats.hp) {
+    heal(mon, fraction(mon, 16));
+  }
+
+  // ENDTURN_LEECH_SEED (util:1501): max HP / 8 from the seeded Pokémon, then
+  // the seeder (the foe's active Pokémon) gains what was lost, or loses it
+  // to the seeded Pokémon's Liquid Ooze (BattleScript_LeechSeedTurnDrain,
+  // bs1:3265). The seeded Pokémon faints first (bs1:3283).
+  const Player seeder = foe(player);
+  Pokemon& seeder_mon = battle.side(seeder).get(1);
+  if (v.leech_seed && alive() && !seeder_mon.fainted()) {
+    const bool ooze = a.ability == Ability::LiquidOoze;
+    const uint16_t drained = residual_damage(battle, player, fraction(mon, 8), options);
+    if (ooze) {
+      residual_damage(battle, seeder, drained, options);
+    } else {
+      heal(seeder_mon, drained);
+    }
+    if (Flow over = outcome(battle)) return over;
+  }
+
+  // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's
+  // counter, at most 15, times 1/16; 1/8.
+  if (alive() && mon.status.poisoned() && !mon.status.badly_poisoned()) {
+    residual_damage(battle, player, fraction(mon, 8), options);
+    if (Flow over = outcome(battle)) return over;
+  }
+  if (alive() && mon.status.badly_poisoned()) {
+    if (a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
+    residual_damage(battle, player, fraction(mon, 16) * a.toxic, options);
+    if (Flow over = outcome(battle)) return over;
+  }
+  if (alive() && mon.status.burned()) {
+    residual_damage(battle, player, fraction(mon, 8), options);
+    if (Flow over = outcome(battle)) return over;
+  }
+
+  // ENDTURN_NIGHTMARES (util:1553): 1/4 while asleep, else it ends.
+  if (v.nightmare && alive()) {
+    if (mon.status.asleep()) {
+      residual_damage(battle, player, fraction(mon, 4), options);
+      if (Flow over = outcome(battle)) return over;
+    } else {
+      v.nightmare = false;
+    }
+  }
+
+  // ENDTURN_CURSE (util:1574): 1/4.
+  if (v.cursed && alive()) {
+    residual_damage(battle, player, fraction(mon, 4), options);
+    if (Flow over = outcome(battle)) return over;
+  }
+
+  // ENDTURN_WRAP (util:1585): the hidden counter ticks first; while it
+  // lasts, 1/16, then the Pokémon is freed (chance.hpp, Binding).
+  if (v.wrapped != 0 && alive()) {
+    v.wrapped--;
+    const bool freed = v.wrapped == 0;
+    if constexpr (CHANCE<O>) {
+      rolls::tick(options.chance.actions.get(player).binding,
+                  options.chance.durations.get(player).binding, freed, 3, 6,
+                  1, options);
+    }
+    if (freed) {
+      a.wrapped_move = Move::None;
+    } else {
+      residual_damage(battle, player, fraction(mon, 16), options);
+      if (Flow over = outcome(battle)) return over;
+    }
+  }
+
+  // ENDTURN_DISABLE (util:1692): it ends silently if the Pokémon no longer
+  // knows the move (public), else the hidden timer ticks.
+  if (a.disable_timer != 0) {
+    bool known = false;
+    for (const MoveSlot& ms : a.moves) known |= ms.id == a.disabled_move;
+    if (!known) {
+      a.disabled_move = Move::None;
+      a.disable_timer = 0;
+      if constexpr (CHANCE<O>) options.chance.durations.get(player).disable = 0;
+    } else {
+      const bool ended = --a.disable_timer == 0;
+      if (ended) a.disabled_move = Move::None;
+      if constexpr (CHANCE<O>) {
+        rolls::tick(options.chance.actions.get(player).disable,
+                    options.chance.durations.get(player).disable, ended, 2, 5,
+                    1, options);
+      }
+    }
+  }
+
+  // ENDTURN_ENCORE (util:1713): it ends if the move was overwritten or its
+  // PP ran out (public), else the hidden timer ticks.
+  if (a.encore_timer != 0) {
+    const MoveSlot& ms = a.moves[a.encored_slot];
+    const bool lost = ms.id != a.encored_move || ms.pp == 0;
+    const bool ended = lost || --a.encore_timer == 0;
+    if constexpr (CHANCE<O>) {
+      if (lost) {
+        options.chance.durations.get(player).encore = 0;
+      } else {
+        rolls::tick(options.chance.actions.get(player).encore,
+                    options.chance.durations.get(player).encore, ended, 3, 6,
+                    1, options);
+      }
+    }
+    if (ended) {
+      a.encored_move = Move::None;
+      a.encore_timer = 0;
+    }
+  }
+
+  // ENDTURN_LOCK_ON, CHARGE, TAUNT (util:1734-1748). Lock-On lives on the
+  // target here (README decision 9), so it ticks in the target's pass; in
+  // singles the order can't matter.
+  if (v.lock_on != 0) v.lock_on--;
+  if (a.charge_timer != 0 && --a.charge_timer == 0) v.charged_up = false;
+  if (a.taunt != 0) a.taunt--;
+  return std::nullopt;
+}
+
 // HandleEndTurn_ContinueBattle (main:3932), then BattleTurnPassed's residuals
 // (main:3956) and HandleFaintedMonActions.
-template <typename O> constexpr Flow end_of_turn(Battle& battle, O&) {
+template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
     a.volatiles.flinched = false;
@@ -1803,11 +2116,19 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O&) {
       a.cancel_multi_turn_moves();
     }
   }
-  // TODO(plan step 4): DoFieldEndTurnEffects and DoBattlerEndTurnEffects.
-  // ENDTURN_ORDER (util:1209) takes the order's inputs here, with
-  // speeds(battle, request.move[0], request.move[1], true), and resolves it
-  // with first(..., true, options) at the first residual whose order
-  // matters, so the tie isn't drawn when nothing depends on it.
+  // ENDTURN_ORDER (util:1209): GetWhoStrikesFirst with the chosen moves'
+  // priority and the turn's Quick Claw draw, and its own tie draw, taken
+  // only when the order can matter.
+  const Request& r = battle.request;
+  const Player first =
+      residual_order_matters(battle)
+          ? detail::first(battle, speeds(battle, r.move[0], r.move[1], true),
+                          true, options)
+          : Player::P1;
+  if (Flow over = field_residuals(battle, first, options)) return over;
+  for (const Player p : {first, foe(first)}) {
+    if (Flow over = battler_residuals(battle, p, options)) return over;
+  }
   return faints(battle, Phase::FaintAfterResiduals);
 }
 

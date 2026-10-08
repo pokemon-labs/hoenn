@@ -613,6 +613,127 @@ void check_status_moves() {
   }
 }
 
+void check_residuals() {
+  helpers::Pokemon plain = IDLE;
+  plain.ability = Ability::ThickFat;
+  Null null{};
+  const auto turn = [&](Battle& b) {
+    return update(b, Choice::move(1), Choice::move(1), null);
+  };
+  {
+    // Poison 1/8, burn 1/8, toxic n/16 with its counter.
+    Battle b = started({plain}, {plain});
+    Pokemon& m1 = b.sides[0].get(1);
+    Pokemon& m2 = b.sides[1].get(1);
+    m1.status = Status::psn();
+    m2.status = Status::brn();
+    turn(b);
+    CHECK(m1.hp == m1.stats.hp - m1.stats.hp / 8);
+    CHECK(m2.hp == m2.stats.hp - m2.stats.hp / 8);
+    Battle c = started({plain}, {IDLE});
+    Pokemon& t = c.sides[0].get(1);
+    t.status = Status::tox();
+    turn(c);
+    CHECK(t.hp == t.stats.hp - t.stats.hp / 16);
+    turn(c);
+    CHECK(t.hp == t.stats.hp - 3 * (t.stats.hp / 16));
+    CHECK(c.sides[0].active.toxic == 2);
+  }
+  {
+    // Leftovers: 1/16, capped at max HP, before poison in the same pass, so
+    // a poisoned Pokémon at full HP gains nothing first.
+    Battle b = started({holding(plain, Item::Leftovers)}, {IDLE});
+    Pokemon& m = b.sides[0].get(1);
+    m.hp = uint16_t(m.stats.hp - 3);
+    turn(b);
+    CHECK(m.hp == m.stats.hp);
+    m.status = Status::psn();
+    turn(b);
+    CHECK(m.hp == m.stats.hp - m.stats.hp / 8);
+    turn(b);
+    CHECK(m.hp == m.stats.hp - 2 * (m.stats.hp / 8) + m.stats.hp / 16);
+  }
+  {
+    // Sandstorm: 1/16 to each Pokémon but Rock, Ground and Steel types; on
+    // its last turn it does nothing and ends.
+    Battle b = started({plain}, {helpers::detail::SKARMORY});
+    b.field.weather = Weather::Sandstorm;
+    b.field.weather_turns = 2;
+    const Pokemon& m = b.sides[0].get(1);
+    turn(b);
+    CHECK(m.hp == m.stats.hp - m.stats.hp / 16);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+    turn(b);
+    CHECK(m.hp == m.stats.hp - m.stats.hp / 16);
+    CHECK(b.field.weather == Weather::None && b.field.weather_turns == 0);
+  }
+  {
+    // The side timers count down and end.
+    Battle b = started({plain}, {IDLE});
+    b.sides[0].conditions.reflect = 2;
+    b.sides[1].conditions.safeguard = 1;
+    turn(b);
+    CHECK(b.sides[0].conditions.reflect == 1);
+    CHECK(b.sides[1].conditions.safeguard == 0);
+  }
+  {
+    // Both last Pokémon at 1 HP and burned: the faster dies first and its
+    // side loses; the battle ends before the slower one's burn.
+    helpers::Pokemon fast = JOLTEON;
+    fast.moves[0] = Move::Splash;
+    Battle b = started({fast}, {plain});
+    b.sides[0].get(1).hp = 1;
+    b.sides[0].get(1).status = Status::brn();
+    b.sides[1].get(1).hp = 1;
+    b.sides[1].get(1).status = Status::brn();
+    const Result r = update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(r.type() == Result::Lose);
+    CHECK(b.sides[1].get(1).hp == 1);
+  }
+  {
+    // A residual KO with a Pokémon left raises a replacement request.
+    Battle b = started({plain, JOLTEON}, {IDLE});
+    b.sides[0].get(1).hp = 1;
+    b.sides[0].get(1).status = Status::psn();
+    CHECK(turn(b) == Result::init(Result::None, Choice::Switch, Choice::Pass));
+  }
+  {
+    // Leech Seed: 1/8 from the seeded, to the seeder.
+    Battle b = started({plain}, {plain});
+    b.sides[0].active.volatiles.leech_seed = true;
+    Pokemon& seeded = b.sides[0].get(1);
+    Pokemon& seeder = b.sides[1].get(1);
+    seeder.hp = 10;
+    turn(b);
+    CHECK(seeded.hp == seeded.stats.hp - seeded.stats.hp / 8);
+    CHECK(seeder.hp == 10 + seeded.stats.hp / 8);
+  }
+  {
+    // Speed Boost from the lead's first turn.
+    const helpers::Pokemon ninjask = {
+        .species = Species::Ninjask,
+        .moves = {Move::Splash},
+        .ability = Ability::SpeedBoost,
+        .gender = Gender::Male,
+    };
+    Battle b = started({ninjask}, {IDLE});
+    turn(b);
+    CHECK(b.sides[0].active.boosts.spe == 1);
+  }
+  {
+    // A speed tie draws the residual order only when it can matter.
+    Battle b = started({plain}, {plain});
+    Observed o{};
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(o.chance.actions.turn.residual_tie == 0);
+    Battle c = started({plain}, {plain});
+    c.sides[0].active.volatiles.leech_seed = true;
+    Observed q{};
+    update(c, Choice::move(1), Choice::move(1), q);
+    CHECK(q.chance.actions.turn.residual_tie != 0);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -723,6 +844,7 @@ int main(int argc, char** argv) {
   check_confusion();
   check_confuse();
   check_status_moves();
+  check_residuals();
   check_accuracy();
   check_turn_cap();
 

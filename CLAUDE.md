@@ -430,8 +430,12 @@ unchecked claims.
   as soon as a side is out (bsc:3564–3577); the weather loop exits on it
   (bs1:3219) and `BattleTurnPassed` runs residuals only while it's 0
   (main:3961). If both last Pokémon would die to residuals, the faster dies
-  first and its side loses. Audit Explosion, Self-Destruct, Destiny Bond,
-  recoil and Perish Song the same way *(verify tie rules against Showdown)*.
+  first and its side loses. Showdown agrees: `fieldEvent` checks after
+  every handler (`sim/battle.ts:569`); the decomp's Leech Seed script has
+  no `checkteamslost`, and the code follows Showdown there (tested in
+  `check_frame`). Audit Explosion, Self-Destruct, Destiny Bond, recoil and
+  Perish Song the same way *(verify tie rules against Showdown)*. Open:
+  sand or hail KOing both last Pokémon at once may be a tie in Showdown.
 - **Baton Pass** has its own switch-in (main:3158–3217, bsc:4648; README
   decision 5).
   - Passes: stat stages; confusion (with its counter), Focus Energy,
@@ -592,7 +596,8 @@ feels like progress; every later mechanic inherits the frame.
   counts what's handled (see "Next session" for the current numbers).
 
 **Not started:** every other move effect (they only use PP), switch-in
-abilities and items, the residuals, the ability and item dispatchers,
+abilities and items, the berries and the Uproar, Thrash and Yawn
+residuals, the ability and item dispatchers,
 `min_ko_roll`, most scenario tests. Only the damage formula has been
 compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
 through the damage cases. birch still runs on ADV-Simulator and must be
@@ -634,15 +639,21 @@ adapted (see Interface).
   `detail::handled()` is what `tools/coverage` counts: 66% of move slots
   (92% of damaging ones). Gap: Synchronize (24 holders in `teams/`) doesn't
   pass the status back yet; it belongs to `moveend`'s ability dispatcher.
-- The release build's `soak` doesn't link: `soak.cpp` calls
-  `__sanitizer_set_death_callback` without sanitizers. This predates the
-  confusion and accuracy changes.
-- **Then:** the end of turn (`DoFieldEndTurnEffects`,
-  `DoBattlerEndTurnEffects`, as one ordered table) with the ability and item
-  dispatchers: Leftovers, poison and burn damage, weather, Truant's toggle,
-  switch-in abilities (Intimidate, Sand Stream, Drizzle) and items, Sitrus
-  and the status berries. Poison and burn do no damage yet. Then the status
-  moves by `tools/coverage`'s order.
+- Done (2026-10-07): the end of turn as straight-line code (decided over a
+  table): `field_residuals` (side timers, Wish, weather and sand/hail
+  damage) and `battler_residuals` per Pokémon in the residual order
+  (Ingrain, Rain Dish, Shed Skin, Speed Boost, Truant's toggle, Leftovers,
+  Leech Seed, poison, toxic, burn, Nightmare, Curse, binding, Disable,
+  Encore, Lock-On, Charge, Taunt). The residual tie is drawn only when the
+  order can matter (`residual_order_matters`). `soak` now builds in
+  release. About 3.5% of random soak games reach the turn cap: Struggle
+  against Leftovers stalls, once every move is out of PP.
+- **Then:** the item dispatcher (`ItemBattleEffects`: the berries in
+  `teams/` are Salac, Lum, Liechi, Petaya, Chesto; end of turn and after
+  damage), with `moveend`'s ability dispatcher (Synchronize, Static...);
+  the switch-in abilities (Intimidate, Sand Stream, Drizzle); Uproar,
+  Thrash and Yawn residuals. Then the status moves by `tools/coverage`'s
+  order (Roar, Calm Mind, Rest, Substitute, Protect, Spikes...).
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 

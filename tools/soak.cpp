@@ -22,7 +22,15 @@
 
 #include <unistd.h>
 
-#if defined(__has_include)
+// Only when ASan is on: the header can exist without the runtime linked.
+#if defined(__SANITIZE_ADDRESS__)
+#define PKMN_SOAK_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PKMN_SOAK_ASAN 1
+#endif
+#endif
+#if defined(PKMN_SOAK_ASAN) && defined(__has_include)
 #if __has_include(<sanitizer/common_interface_defs.h>)
 #include <sanitizer/common_interface_defs.h>
 #define PKMN_SOAK_SANITIZER 1
