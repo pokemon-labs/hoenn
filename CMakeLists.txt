@@ -57,6 +57,10 @@ target_link_libraries(check_frame PRIVATE pkmn_gen3 pkmn_warnings)
 add_executable(soak tools/soak.cpp)
 target_link_libraries(soak PRIVATE pkmn_gen3 pkmn_warnings)
 
+# Which moves on the teams have a written mechanic (tools/coverage.cpp).
+add_executable(coverage tools/coverage.cpp)
+target_link_libraries(coverage PRIVATE pkmn_gen3 pkmn_warnings)
+
 # The team corpus lives in birch, beside this repo.
 set(PKMN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../teams/adv
     CACHE PATH "Showdown export teams for check_teams")

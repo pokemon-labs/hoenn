@@ -111,8 +111,13 @@ competitive play, not cartridge-exact behaviour for every input.
 ## Mechanics references
 
 - **Read Emerald, test against Showdown.** Write mechanics from the decomp
-  (`pokeemerald/`); tests check behaviour against Showdown. Record
-  disagreements in `src/gen3/README.md`.
+  (`pokeemerald/`); tests check behaviour against Showdown.
+- **Where they differ visibly, follow Showdown** (decided 2026-10-07; so
+  far crit after immunity, Quick Claw's 1/5, the damage arithmetic). The
+  log will mirror Showdown's, so matching it pays. Note a small difference
+  in a short comment at the code, not the README; the README is for layout
+  decisions and big deviations. Check `showdown/` when writing a mechanic
+  whose Showdown version might differ.
 - **Link battles are the default branch.** Where the decomp branches on
   `BATTLE_TYPE_LINK` (or Frontier and the like), take the link path. Where
   Showdown departs from it anyway, match Showdown and record the exception in
@@ -534,8 +539,11 @@ feels like progress; every later mechanic inherits the frame.
   its side loses); double KO on the first action (does the replacement act,
   and in what order); Baton Pass resumes at the foe's move and the toxic
   counter restarts.
-- **Matching Showdown** is the target; how to compare (scenario replays,
-  outcome distributions) isn't designed.
+- **For now, testing is random battles in debug** (`soak`, decided
+  2026-10-07): run many games under ASan/UBSan after each change. The user
+  has a design for checking correctness against Showdown (its PRNG can't be
+  matched) once the mechanics are in; don't design one.
+- **Matching Showdown** is the target.
 - **Differential runs against ADV-Simulator** from one C++ driver,
   comparing outcome distributions over the same team pairs.
 - **Soak runs** of millions of random self-play games under ASan/UBSan,
@@ -579,8 +587,10 @@ feels like progress; every later mechanic inherits the frame.
   replayable per-game seeds, a 100-game `ctest` case); status and flinch
   secondaries, secondary stat drops and Meteor Mash's raise, Tri Attack,
   Hidden Power, Earthquake, Thunder, Sky Uppercut, Double-Edge, Explosion,
-  Seismic Toss, Night Shade, Rapid Spin and Brick Break. About 85% of the
-  damaging move slots in `teams/` now work.
+  Seismic Toss, Night Shade, Rapid Spin and Brick Break. `tools/coverage`
+  counts what's handled: 92% of damaging move slots in `teams/`, 59% of all
+  slots; the top missing moves are status moves (Toxic, Roar, Thunder Wave,
+  Calm Mind, Rest, Substitute, Protect, Spikes...).
 
 **Not started:** every other move effect (they only use PP), switch-in
 abilities and items, the residuals, the ability and item dispatchers,
@@ -589,15 +599,39 @@ compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
 through the damage cases. birch still runs on ADV-Simulator and must be
 adapted (see Interface).
 
+**Next session** (step 4, on branch `step4`; ask before each open choice):
+
+- **Decisions for the user**, each blocking what follows it:
+  - Confusion's self-hit damage: Showdown's arithmetic (its gen4 confusion
+    condition calls `getDamage` with a typeless 40-power move) or the
+    decomp's. Blocks confusion, Dynamic Punch, Confuse Ray, Swagger; the
+    canceler asserts on confusion until then.
+  - Accuracy: the decomp's arithmetic now (README, "Hit backbone"); by the
+    follow-Showdown rule it should probably switch. Confirm.
+  - The per-turn `ProtectStruct` as a struct on `update`'s stack (README
+    decision 2). Blocks Protect, Endure, Counter, Mirror Coat, Magic Coat,
+    Snatch.
+  - Skipping the damage roll when every roll KOs (fewer chance nodes, but
+    it changes the `Actions` key). Can wait for the birch adaptation.
+  - Brick Break breaks screens into a Ghost type, as the decomp; check
+    Showdown.
+  - Merge `step3` and `step4` into main?
+- **Then:** the end of turn (`DoFieldEndTurnEffects`,
+  `DoBattlerEndTurnEffects`, as one ordered table) with the ability and item
+  dispatchers: Leftovers, poison and burn damage, weather, Truant's toggle,
+  switch-in abilities (Intimidate, Sand Stream, Drizzle) and items, Sitrus
+  and the status berries. Poison and burn do no damage yet. Then the status
+  moves by `tools/coverage`'s order.
+- The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
+  `IVs: 3 Atk`) is uncommitted in the birch repo.
+
 **Open:**
 
 - Check the `Actions` and `Durations` drafts against the `Battle` layout.
 - `Item::KnockedOff` and a `Move` sentinel for `MOVE_UNAVAILABLE` in the
   generator; bounds of `bide_damage` and `future_sight_damage` (u32 for now).
 - The per-`Effect` behaviour (hand-written with the mechanics).
-- A coverage report of the effects, abilities and hold effects `teams/` uses.
-- Trace the battle start (`TryDoEventsBeforeFirstTurn`): switch-in
-  abilities and items before turn 1, possibly in speed order with a tie draw.
+- Extend `tools/coverage` to the abilities and hold effects `teams/` uses.
 - Team parsing enforces only Species Clause; the other Smogon ADV clauses
   aren't checked.
 
