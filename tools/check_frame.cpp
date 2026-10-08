@@ -1192,6 +1192,59 @@ void check_encore() {
   CHECK(b.sides[1].active.encored_move == Move::Splash);
 }
 
+// Solar Beam: charges a turn (PP spent, the move locked, Protect no help),
+// then hits with no PP; in sun it hits at once; a full paralysis on the
+// second turn loses it.
+void check_solar_beam() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::SolarBeam;
+  user.moves[1] = Move::SunnyDay;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Splash;
+  target.moves[3] = Move::Protect;
+  Observed o{};
+  o.calc.overrides.p1.hit = Optional::True;
+  const uint8_t pp = max_pp(Move::SolarBeam, 3);
+  Battle b = started({user}, {target});
+  const Pokemon& t = b.sides[1].get(1);
+  const ActivePokemon& a = b.sides[0].active;
+  const auto forced = [&] {
+    std::array<Choice, MAX_CHOICES> out{};
+    const uint8_t n = choices(b, Player::P1, Choice::Move, out);
+    return n == 1 && out[0] == Choice::move(0);
+  };
+  // Charging through Protect.
+  update(b, Choice::move(1), Choice::move(4), o);
+  CHECK(t.hp == t.stats.hp);
+  CHECK(a.volatiles.multiple_turns && a.locked_move == Move::SolarBeam);
+  CHECK(b.sides[0].get(1).moves[0].pp == pp - 1);
+  CHECK(forced());
+  update(b, Choice::move(0), Choice::move(3), o);
+  CHECK(t.hp < t.stats.hp);
+  CHECK(!a.volatiles.multiple_turns);
+  CHECK(b.sides[0].get(1).moves[0].pp == pp - 1);
+  CHECK(!forced());
+  // Protect on the second turn blocks it.
+  update(b, Choice::move(1), Choice::move(3), o);
+  const uint16_t hp = t.hp;
+  update(b, Choice::move(0), Choice::move(4), o);
+  CHECK(t.hp == hp && !a.volatiles.multiple_turns);
+  // A full paralysis on the second turn loses the charge.
+  b.sides[0].get(1).status = Status::par();
+  o.calc.overrides.p1.paralysis = Optional::False;
+  update(b, Choice::move(1), Choice::move(3), o);
+  CHECK(a.volatiles.multiple_turns);
+  o.calc.overrides.p1.paralysis = Optional::True;
+  update(b, Choice::move(0), Choice::move(3), o);
+  CHECK(t.hp == hp && !a.volatiles.multiple_turns && !forced());
+  // In sun it hits at once.
+  b.sides[0].get(1).status = Status::none();
+  o.calc.overrides.p1.paralysis = Optional::None;
+  update(b, Choice::move(2), Choice::move(3), o);
+  update(b, Choice::move(1), Choice::move(3), o);
+  CHECK(t.hp < hp && !a.volatiles.multiple_turns);
+}
+
 // The weather moves: 5 turns counting this one, replacing an ability's
 // permanent weather, failing on the same weather.
 void check_weather_moves() {
@@ -2414,6 +2467,7 @@ int main(int argc, char** argv) {
   check_knock_off();
   check_thief();
   check_encore();
+  check_solar_beam();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();

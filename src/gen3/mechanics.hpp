@@ -1266,6 +1266,9 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
         a.sleep_skipped = 0;
       } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
         a.sleep_skipped = 0;
+        // As Showdown's onMoveAborted: a charged move is lost. The decomp
+        // keeps it until the end of the turn (main:3944).
+        a.cancel_multi_turn_moves();
         m.unable = true;
         return false;
       } else {
@@ -1283,6 +1286,8 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     if (rolls::thaw(battle, player, options)) {
       mon.status = Status::none();
     } else if (!thaw_hit) {
+      // As Showdown's onMoveAborted; the decomp keeps a charged move.
+      a.cancel_multi_turn_moves();
       return false;
     }
   }
@@ -1679,6 +1684,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Endeavor:
   case Effect::KnockOff:
   case Effect::Thief:
+  case Effect::SolarBeam:
   case Effect::Superpower:
   case Effect::Overheat:
   case Effect::Return:
@@ -2309,6 +2315,30 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (effect == Effect::FocusPunch && m.turn->hit[index(player)]) {
     pp_reduce(battle, player, m);
     return moveend(battle, player, m, options);
+  }
+  // BattleScript_EffectSolarBeam (bs1:1903). In sun (not suppressed by
+  // Cloud Nine or Air Lock) it fires at once: the plain hit. Otherwise the
+  // first turn charges (BattleScriptFirstChargingTurn, bs1:795): ppreduce
+  // without an attack string, then MOVE_EFFECT_CHARGING locks the move
+  // (STATUS2_MULTIPLETURNS and gLockedMoves, bsc:2571), and moveend. Protect
+  // doesn't stop the charge (the canceler skips a two-turn move's first
+  // turn; here Protect is in accuracy(), which the charge doesn't reach).
+  // The forced second turn (BattleScript_TwoTurnMovesSecondTurn, bs1:785)
+  // clears the lock after the canceler and hits from the accuracy check
+  // with no PP. Showdown's gen3 agrees: twoturnmove, PP on the first turn,
+  // onMoveAborted (see cancel()). Rain, sand and hail halve the power
+  // (damage.hpp). Log: Prepare, then Move on the second turn.
+  if (effect == Effect::SolarBeam) {
+    Volatiles& v = battle.side(player).active.volatiles;
+    if (v.multiple_turns) {
+      v.multiple_turns = false;
+      m.no_pp = true;
+    } else if (effective_weather(battle) != Weather::Sun) {
+      pp_reduce(battle, player, m);
+      v.multiple_turns = true;
+      battle.side(player).active.locked_move = m.move;
+      return moveend(battle, player, m, options);
+    }
   }
   Pokemon& user = battle.side(player).get(1);
 
