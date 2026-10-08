@@ -80,7 +80,8 @@ result, they don't drive the design.
      correct input pays nothing for checks. `update` doesn't return
      `Result::Error` for bad input.
    - Every loop has a fixed bound. After `turn += 1`, `update` returns `Tie`
-     once the turn reaches 1000 (libpkmn `gen1/mechanics.zig:1650`).
+     once the turn reaches 1001 (`MAX_TURNS`): turn 1000 is played, as
+     Showdown (`sim/battle.ts:1843`); libpkmn ties at 1000.
    - `Battle` is trivially copyable, with `static_assert`s on its size, and
      holds no pointers, strings or containers.
    - Debug and test builds run under ASan and UBSan with `assert` on, and
@@ -917,27 +918,28 @@ adapted (see Interface).
   charging Pokémon left a forced choice with no lock (now, as Showdown, the
   lock stays until the move is aborted). `soak` now reports the game seed
   on a release segfault.
-- **Resume here (2026-10-08, uncommitted work on `main`).** Built the
-  realizability harness with a temporary state guard (decided with the
-  user; the log comparison replaces it later): `tools/showdown_traces.cjs`
-  (seeded Showdown 0.11.11 games over `teams/adv/all.txt`, teams through
-  the gen3ou validator, JSONL traces) and `tools/check_showdown.cpp` (+
-  `tools/json.hpp`; `--why`, `--game`, `--tries`; random branch search;
-  guard: HP, status, PP, items, boosts, main volatiles, Substitute HP, side
+- **Resume here (2026-10-08).** The realizability harness, with a
+  temporary state guard (decided with the user; the log comparison
+  replaces it later): `tools/showdown_traces.cjs` (seeded Showdown 0.11.11
+  games over `teams/adv/all.txt`, teams through the gen3ou validator, JSONL
+  traces) and `tools/check_showdown.cpp` (+ `tools/json.hpp`; `--why`,
+  `--game`, `--tries`; random branch search; guard: HP, status, PP, items,
+  boosts, main volatiles, Substitute HP, Protect's `stall` duration, side
   conditions, weather, residual timing). Not in ctest (traces aren't
   committed). Run: `node tools/showdown_traces.cjs --games 1000 --seed 7 >
-  t.jsonl; build/release/check_showdown --quiet t.jsonl`. Now 958/1000
-  games match to the end. Fixed via it, all following Showdown (README
-  shortlist): Pressure on field-wide moves and Sleep Talk, Truant at the
-  battle start, Thief's Choice Band lock, Speed rounding, end-of-turn order
-  by Speed, sand/hail and Perish Song double KOs tie, Pursuit on a
-  switching target (`pursues()`, `MoveState::pursuing`). `calc_stats`
-  matches Showdown on every team. Open, next: (1) 24 PP mismatches, all
-  with Sleep Talk: we take one PP more than Showdown; (2) 11 turn-cap
-  games: Showdown ties a step later (at turn 1001's start); (3) a few
-  singletons (Protect failing then hit, a tox, Sleep Talk requests).
-  Then the log (opcodes, formatter; README "Protocol"), replacing the
-  guard with line comparison. Nothing from this session is committed.
+  t.jsonl; build/release/check_showdown --quiet t.jsonl`. **Every game
+  matches to the end** on seeds 7 and 8 (2000 games), one only past the
+  1M-try cap (game 816 of seed 7: two crits, a 10% drop and two rolls; it
+  matched at 2.03M). Fixed via it, all following Showdown (README
+  shortlist): Pressure on field-wide moves and on Sleep Talk itself
+  (Showdown's `'self'`; the decomp's DEPENDS takes 2 PP), Truant at the
+  battle start, Thief's Choice Band lock, Speed rounding, end-of-turn
+  order by Speed, sand/hail and Perish Song double KOs tie, Pursuit on a
+  switching target, the turn cap (turn 1000 is played), Protect's chain
+  ending after any turn without a success (`ActivePokemon::stall`), and
+  Endure at +4 (likely a Showdown data bug, followed anyway). Next: the
+  log (opcodes, formatter; README "Protocol"), replacing the guard with
+  line comparison, keeping the guard (see the realizability Q&A, gap 6).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.

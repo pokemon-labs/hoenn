@@ -49,7 +49,12 @@ using Flow = std::optional<Result>;
 
 constexpr uint8_t index(Player p) { return uint8_t(p); }
 
+// Showdown's gen3 Endure keeps the base data's +4: its gen4 mod lowers
+// Protect and Detect to +3 but not Endure. The decomp has all three at +3,
+// so Endure goes first there only by speed. Visible in the order: this
+// follows Showdown (README shortlist).
 constexpr int8_t priority(Move move) {
+  if (move == Move::Endure) return 4;
   return move == Move::None ? 0 : get(move).priority;
 }
 
@@ -1605,10 +1610,15 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
 // include the foe (getMoveTargets, sim/pokemon.ts:791; gen3 scripts.ts:173),
 // which adds the field-wide moves the decomp aims at the user (Showdown's
 // target 'all': Haze, Perish Song, Mud Sport, Water Sport and the weathers)
-// and Conversion 2 ('normal'). This follows Showdown.
+// and Conversion 2 ('normal'). This follows Showdown. The reverse: Sleep
+// Talk is MOVE_TARGET_DEPENDS in the decomp, so Pressure takes 2 PP from it,
+// but Showdown's 'self' target takes none from Sleep Talk itself, only from
+// the move it calls (sleep_talk). Metronome, Assist, Snatch and Magic Coat
+// are DEPENDS too; check them against Showdown when they're written.
 constexpr bool pressure_applies(const Battle& battle, Player player, Move move,
                                 bool self) {
   if (battle.side(foe(player)).active.ability != Ability::Pressure) return false;
+  if (move == Move::SleepTalk) return false;
   if (!self) return true;
   switch (move) {
   case Move::Haze:
@@ -3379,14 +3389,17 @@ constexpr void substitute(Battle& battle, Player player, MoveState& m,
 }
 
 // BattleScript_EffectProtect and BattleScript_EffectEndure (bs1), for
-// Protect, Detect and Endure; Cmd_setprotectlike (bsc:6503). The count of
-// consecutive successes restarts unless the last move that resulted was
-// one of the three. It fails when the user acts last this turn
-// (gCurrentTurnActionNumber, Showdown's queue.willAct()), or on the
-// success draw (rolls::protect); a failure restarts the count and marks
-// the move MISSED. Showdown's gen3 stall agrees (it expires after a turn
-// without one of the three, and is removed on a failure), except past the
-// fourth success (see rolls::protect). Log: SingleTurn, or Fail.
+// Protect, Detect and Endure; Cmd_setprotectlike (bsc:6503). It fails when
+// the user acts last this turn (gCurrentTurnActionNumber, Showdown's
+// queue.willAct()), or on the success draw (rolls::protect); a failure
+// restarts the count and marks the move MISSED. The count of consecutive
+// successes restarts, as Showdown's gen3 stall (gen5 conditions.ts:24:
+// duration 2, so it expires at the end of a turn without a success), after
+// any turn without a successful use, `stall` timing it. The decomp restarts
+// it only when the last resulting move (bsc:6506) isn't one of the three,
+// so a turn the user doesn't act at all (its action cancelled by a faint)
+// keeps the chain there. Past the fourth success, see rolls::protect. Log:
+// SingleTurn, or Fail.
 template <typename O>
 constexpr void protect(Battle& battle, Player player, MoveState& m,
                        O& options) {
@@ -3394,10 +3407,7 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   ActivePokemon& a = battle.side(player).active;
-  const Move last = a.last_resulting_move;
-  if (last != Move::Protect && last != Move::Detect && last != Move::Endure) {
-    a.protect_uses = 0;
-  }
+  if (a.stall == 0) a.protect_uses = 0;
   const uint8_t n = a.protect_uses < 3 ? a.protect_uses : 3;
   if (!m.first || (n != 0 && !rolls::protect(battle, player, n, options))) {
     a.protect_uses = 0;
@@ -3410,6 +3420,7 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
     m.turn->endure[index(player)] = true;
   }
   if (a.protect_uses != UINT8_MAX) a.protect_uses++;
+  a.stall = 2;
   moveend(battle, player, m, options);
 }
 
@@ -4698,6 +4709,13 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     if (Flow over = battler_residuals(battle, p, options)) return over;
   }
   for (const Player p : {first, foe(first)}) perish_count(battle, p, options);
+  // Showdown's stall expires with the residuals, before a residual faint's
+  // replacement: a turn without a successful Protect, Detect or Endure ends
+  // the chain (protect()).
+  for (Side& side : battle.sides) {
+    ActivePokemon& a = side.active;
+    if (a.stall != 0 && --a.stall == 0) a.protect_uses = 0;
+  }
   if (Flow over = outcome(battle)) return over;
   return faints(battle, Phase::FaintAfterResiduals);
 }

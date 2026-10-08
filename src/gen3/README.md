@@ -213,7 +213,9 @@ is the same and only the messages differ.
 | Leech Seed, Taunt, Encore vs Protect/evasion | fail before the accuracy draw | draw first, so a miss is logged (log only) |
 | Quick Claw activation | — | not logged by Showdown's gen3 (log only) |
 | Pressure on field-wide moves | none (`MOVE_TARGET_USER`): weathers, Haze, Perish Song... | an extra PP (target `'all'` includes the foe); Conversion 2 too |
-| Sleep Talk into Pressure | no extra PP | the called move's Pressure PP comes off Sleep Talk |
+| Sleep Talk into Pressure | 2 PP for Sleep Talk itself (`MOVE_TARGET_DEPENDS`), none for the called move | 1 for Sleep Talk (`'self'`), plus the called move's extra PP |
+| Protect's chain after a turn without acting | kept (`gLastResultingMoves` unchanged) | ended (`stall` expires after a turn without a success) |
+| Endure's priority | +3, as Protect and Detect | +4 (the gen4 mod lowers only Protect and Detect) |
 | Thief taking a Choice Band | not locked (item arrives after `MOVEEND_CHOICE_MOVE`) | locked into Thief |
 | Speed | floors per factor; weather ×2 before the stage | stage, then modifiers chained and rounded once (paralysis 147 and 149 both 37) |
 | End-of-turn order | `GetWhoStrikesFirst`: move priority, Quick Claw | Speed alone |
@@ -682,7 +684,8 @@ the changes.
 | `transformedMonPersonality` | — | | | | dropped |
 | `disabledMove`, `disableTimer` | `disabled_move`, `disable_timer` | `Move`, u8 0–5 | | yes | set 2–5 (bsc:8007) |
 | `encoredMove`, `encoredMovePos`, `encoreTimer` | `encored_move`, `encored_slot`, `encore_timer` | `Move`, u8 0–3, u8 0–6 | | yes | set 3–6 (bsc:8039) |
-| `protectUses` | `protect_uses` | u8 | | | ++ on success (bsc:6526); reset unless the last resulting move was Protect, Detect or Endure (bsc:6506). Unbounded in the decomp: saturate, and clamp the rate index |
+| `protectUses` | `protect_uses` | u8 | | | ++ on success (bsc:6526); reset when `stall` runs out (Showdown), where the decomp resets unless the last resulting move was Protect, Detect or Endure (bsc:6506). Unbounded in the decomp: saturate, and clamp the rate index |
+| — | `stall` | u8 | | | Showdown's stall duration, 0-2: 2 on a success, counted down after the residuals; at 0 the chain ends |
 | `stockpileCounter` | `stockpile` | u8 0–3 | | | |
 | `substituteHP` | `substitute_hp` | u8 | **BP** | | max HP / 4 ≤ 178, fits |
 | `perishSongTimer` | `perish_song_timer` | u8 0–3 | **BP** | | |

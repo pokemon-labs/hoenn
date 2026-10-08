@@ -1865,7 +1865,7 @@ void check_protect() {
   {
     Battle b = started({user}, {DUGTRIO, JOLTEON});
     b.sides[0].active.protect_uses = 2;
-    b.sides[0].active.last_resulting_move = Move::Protect;
+    b.sides[0].active.stall = 1;
     Observed o{};
     update(b, Choice::move(1), Choice::swap(2), o);
     CHECK(b.sides[0].active.protect_uses == 0);
@@ -1897,6 +1897,22 @@ void check_protect() {
     CHECK(c.sides[0].active.protect_uses == 3);
     CHECK(q.chance.probability.p == 1 && q.chance.probability.q == 4);
   }
+  // As Showdown's stall, the chain ends after a turn without a successful
+  // use, even one the user didn't act in (its last resulting move is still
+  // Protect, which kept the chain in the decomp): no draw.
+  {
+    Battle b = started({user}, {DUGTRIO});
+    first(b);
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].active.stall == 1 && b.sides[0].active.protect_uses == 1);
+    b.sides[0].active.stall = 0; // as after a turn without acting
+    b.sides[0].active.last_resulting_move = Move::Protect;
+    Observed o{};
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(o.chance.actions.p1.protect == Optional::None);
+    CHECK(b.sides[0].active.protect_uses == 1);
+  }
   // Endure leaves 1 HP against a lethal hit.
   {
     Battle b = started({user}, {DUGTRIO});
@@ -1918,7 +1934,7 @@ void check_protect() {
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[0].get(1).species == Species::Snorlax);
     b.sides[0].active.protect_uses = 0;
-    b.sides[0].active.last_resulting_move = Move::None;
+    b.sides[0].active.stall = 0;
     update(b, Choice::move(1), Choice::move(2), null);
     CHECK(!b.sides[0].get(1).status.any());
     helpers::Pokemon gengar = {

@@ -514,6 +514,7 @@ struct ActivePokemon {
   uint8_t encore_timer;     // 0-6. Hidden.
   uint8_t encored_slot;     // 0-3
   uint8_t protect_uses;     // unbounded in the decomp: saturate
+  uint8_t stall;            // Showdown's stall duration, 0-2 (protect())
   uint8_t stockpile;        // 0-3
   uint8_t perish_song_timer;// 0-3. Baton Pass keeps.
   uint8_t fury_cutter;      // 0-5
@@ -566,7 +567,8 @@ struct ActivePokemon {
            disable_timer <= 5 && encore_timer <= 6 && encored_slot <= 3 &&
            stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
-           first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF;
+           first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
+           stall <= 2;
   }
 
   friend constexpr bool operator==(const ActivePokemon&, const ActivePokemon&) = default;
@@ -649,8 +651,10 @@ struct Battle {
   Field field;
   Request request;
 
-  // The hard cap: update returns Tie once turn reaches it (CLAUDE.md).
-  static constexpr uint16_t MAX_TURNS = 1000;
+  // The hard cap: update returns Tie once turn reaches it (CLAUDE.md). As
+  // Showdown (sim/battle.ts:1843, `turn > 1000`): turn 1000 is played and the
+  // tie comes as turn 1001 starts. libpkmn ties at 1000.
+  static constexpr uint16_t MAX_TURNS = 1001;
 
   constexpr Side& side(Player p) { return sides[uint8_t(p)]; }
   constexpr const Side& side(Player p) const { return sides[uint8_t(p)]; }

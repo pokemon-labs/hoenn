@@ -220,6 +220,13 @@ std::string active_mismatch(const Battle& battle, Player p,
              ", Showdown " + std::to_string(theirs) + ";";
     }
   }
+  // Showdown's stall duration, which our `stall` mirrors (protect()): a
+  // Protect whose outcome changes nothing visible (the foe's move fails
+  // anyway) can otherwise match either branch and drift the count.
+  if (a.stall != sa["stall"].integer()) {
+    why += std::string(" ") + side + " stall " + std::to_string(a.stall) +
+           ", Showdown " + std::to_string(sa["stall"].integer()) + ";";
+  }
   if (a.volatiles.substitute && a.substitute_hp != sa["subhp"].integer()) {
     why += std::string(" ") + side + " Substitute HP " +
            std::to_string(a.substitute_hp) + ", Showdown " +

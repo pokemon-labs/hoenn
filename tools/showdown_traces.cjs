@@ -26,7 +26,7 @@
 //                                           |split| triplets included,
 //                                           |t:| timestamps dropped
 //    "state":{"p1":[[species,hp,maxhp,status,[pp...],item],...],"p2":[...],
-//             "p1active":{boosts,volatiles,subhp,moves},"p2active":...,
+//             "p1active":{boosts,volatiles,subhp,stall,moves},"p2active":...,
 //             "p1side":{spikes,reflect,lightscreen,safeguard,mist},"p2side":...,
 //             "weather":ID},
 //    "result":null | "p1" | "p2" | "tie"}
@@ -130,6 +130,7 @@ function state(battle) {
     out[side.id + 'active'] = a ? {
       boosts: a.boosts, volatiles: Object.keys(a.volatiles),
       subhp: a.volatiles.substitute ? a.volatiles.substitute.hp : 0,
+      stall: a.volatiles.stall ? a.volatiles.stall.duration : 0,
       moves: a.moveSlots.map(m => [m.id, m.pp, !!m.disabled]),
     } : null;
   }
