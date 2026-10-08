@@ -881,6 +881,37 @@ void check_baton_pass() {
   }
 }
 
+// Wish: it lands at the end of the next turn, fails while pending, and heals
+// whoever is active then by its own max HP / 2.
+void check_wish() {
+  helpers::Pokemon wisher = SNORLAX;
+  wisher.moves[0] = Move::Wish;
+  Null null{};
+  {
+    Battle b = started({wisher}, {IDLE});
+    Pokemon& mon = b.sides[0].get(1);
+    mon.hp = 1;
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].conditions.wish == 1 && b.sides[0].conditions.wisher == 1);
+    CHECK(mon.hp == 1);
+    // A second Wish fails (and uses PP); the first lands.
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(mon.moves[0].pp == max_pp(Move::Wish, 3) - 2);
+    CHECK(b.sides[0].conditions.wish == 0 && b.sides[0].conditions.wisher == 0);
+    CHECK(mon.hp == 1 + mon.stats.hp / 2);
+  }
+  // The Pokémon that switched in takes it, by its own max HP.
+  {
+    Battle b = started({wisher, JOLTEON}, {IDLE});
+    update(b, Choice::move(1), Choice::move(1), null);
+    Pokemon& jolteon = b.sides[0].get(2);
+    jolteon.hp = 1;
+    update(b, Choice::swap(2), Choice::move(1), null);
+    CHECK(b.sides[0].get(1).species == Species::Jolteon);
+    CHECK(b.sides[0].get(1).hp == 1 + b.sides[0].get(1).stats.hp / 2);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -1791,6 +1822,7 @@ int main(int argc, char** argv) {
   check_stat_moves();
   check_roar();
   check_baton_pass();
+  check_wish();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

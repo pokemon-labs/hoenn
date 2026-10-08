@@ -3057,6 +3057,26 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   m.pass = c.pass;
 }
 
+// BattleScript_EffectWish (bs1:2358), Cmd_trywish (bsc:9292): after the
+// canceler, attackstring and ppreduce it sets the user's side's counter to
+// 2 and remembers the wisher, or fails while one is pending. Showdown's
+// gen4 slot condition agrees (duration 2; addSlotCondition fails while it's
+// there). It lands in field_residuals. Log: Fail.
+template <typename O>
+constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& side = battle.side(player);
+  if (side.conditions.wish != 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  side.conditions.wish = 2;
+  side.conditions.wisher = side.order[0];
+  moveend(battle, player, m, options);
+}
+
 // The healing moves' effects (heal_move).
 constexpr bool heals(Effect effect) {
   return effect == Effect::RestoreHp || effect == Effect::Softboiled ||
@@ -3076,7 +3096,7 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Roar || effect == Effect::Substitute ||
          effect == Effect::Protect || effect == Effect::Endure ||
          effect == Effect::Spikes || heals(effect) ||
-         effect == Effect::BatonPass;
+         effect == Effect::BatonPass || effect == Effect::Wish;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3115,6 +3135,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Spikes) return spikes_move(battle, player, m, options);
   if (heals(effect)) return heal_move(battle, player, m, options);
   if (effect == Effect::BatonPass) return baton_pass(battle, player, m, options);
+  if (effect == Effect::Wish) return wish(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then

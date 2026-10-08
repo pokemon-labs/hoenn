@@ -745,13 +745,14 @@ adapted (see Interface).
   slots, 95% of damaging ones.
 - Done (2026-10-07): Baton Pass (see the checklist), with the frame's
   `BatonPass` request and resume. `tools/coverage`: 91% of move slots.
+- Done (2026-10-07): the Wish move (its landing was already in
+  `field_residuals`); the decomp and Showdown agree. 92%.
 - Noted for Counter and Mirror Coat: Showdown's gen3 protect flag is on
   them (the decomp's isn't), and the decomp counts Hidden Power as
   physical whatever its type where Showdown uses the type. Follow
   Showdown; they'll need physical and special damage in `Turn`.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Wish, Leech Seed, Refresh, Aromatherapy, Counter, Giga Drain,
-  Taunt...). Uproar and Thrash (with the
+  (Leech Seed, Refresh, Aromatherapy, Counter, Giga Drain, Taunt...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
