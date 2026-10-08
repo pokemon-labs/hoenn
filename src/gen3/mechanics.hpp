@@ -1164,6 +1164,9 @@ struct MoveState {
   // Baton Pass worked: the user's side picks the recipient after the action
   // (Phase::BatonPass), as Showdown's switchFlag.
   bool pass;
+  // gBattleStruct->changedItems for the user: the item Thief or Covet took,
+  // given to the user at MOVEEND_CHANGED_ITEMS. None when nothing was taken.
+  Item stolen;
   // This turn's ProtectStruct; set by use_move, null only for the
   // residuals' MoveState, which never reads it.
   Turn* turn;
@@ -1675,6 +1678,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Absorb:
   case Effect::Endeavor:
   case Effect::KnockOff:
+  case Effect::Thief:
   case Effect::Superpower:
   case Effect::Overheat:
   case Effect::Return:
@@ -2200,7 +2204,8 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     if (!known) a.choice_move = Move::None;
   }
 
-  // TODO(plan step 4): MOVEEND_CHANGED_ITEMS (Trick, Thief, Covet).
+  // MOVEEND_CHANGED_ITEMS (Thief and Covet; Trick is TODO(plan step 4)).
+  if (m.stolen != Item::None) side.get(1).item = m.stolen;
 
   // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends the
   // attacker's semi-invulnerable turn.
@@ -2463,6 +2468,26 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       target.item != Item::None && target.item != Item::KnockedOff &&
       !(foe_side.active.ability == Ability::StickyHold && !target.fainted())) {
     target.item = Item::KnockedOff;
+    foe_side.active.choice_move = Move::None;
+  }
+
+  // Thief and Covet (bs1:1440, MOVE_EFFECT_STEAL_ITEM, bsc:2738): after a
+  // hit on the target itself (not its Substitute), fainted or not, an
+  // empty-handed user takes the target's item, unless the target's Sticky
+  // Hold keeps it (also when fainted: Showdown's gen4 onTakeItem runs before
+  // the faint is processed). The target's Choice Band lock ends (bsc:2799);
+  // the user gets the item at MOVEEND_CHANGED_ITEMS, after its own Choice
+  // Band check, so it isn't locked into Thief. A Knocked Off item can't be
+  // taken, nor can a user whose item was knocked off take one (Showdown's
+  // takeItem, gen <= 4). Showdown's gen3 doesn't keep the decomp's Enigma
+  // Berry and Mail out, and this follows it. Log: EndItem [silent] and Item
+  // [from] Thief, or Activate Sticky Hold.
+  if (effect == Effect::Thief && m.damaged && !user.fainted() &&
+      user.item == Item::None && target.item != Item::None &&
+      target.item != Item::KnockedOff &&
+      foe_side.active.ability != Ability::StickyHold) {
+    m.stolen = target.item;
+    target.item = Item::None;
     foe_side.active.choice_move = Move::None;
   }
 

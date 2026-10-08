@@ -1253,6 +1253,52 @@ void check_knock_off() {
   }
 }
 
+// Thief: an empty-handed user takes the item after a hit on the target
+// itself, ending the target's Choice Band lock without locking the user.
+// Sticky Hold, a Substitute or the user's own item stop it.
+void check_thief() {
+  helpers::Pokemon user = JOLTEON;
+  user.item = Item::None;
+  user.moves[0] = Move::Thief;
+  const auto run = [&](helpers::Pokemon thief, helpers::Pokemon foe,
+                       auto&& setup) {
+    Battle b = started({thief}, {foe});
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return b;
+  };
+  const auto none = [](Battle&) {};
+  {
+    Battle b = run(user, holding(IDLE, Item::ChoiceBand), [](Battle& b) {
+      b.sides[1].active.choice_move = Move::Splash;
+    });
+    CHECK(b.sides[0].get(1).item == Item::ChoiceBand);
+    CHECK(b.sides[0].active.choice_move == Move::None);
+    CHECK(b.sides[1].get(1).item == Item::None);
+    CHECK(b.sides[1].active.choice_move == Move::None);
+  }
+  CHECK(run(holding(user, Item::Leftovers), holding(IDLE, Item::ChoiceBand),
+            none).sides[1].get(1).item == Item::ChoiceBand);
+  {
+    helpers::Pokemon sticky = holding(IDLE, Item::Leftovers);
+    sticky.species = Species::Muk;
+    sticky.ability = Ability::StickyHold;
+    const Battle b = run(user, sticky, none);
+    CHECK(b.sides[1].get(1).item == Item::Leftovers);
+    CHECK(b.sides[0].get(1).item == Item::None);
+  }
+  {
+    Battle b = run(user, holding(IDLE, Item::Leftovers), [](Battle& b) {
+      b.sides[1].active.volatiles.substitute = true;
+      b.sides[1].active.substitute_hp = 200;
+    });
+    CHECK(b.sides[1].get(1).item == Item::Leftovers);
+    CHECK(b.sides[0].get(1).item == Item::None);
+  }
+}
+
 // Perish Song: both count 3, 2, 1, then faint at the fourth end of turn;
 // both last Pokémon perishing ends it on the faster one's side first.
 void check_perish_song() {
@@ -2313,6 +2359,7 @@ int main(int argc, char** argv) {
   check_endeavor();
   check_beat_up();
   check_knock_off();
+  check_thief();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();

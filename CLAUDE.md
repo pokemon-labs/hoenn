@@ -796,14 +796,19 @@ adapted (see Interface).
 - Done (2026-10-07): Mean Look (Protect doesn't stop it, as Showdown; the
   protect flags otherwise match on every teams/adv/ move). 99%
   (15598 of 15696 slots).
-- **Then (resume here):** the last six moves on `teams/adv/`, by
-  `tools/coverage`: Thief, Encore (hidden length, check Showdown's fail
-  rules), Solar Beam (needs a charge turn), Destiny Bond (the TODO in
-  `hit()`), Rock Blast (first 2-5 multi-hit; `Action::multi_hit`), Mimic.
-  The user wants these in (they appear in real play), then the
-  realizability test (see Testing), which isn't started. Uproar and Thrash (with the
-  `WasUnableToUseMove` question, README decision 2) wait: no team in
-  `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
+- Done (2026-10-08): `check_chance`, the user's chance-key test (see
+  Testing): 0 collisions over 500 games at 128 samples.
+- Done (2026-10-08): Thief and Covet (the decomp and Showdown agree;
+  Showdown doesn't keep Enigma Berry and Mail out).
+- **Then (resume here):** the moves on `teams/adv/` still missing, by
+  `tools/coverage` (7848 slots without `all.txt`; the older 15696 counted
+  it twice, and the older "six left" missed seven single-slot moves):
+  Encore 10, Solar Beam 9, Destiny Bond 5 (the TODO in `hit()`), Rock
+  Blast 4 (first 2-5 multi-hit; `Action::multi_hit`), Mimic 2, then Water
+  Spout, Imprison, Memento, Fake Out, Pain Split, Nightmare and Gust at 1
+  each. Then the realizability test (see Testing), not started. Uproar and
+  Thrash (with the `WasUnableToUseMove` question, README decision 2) wait:
+  no team uses them.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 
