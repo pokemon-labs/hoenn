@@ -745,8 +745,15 @@ adapted (see Interface).
   Soundproof's block in the canceler. `tools/coverage`: 78%.
 - Done (2026-10-07): Substitute (the decomp and Showdown agree; it ends a
   binding on the user).
+- Done (2026-10-07): Protect, Detect and Endure. The per-turn state is a
+  `Turn` local of `actions()`, reached through `MoveState::turn` (decided;
+  README decision 2). Protect is part of `accuracy()`, as the decomp's
+  accuracy check; the consecutive-use chance stays at 1/8 after the
+  fourth, as Showdown. Showdown's protect flag matches the decomp's except
+  Counter and Mirror Coat (take Showdown's when written). Roar fixed:
+  accuracy 100 and Protect, as Showdown's gen3. `tools/coverage`: 83%.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Protect, Spikes, Focus Punch, Soft-Boiled, Recover, Baton
+  (Spikes, Focus Punch, Soft-Boiled, Recover, Baton
   Pass, Wish, Leech Seed...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.

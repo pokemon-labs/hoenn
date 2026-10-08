@@ -169,6 +169,17 @@ constexpr bool coin(Battle& battle, Player p, Optional Action::*m,
   return coin(battle, forced, field, num, den, options);
 }
 
+// Protect, Detect or Endure after n consecutive successes, n 1-3:
+// sProtectSuccessRates[n] >= Random() (bsc:6514), exactly 1 / 2^n. The
+// decomp reads past the table after the fourth success; Showdown's gen3
+// stall stays at 1/8 (counterMax 8, data/mods/gen4/conditions.ts:142), and
+// so does this. The first use always works and draws nothing.
+template <typename O>
+constexpr bool protect(Battle& battle, Player p, uint8_t n, O& options) {
+  assert(n >= 1 && n <= 3);
+  return coin(battle, p, &Action::protect, 1, 1u << n, options);
+}
+
 // Thawing at a move attempt: Random() % 5 == 0 (CANCELER_FROZEN, util:2048).
 template <typename O>
 constexpr bool thaw(Battle& battle, Player p, O& options) {
@@ -1042,6 +1053,15 @@ enum class Secondary : uint8_t {
   AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
 };
 
+// The per-turn ProtectStruct (README decision 2): a local of actions(), so
+// it starts empty each turn and on resuming after Baton Pass, reached
+// through MoveState::turn (decided 2026-10-07). The residuals can't reach
+// it. Indexed by player.
+struct Turn {
+  bool protect[2]; // ProtectStruct.protected: Protect or Detect worked
+  bool endure[2];  // ProtectStruct.endured: Endure worked
+};
+
 // What one move execution tracks: the decomp's per-action globals
 // (gCurrentMove, gCurrMovePos, gMoveResultFlags, gHpDealt) and the
 // gHitMarker bits that this code reads. On the stack, as libpkmn gen2's
@@ -1074,6 +1094,9 @@ struct MoveState {
   // Roar or Whirlwind worked: the target is dragged out after the action,
   // as Showdown's forceSwitchFlag (sim/battle.ts:2828).
   bool drag;
+  // This turn's ProtectStruct; set by use_move, null only for the
+  // residuals' MoveState, which never reads it.
+  Turn* turn;
 
   static constexpr uint8_t NO_SLOT = 4;
 };
@@ -1317,8 +1340,8 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   }
 
   m.obeys = true;
-  // TODO(plan step 4): Magic Coat, Snatch and Protect, which need the
-  // per-turn ProtectStruct (README decision 2).
+  // TODO(plan step 4): Magic Coat and Snatch, in the per-turn Turn. Protect
+  // is in the accuracy check (accuracy()).
   return true;
 }
 
@@ -1347,6 +1370,7 @@ inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
 
 // The accuracy check without its draw: 0 for a certain miss, 100 or more
 // for a certain hit, otherwise the number of the 100 outcomes that hit.
+// A protected target is a certain miss, as in Cmd_accuracycheck.
 // The certain cases are the decomp's (Cmd_accuracycheck, bsc:1099, and
 // AccuracyCalcHelper, bsc:1054); the arithmetic is Showdown's (decided,
 // 2026-10-07), from its gen3 tryMoveHit (data/mods/gen3/scripts.ts:319-363):
@@ -1363,6 +1387,17 @@ inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
 //   BrightPowder that leaves a fraction the chained modifiers are dropped.
 // - randomChance(acc, 100) is `random(100) < acc` (sim/prng.ts:115), so a
 //   fractional accuracy hits on ceil(acc) outcomes of 100.
+// Whether the foe's Protect or Detect blocks m (DEFENDER_IS_PROTECTED,
+// bsc:57). Showdown's protect flag agrees with the decomp's
+// FLAG_PROTECT_AFFECTED on every gen3 move that checks it, except Counter
+// and Mirror Coat, which take Showdown's when they're written. Log:
+// Activate Protect.
+constexpr bool protected_from(const MoveState& m, Player player) {
+  assert(m.turn != nullptr);
+  return m.turn->protect[index(foe(player))] &&
+         (get(m.move).flags & Flag::ProtectAffected);
+}
+
 constexpr uint32_t accuracy(const Battle& battle, Player player,
                             const MoveState& m) {
   const Side& side = battle.side(player);
@@ -1372,6 +1407,9 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   const MoveData& data = get(m.move);
   const Weather weather = effective_weather(battle);
 
+  // JumpIfMoveAffectedByProtect (bsc:1041), before anything else: the foe
+  // protected itself and the move has the protect flag, so it misses.
+  if (protected_from(m, player)) return 0;
   // Lock-On and Mind Reader: the only possible locker in singles is the
   // attacker.
   if (f.volatiles.lock_on != 0) return 100;
@@ -1756,7 +1794,8 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   case Secondary::AccDown: {
     // ChangeStatBuffs (bsc:6937) for a secondary drop: Mist, Clear Body and
     // White Smoke, Hyper Cutter for Attack, Keen Eye for accuracy, and a
-    // stage already at -6 stop it. TODO(plan step 4): Protect's check.
+    // stage already at -6 stop it. Its Protect check can't fire: the hit got
+    // through.
     const uint8_t stat = uint8_t(s) - uint8_t(Secondary::AtkDown);
     matters = side.conditions.mist == 0 &&
               t.ability != Ability::ClearBody &&
@@ -2172,7 +2211,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   SideConditions& foe_conditions = battle.side(foe(player)).conditions;
   const bool breaks = effect == Effect::BrickBreak &&
                       (foe_conditions.reflect != 0 || foe_conditions.light_screen != 0);
-  if (affects || breaks) {
+  // Protect is part of the accuracy check, which comes before typecalc, so
+  // it blocks a move the target is immune to too (Showdown's Protect
+  // TryHit also comes first).
+  if (affects || breaks || protected_from(m, player)) {
     const uint32_t calc = accuracy(battle, player, m);
     const bool hits =
         calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options));
@@ -2223,11 +2265,14 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     }
     if (!foe_side.active.volatiles.substitute && target.hp <= d) {
       const ItemData item = item_data(target.item);
-      bool survives = data.effect == Effect::FalseSwipe;
+      // Endure before Focus Band, whose draw then can't matter
+      // (adjustnormaldamage, bsc:1677; Showdown's Endure onDamage has the
+      // higher priority). Log: Activate Endure, or Focus Band.
+      bool survives = data.effect == Effect::FalseSwipe ||
+                      m.turn->endure[index(defender)];
       if (!survives && item.effect == HoldEffect::FocusBand) {
         survives = rolls::focus_band(battle, player, 0, item.param, options);
       }
-      // TODO(plan step 4): Endure (ProtectStruct).
       if (survives) d = target.hp - 1u;
     }
     // datahpupdate
@@ -2620,9 +2665,9 @@ constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
 // bsc:8468); otherwise the foe is cursed and the user loses max HP / 2 (at
 // least 1), bypassing its own Substitute, and may faint. Showdown agrees on
 // the Substitute (gen4 onModifyMove drops the effect), an existing curse
-// (onTryHit) and the half HP (directDamage). TODO(plan step 4): Protect
-// (Showdown's gen4 Curse has no protect flag; the decomp's accuracycheck
-// checks Protect, *(verify)*).
+// (onTryHit) and the half HP (directDamage). Protect doesn't stop it: the
+// decomp's accuracycheck checks Protect only for FLAG_PROTECT_AFFECTED,
+// which Curse lacks, and Showdown's gen4 Curse has no protect flag.
 template <typename O>
 constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -2702,6 +2747,41 @@ constexpr void substitute(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectProtect and BattleScript_EffectEndure (bs1), for
+// Protect, Detect and Endure; Cmd_setprotectlike (bsc:6503). The count of
+// consecutive successes restarts unless the last move that resulted was
+// one of the three. It fails when the user acts last this turn
+// (gCurrentTurnActionNumber, Showdown's queue.willAct()), or on the
+// success draw (rolls::protect); a failure restarts the count and marks
+// the move MISSED. Showdown's gen3 stall agrees (it expires after a turn
+// without one of the three, and is removed on a failure), except past the
+// fourth success (see rolls::protect). Log: SingleTurn, or Fail.
+template <typename O>
+constexpr void protect(Battle& battle, Player player, MoveState& m,
+                       O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& a = battle.side(player).active;
+  const Move last = a.last_resulting_move;
+  if (last != Move::Protect && last != Move::Detect && last != Move::Endure) {
+    a.protect_uses = 0;
+  }
+  const uint8_t n = a.protect_uses < 3 ? a.protect_uses : 3;
+  if (!m.first || (n != 0 && !rolls::protect(battle, player, n, options))) {
+    a.protect_uses = 0;
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  if (get(m.move).effect == Effect::Protect) {
+    m.turn->protect[index(player)] = true;
+  } else {
+    m.turn->endure[index(player)] = true;
+  }
+  if (a.protect_uses != UINT8_MAX) a.protect_uses++;
+  moveend(battle, player, m, options);
+}
+
 // The SLOTs p's bench can send in, as a mask (bit s - 1 for SLOT s): the
 // Pokémon present and not fainted.
 constexpr uint8_t bench(const Battle& battle, Player player) {
@@ -2728,7 +2808,7 @@ constexpr uint8_t bench(const Battle& battle, Player player) {
 //   user's level is lower, and Showdown has none.
 // - The drag happens after the whole action (Showdown's forceSwitchFlag;
 //   the decomp drags before moveend), so this only sets m.drag.
-// - It hits through a Substitute in both. TODO(plan step 4): Protect.
+// - It hits through a Substitute in both; Protect stops it (accuracy()).
 template <typename O>
 constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -2823,6 +2903,7 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   c.no_pp = true;
   c.called = true;
   c.first = m.first;
+  c.turn = m.turn;
   assert(get(c.move).effect != Effect::SleepTalk);
   execute(battle, player, c, options);
   m.drag = c.drag;
@@ -2837,7 +2918,8 @@ constexpr bool handled(Effect effect) {
          stat_up(effect).n != 0 || stat_pair(effect).any() ||
          effect == Effect::Minimize || effect == Effect::DefenseCurl ||
          effect == Effect::BellyDrum || effect == Effect::Curse ||
-         effect == Effect::Roar || effect == Effect::Substitute;
+         effect == Effect::Roar || effect == Effect::Substitute ||
+         effect == Effect::Protect || effect == Effect::Endure;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -2870,6 +2952,9 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Curse) return curse(battle, player, m, options);
   if (effect == Effect::Roar) return roar(battle, player, m, options);
   if (effect == Effect::Substitute) return substitute(battle, player, m, options);
+  if (effect == Effect::Protect || effect == Effect::Endure) {
+    return protect(battle, player, m, options);
+  }
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
@@ -2887,7 +2972,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
 // chosen one, unless it was overwritten, which ends the Encore. Returns
 // whether Roar or Whirlwind is to drag the foe out (MoveState::drag).
 template <typename O>
-constexpr bool use_move(Battle& battle, Player player, bool first,
+constexpr bool use_move(Battle& battle, Player player, bool first, Turn& turn,
                         O& options) {
   const Request& r = battle.request;
   const uint8_t i = index(player);
@@ -2926,6 +3011,7 @@ constexpr bool use_move(Battle& battle, Player player, bool first,
   }
   assert(m.move != Move::None);
   m.first = first;
+  m.turn = &turn;
   execute(battle, player, m, options);
   return m.drag;
 }
@@ -2940,13 +3026,14 @@ constexpr bool use_move(Battle& battle, Player player, bool first,
 // Pokémon's move); a switch can't be queued after a move.
 template <typename O>
 constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
+  Turn turn{};
   for (uint8_t i = from; i < Request::END_OF_ACTIONS; i++) {
     const Player p = i == 0 ? battle.request.first : foe(battle.request.first);
     const Choice c = battle.request.choice[index(p)];
     bool dragged = false;
     if (c.type() == Choice::Switch) {
       switch_to(battle, p, c.data(), options);
-    } else if (use_move(battle, p, i == 0, options)) {
+    } else if (use_move(battle, p, i == 0, turn, options)) {
       drag(battle, p, options);
       dragged = true;
     }

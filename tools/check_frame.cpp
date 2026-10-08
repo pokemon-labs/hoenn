@@ -856,6 +856,98 @@ void check_substitute() {
   }
 }
 
+// Protect, Detect and Endure: blocking, failing when last, the consecutive
+// draw (forced and observed), Endure's 1 HP, and what Protect lets through.
+void check_protect() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[0] = Move::Protect;
+  user.moves[1] = Move::Endure;
+  // P1 moves first among equal priorities.
+  const auto first = [](Battle& b) { b.sides[1].active.stats.spe = 1; };
+  // Protect blocks the foe's hit, and its PP is used.
+  {
+    Battle b = started({user}, {DUGTRIO});
+    first(b);
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Earthquake, 3) - 1);
+    CHECK(b.sides[0].active.protect_uses == 1);
+  }
+  // Acting last (the foe switches, which goes first), it fails with no
+  // draw and restarts the count.
+  {
+    Battle b = started({user}, {DUGTRIO, JOLTEON});
+    b.sides[0].active.protect_uses = 2;
+    b.sides[0].active.last_resulting_move = Move::Protect;
+    Observed o{};
+    update(b, Choice::move(1), Choice::swap(2), o);
+    CHECK(b.sides[0].active.protect_uses == 0);
+    CHECK(o.chance.actions.p1.protect == Optional::None);
+  }
+  // A second use draws 1/2; a third, 1/4.
+  {
+    Battle b = started({user}, {DUGTRIO});
+    first(b);
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    Battle c = b;
+    Observed o{};
+    o.calc.overrides.p1.protect = Optional::False;
+    o.calc.overrides.p2.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(o.chance.actions.p1.protect == Optional::False);
+    o.chance.probability.reduce();
+    CHECK(b.sides[0].active.protect_uses == 0);
+    CHECK(b.sides[0].get(1).hp < b.sides[0].get(1).stats.hp);
+    Observed p{};
+    p.calc.overrides.p1.protect = Optional::True;
+    update(c, Choice::move(1), Choice::move(1), p);
+    CHECK(c.sides[0].active.protect_uses == 2);
+    Observed q{};
+    q.calc.overrides.p1.protect = Optional::True;
+    update(c, Choice::move(1), Choice::move(1), q);
+    q.chance.probability.reduce();
+    CHECK(c.sides[0].active.protect_uses == 3);
+    CHECK(q.chance.probability.p == 1 && q.chance.probability.q == 4);
+  }
+  // Endure leaves 1 HP against a lethal hit.
+  {
+    Battle b = started({user}, {DUGTRIO});
+    first(b);
+    b.sides[0].get(1).hp = 5;
+    Observed o{};
+    o.calc.overrides.p2.hit = Optional::True;
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).hp == 1);
+  }
+  // Protect stops Roar and Thunder Wave, not Ghost Curse.
+  {
+    helpers::Pokemon foe = JOLTEON;
+    foe.moves[0] = Move::Roar;
+    foe.moves[1] = Move::ThunderWave;
+    Battle b = started({user, DUGTRIO}, {foe});
+    first(b);
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[0].get(1).species == Species::Snorlax);
+    b.sides[0].active.protect_uses = 0;
+    b.sides[0].active.last_resulting_move = Move::None;
+    update(b, Choice::move(1), Choice::move(2), null);
+    CHECK(!b.sides[0].get(1).status.any());
+    helpers::Pokemon gengar = {
+        .species = Species::Gengar,
+        .moves = {Move::Curse},
+        .ability = Ability::Levitate,
+        .gender = Gender::Male,
+    };
+    Battle c = started({user}, {gengar});
+    first(c);
+    update(c, Choice::move(1), Choice::move(1), null);
+    CHECK(c.sides[0].active.volatiles.cursed);
+  }
+}
+
 void check_residuals() {
   helpers::Pokemon plain = IDLE;
   plain.ability = Ability::ThickFat;
@@ -1438,8 +1530,10 @@ void check_sleep() {
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
+  detail::Turn turn{};
   detail::MoveState m{};
   m.move = move;
+  m.turn = &turn;
   return detail::accuracy(b, Player::P1, m);
 }
 
@@ -1548,6 +1642,7 @@ int main(int argc, char** argv) {
   check_stat_moves();
   check_roar();
   check_substitute();
+  check_protect();
   check_residuals();
   check_items();
   check_move_abilities();

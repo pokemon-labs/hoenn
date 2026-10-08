@@ -437,6 +437,12 @@ main = `src/battle_main.c`.
    - This rests on requests only at action boundaries or Baton Pass, and on
      residuals never reading per-turn state. Guard it: read per-turn fields
      through an accessor that asserts the actions phase.
+   - **Reached through `MoveState::turn`** (decided 2026-10-07): a pointer
+     to a `Turn` local of `actions()`, which starts empty each turn and on
+     the Baton Pass resume; `use_move` sets it and readers assert it isn't
+     null. The pointer lives only on the stack, so `Battle` stays
+     pointer-free, and the residuals have no `MoveState` to reach it with.
+     It holds Protect and Endure so far.
    - **Exception found** (field check, 2026-10-07): residuals do read it.
      `ENDTURN_UPROAR` and `ENDTURN_THRASH` (util:1648, 1674) call
      `WasUnableToUseMove` (util:890), the OR of nine immobility bits set in
