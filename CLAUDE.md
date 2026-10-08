@@ -781,8 +781,15 @@ adapted (see Interface).
   Reversal (the decomp and Showdown agree; power at least 1).
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
-- **Then:** the status moves by `tools/coverage`'s order
-  (Thief, Mean Look, Encore, Solar Beam, Destiny Bond, Rock Blast, Mimic). Uproar and Thrash (with the
+- Done (2026-10-07): Mean Look (Protect doesn't stop it, as Showdown; the
+  protect flags otherwise match on every teams/adv/ move). 99%
+  (15598 of 15696 slots).
+- **Then (resume here):** the last six moves on `teams/adv/`, by
+  `tools/coverage`: Thief, Encore (hidden length, check Showdown's fail
+  rules), Solar Beam (needs a charge turn), Destiny Bond (the TODO in
+  `hit()`), Rock Blast (first 2-5 multi-hit; `Action::multi_hit`), Mimic.
+  The user wants these in (they appear in real play), then the
+  realizability test (see Testing), which isn't started. Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

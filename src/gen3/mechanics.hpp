@@ -1458,8 +1458,9 @@ inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
 //   fractional accuracy hits on ceil(acc) outcomes of 100.
 // Whether the foe's Protect or Detect blocks m (DEFENDER_IS_PROTECTED,
 // bsc:57). Showdown's protect flag agrees with the decomp's
-// FLAG_PROTECT_AFFECTED on every gen3 move that checks it, except Counter
-// and Mirror Coat: Showdown's protect flag is on them, and this follows it.
+// FLAG_PROTECT_AFFECTED on every move on teams/adv/ (checked 2026-10-07)
+// except Counter and Mirror Coat, which Showdown's protect flag covers, and
+// Mean Look, which it doesn't (mean_look); this follows Showdown.
 // Log:
 // Activate Protect.
 constexpr bool protected_from(const MoveState& m, Player player) {
@@ -3512,6 +3513,33 @@ constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectMeanLook (bs1:1444): after the canceler, attackstring
+// and ppreduce, it misses a semi-invulnerable target (accuracycheck with
+// NO_ACC_CALC, no draw) and fails on one already trapped or behind a
+// Substitute; otherwise the target can't switch (escape_prevention, which
+// ends when the user switches out normally, README decision 9). The
+// decomp's check also stops it at Protect; Showdown's Mean Look has no
+// protect flag, and this follows it. Log: Activate trapped, or Fail or
+// Miss.
+template <typename O>
+constexpr void mean_look(Battle& battle, Player player, MoveState& m,
+                         O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Volatiles& v = battle.side(foe(player)).active.volatiles;
+  if (v.semi_invulnerable()) {
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  if (v.escape_prevention || v.substitute) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  v.escape_prevention = true;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
 // ppreduce, a missed accuracy check (Protect, evasion) or an existing
 // Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
@@ -3611,7 +3639,7 @@ constexpr bool handled(Effect effect) {
          effect == Effect::PerishSong || stat_down(effect).n != 0 ||
          effect == Effect::Tickle || effect == Effect::Haze ||
          effect == Effect::PsychUp || effect == Effect::Reflect ||
-         effect == Effect::LightScreen;
+         effect == Effect::LightScreen || effect == Effect::MeanLook;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3666,6 +3694,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Reflect || effect == Effect::LightScreen) {
     return screen(battle, player, m, options);
   }
+  if (effect == Effect::MeanLook) return mean_look(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }

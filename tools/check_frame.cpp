@@ -1365,6 +1365,34 @@ void check_screens_and_power() {
   CHECK(dealt(fighter, 1, full) < dealt(fighter, 2, full) / 2); // 20
 }
 
+// Mean Look: the target can't switch until the user leaves; Protect doesn't
+// stop it (as Showdown); a Substitute does.
+void check_mean_look() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::MeanLook;
+  helpers::Pokemon protector = SNORLAX;
+  protector.moves[0] = Move::Protect;
+  Null null{};
+  {
+    Battle b = started({user, DUGTRIO}, {protector, IDLE});
+    b.sides[1].active.stats.spe = 999; // Protect first
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].active.volatiles.escape_prevention);
+    std::array<Choice, MAX_CHOICES> out{};
+    const uint8_t n = choices(b, Player::P2, Choice::Move, out);
+    for (uint8_t i = 0; i < n; i++) CHECK(out[i].type() != Choice::Switch);
+    update(b, Choice::swap(2), Choice::move(2), null);
+    CHECK(!b.sides[1].active.volatiles.escape_prevention);
+  }
+  {
+    Battle b = started({user}, {IDLE});
+    b.sides[1].active.volatiles.substitute = true;
+    b.sides[1].active.substitute_hp = 10;
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(!b.sides[1].active.volatiles.escape_prevention);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2288,6 +2316,7 @@ int main(int argc, char** argv) {
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();
+  check_mean_look();
   check_substitute();
   check_protect();
   check_spikes_and_heals();
