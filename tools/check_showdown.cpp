@@ -12,8 +12,8 @@
 //   from the branch that matched.
 //
 // A branch matches when its Result agrees with Showdown's (the outcome, or
-// the kind of choice each side makes next) and, as a temporary guard until
-// the log is written, each side's Pokémon by SLOT agree in species, HP, max
+// the kind of choice each side makes next), its log agrees with Showdown's
+// (below) and, as a temporary guard until the log is complete, each side's Pokémon by SLOT agree in species, HP, max
 // HP, status, PP and item, the active Pokémon in boosts, Substitute HP and the
 // volatiles in VOLATILES, each side's Spikes and screens, the weather, and a replacement request comes before or after
 // the residuals as Showdown's (its |upkeep). Without the log, state the guard leaves out can drift: a
@@ -21,11 +21,17 @@
 // written (CLAUDE.md, "Testing"). A game stops at its first failure, since
 // we can't stay in step with Showdown after it.
 //
+// The log: our binary log through gen3/format.hpp against the step's raw
+// Showdown lines, |split| triplets included, after dropping what
+// Showdown's FILTER drops. Messages are written in groups (README,
+// "Protocol"), so only the message types in LOGGED are compared, on both
+// sides; --no-log turns the comparison off.
+//
 // A failure to match within the cap can be a bug or bad luck: rerun it with
 // a higher --tries.
 //
 // Usage: check_showdown [--tries N] [--seed N] [--game G] [--quiet] [--why]
-//                       traces.jsonl...
+//                       [--no-log] traces.jsonl...
 //
 // --why tallies every try's mismatch at a failing step, to tell a branch we
 // never produce from a rare one.
@@ -34,15 +40,19 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <optional>
+#include <set>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "common/options.hpp"
 #include "common/protocol.hpp"
 #include "gen3/data/names.hpp"
+#include "gen3/format.hpp"
 #include "gen3/helpers.hpp"
 #include "gen3/mechanics.hpp"
 #include "gen3/showdown.hpp"
@@ -54,7 +64,74 @@ using namespace pkmn::gen3::names;
 
 namespace {
 
-using Observed = Options<protocol::NullLog, Chance<>, NullCalc>;
+using Observed = Options<protocol::FixedLog, Chance<>, NullCalc>;
+
+// A log unit: one line, or a |split| triplet as one.
+using Unit = std::vector<std::string>;
+
+// The message types written so far, compared on both sides: group 1, the
+// frame (CLAUDE.md, "Next session").
+const std::set<std::string> LOGGED = {
+    "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
+    "-damage", "-heal",
+};
+
+
+// The message type of a line: "|-damage|..." is "-damage".
+std::string kind(const std::string& line) {
+  if (line.size() < 2 || line[0] != '|') return "";
+  const size_t bar = line.find('|', 1);
+  return line.substr(1, bar == std::string::npos ? std::string::npos : bar - 1);
+}
+
+// The units of `lines` whose type is in LOGGED.
+std::vector<Unit> units(const std::vector<std::string>& lines) {
+  std::vector<Unit> out;
+  for (size_t i = 0; i < lines.size(); i++) {
+    Unit u{lines[i]};
+    if (kind(lines[i]) == "split" && i + 2 < lines.size()) {
+      u = {lines[i], lines[i + 1], lines[i + 2]};
+      i += 2;
+    }
+    if (LOGGED.count(kind(u.back() == "" ? u[1] : u.back()))) out.push_back(u);
+  }
+  return out;
+}
+
+std::string show(const Unit& u) {
+  std::string s;
+  for (const std::string& l : u) s += (s.empty() ? "" : " / ") + l;
+  return s;
+}
+
+// Until group 2 (-fail, -miss and the accuracy order behind them) lands,
+// the move line's [still] and [miss] aren't compared: both are dropped, and
+// a target either side blanked for [still] is blanked on both.
+constexpr bool MOVE_ATTRIBUTES = false;
+
+// The move lines of two units, normalized as MOVE_ATTRIBUTES says.
+void normalize(Unit& a, Unit& b) {
+  if (MOVE_ATTRIBUTES || a.size() != 1 || b.size() != 1 || kind(a[0]) != "move" ||
+      kind(b[0]) != "move") {
+    return;
+  }
+  bool still = false;
+  for (std::string* s : {&a[0], &b[0]}) {
+    for (const char* attr : {"|[still]", "|[miss]"}) {
+      if (const size_t at = s->find(attr); at != std::string::npos) {
+        still |= std::string_view(attr) == "|[still]";
+        s->erase(at, std::strlen(attr));
+      }
+    }
+  }
+  if (!still) return;
+  for (std::string* s : {&a[0], &b[0]}) {
+    size_t bar = 0;
+    for (int i = 0; i < 3; i++) bar = s->find('|', bar + 1);
+    const size_t next = s->find('|', bar + 1);
+    s->erase(bar + 1, next == std::string::npos ? std::string::npos : next - bar - 1);
+  }
+}
 
 struct Config {
   uint64_t tries = 1000000;
@@ -62,6 +139,7 @@ struct Config {
   int64_t game = -1;
   bool quiet = false;
   bool why = false; // tally every try's mismatch at a failing step
+  bool log = true;  // compare the log
 };
 
 struct Counts {
@@ -73,6 +151,7 @@ struct Counts {
   uint64_t setup = 0;
   uint64_t choices = 0;
   uint64_t unmatched = 0;
+  uint64_t log_only = 0; // unmatched steps where some try matched the state
 };
 
 Counts stats;
@@ -453,6 +532,17 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     return;
   }
 
+  format::Names names;
+  for (int s = 0; s < 2; s++) {
+    const json::Value& sets = header[s == 0 ? "p1" : "p2"]["sets"];
+    for (size_t i = 0; i < sets.size() && i < 6; i++) {
+      names.nickname[size_t(s)][i] = sets[i]["name"].string;
+      names.shiny[size_t(s)][i] = sets[i]["shiny"].boolean;
+    }
+  }
+  format::Formatter formatter(names);
+  std::vector<uint8_t> buffer(protocol::MAX_LOG_SIZE);
+
   Battle battle = *init;
   Durations durations{};
   Result r{};
@@ -490,15 +580,42 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     std::string why;
     std::map<std::string, uint64_t> tally;
     bool matched = false;
+    bool state_matched = false;
+    std::string log_why; // the first log mismatch of a try whose state matched
+    const std::vector<Unit> theirs = units([&] {
+      std::vector<std::string> v;
+      for (const json::Value& l : step["log"].array) v.push_back(l.string);
+      return v;
+    }());
     uint64_t t = 0;
     for (; t < config.tries && !matched; t++) {
       Battle copy = battle;
       copy.rng.seed = rng.next();
       randomize_hidden(copy, durations);
-      Observed o{};
+      protocol::Writer writer{buffer.data(), buffer.size(), 0};
+      Observed o{protocol::fixed_log(writer), {}, {}};
       o.chance.durations = durations;
       const Result result = update(copy, x, y, o);
-      const std::string w = mismatch(copy, result, battle.request.phase, step, next);
+      std::string w = mismatch(copy, result, battle.request.phase, step, next);
+      if (w.empty() && config.log) {
+        if (!state_matched) log_why.clear();
+        state_matched = true;
+        const std::vector<Unit> ours =
+            units(formatter.format(std::span<const uint8_t>(buffer.data(), writer.pos)));
+        size_t i = 0;
+        while (i < ours.size() && i < theirs.size()) {
+          Unit x = ours[i], y = theirs[i];
+          normalize(x, y);
+          if (x != y) break;
+          i++;
+        }
+        if (i < ours.size() || i < theirs.size()) {
+          w = " log line " + std::to_string(i) + ": ours " +
+              (i < ours.size() ? show(ours[i]) : "(none)") + ", Showdown's " +
+              (i < theirs.size() ? show(theirs[i]) : "(none)") + ";";
+          if (log_why.empty()) log_why = w;
+        }
+      }
       if (config.why) tally[w]++;
       // Report the closest try: the fewest differing fields.
       if (t == 0 || std::count(w.begin(), w.end(), ';') <
@@ -515,6 +632,7 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     stats.steps++;
     stats.tries += t;
     stats.max_tries = std::max(stats.max_tries, t);
+    if (!matched && state_matched) why = log_why;
     if (!matched) {
       std::printf("game %lld, step %zu (turn %u): no match in %llu tries, "
                   "choices %s / %s\n  closest try:%s\n  Showdown's log:\n",
@@ -533,6 +651,7 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
         }
       }
       stats.unmatched++;
+      if (state_matched) stats.log_only++;
       return;
     }
   }
@@ -559,6 +678,8 @@ int main(int argc, char** argv) {
       config.quiet = true;
     } else if (arg == "--why") {
       config.why = true;
+    } else if (arg == "--no-log") {
+      config.log = false;
     } else {
       files.push_back(arg);
     }
@@ -600,7 +721,7 @@ int main(int argc, char** argv) {
 
   std::printf("check_showdown: %llu games, %llu matched to the end; %llu "
               "steps, %.1f tries per step (max %llu); failures: %llu setup, "
-              "%llu choices, %llu unmatched\n",
+              "%llu choices, %llu unmatched (%llu by the log alone)\n",
               (unsigned long long)stats.games,
               (unsigned long long)stats.completed,
               (unsigned long long)stats.steps,
@@ -608,6 +729,7 @@ int main(int argc, char** argv) {
               (unsigned long long)stats.max_tries,
               (unsigned long long)stats.setup,
               (unsigned long long)stats.choices,
-              (unsigned long long)stats.unmatched);
+              (unsigned long long)stats.unmatched,
+              (unsigned long long)stats.log_only);
   return stats.completed == stats.games ? 0 : 1;
 }

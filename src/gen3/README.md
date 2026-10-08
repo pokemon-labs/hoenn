@@ -385,7 +385,9 @@ bs1:3394), and the frame raises another request in the same phase.
 
 ## Protocol
 
-The plan for the binary log (`common/protocol.hpp`); nothing is written yet.
+The binary log: plumbing and opcodes in `common/protocol.hpp`, the gen3
+messages in `gen3/protocol.hpp`, the text formatter in `gen3/format.hpp`.
+Written by groups of messages (see the end of this section).
 It comes from a survey of Showdown 0.11.10 (ADV-Simulator's pinned copy),
 redone on `showdown/` 0.11.11 (see below):
 the `add(...)` calls of every gen3 move, ability, item, condition, the gen3
@@ -479,9 +481,34 @@ The inventory (reasons in *italics* are new over libpkmn's gen1 and gen2):
 | `Item`, `EndItem` | eat, Knock Off + of, Thief / Covet + of, Trick (silent), plain (White Herb, Mental Herb) |
 | *`FormeChange`*, `Transform` | Castform's Forecast; Transform |
 
-Open:
+Decided (2026-10-08):
 
-- The opcode values for `-nothing`, `-notarget` and `-anim`.
+- **`Nothing`, `NoTarget` and `Anim` are 73, 74 and 75**, after libpkmn's
+  last value (`Terastallize`), so every libpkmn value stays.
+- **The formatter is a library header** (`gen3/format.hpp`) that `update`
+  never includes. It takes a `Names` (player names, nicknames, shininess
+  by party position) and writes Showdown's raw lines, `|split|` triplets
+  included. Display names come from Showdown's dex
+  (`tools/display_names.cjs` writes `data/display.hpp`).
+- **`check_showdown` compares the raw lines, both lines of each triplet**,
+  after Showdown's `FILTER`; not channel -1 as libpkmn, which drops the
+  public line. The state guard stays alongside.
+- **The buffer bound is a placeholder**, `MAX_LOG_SIZE` = 2048, until it is
+  derived (debug asserts every write; release checks nothing). It is not a
+  proven bound: derive it once every message is written.
+- **By groups**, each checked against the traces as it lands:
+  `check_showdown` compares only the message types written so far
+  (`LOGGED`), on both sides. Group 1, the frame: `move` (with `[from]`,
+  `[still]`, `[miss]`), `switch`, `drag`, `cant`, `faint`, `turn`, `win`,
+  `tie`, `-damage`, `-heal`, `-miss`. Then hit results, statuses and
+  volatiles, side conditions, weather, items and abilities.
+- **Faints are queued** (`FaintQueue` in the log, not in `Battle`): Showdown
+  queues a faint at 0 HP and writes the queue at fixed points (after each
+  action, residual handler, arrival and multi-hit loop), so recoil and
+  drain lines come between a KO and its `faint`.
+- **The gen3 messages live in `pkmn::protocol`**, with the plumbing, as
+  libpkmn's single protocol namespace.
+- `update` ends its messages with `None` (0), libpkmn's terminator.
 
 ## Teams
 

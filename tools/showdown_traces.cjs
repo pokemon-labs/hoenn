@@ -33,8 +33,9 @@
 //
 // `team` is the team's index in FILE and `text` its export block, which
 // both sides parse. `sets` is what Showdown made of each set, in team order:
-// {"species","gender","ability","stats":[hp,atk,def,spa,spd,spe]}, so the
-// engine can take Showdown's random genders and check its own stats. Choices are Showdown's strings: "move N", "switch N"
+// {"species","gender","ability","name","shiny","stats":[hp,atk,def,spa,spd,spe]},
+// so the engine can take Showdown's random genders, check its own stats and
+// give the log formatter each Pokémon's nickname. Choices are Showdown's strings: "move N", "switch N"
 // (N is the position in Showdown's current order, which is our SLOT) or
 // "pass". The legal set is every candidate side.choose() accepts, which
 // checks the true state (a disabled move, a real trap). The first step is
@@ -111,6 +112,7 @@ function legal(side) {
 function sets(side) {
   return side.pokemon.map(p => ({
     species: p.species.id, gender: p.gender, ability: p.baseAbility,
+    name: p.name, shiny: !!p.set.shiny,
     stats: [p.maxhp, p.storedStats.atk, p.storedStats.def, p.storedStats.spa,
       p.storedStats.spd, p.storedStats.spe],
   }));

@@ -222,6 +222,11 @@ from the decomp) and kept as remaining-turn counters. `Chance` keeps the
 in OU, not frame-exact, so there's no libpkmn pending/commit: draw whenever
 it's convenient, but a draw goes in `Actions` and `probability` only when its
 outcome can matter (Quick Claw with no holder, Static on a paralyzed target).
+"Matter" means the perfect-information state (decided 2026-10-08): a draw
+that changes only the log (a tied order of log lines, an accuracy roll into
+Protect) is made but not recorded. So `Actions` determines the state, not
+the log; the log is extra information drawn alongside. A terminal state
+counts as the same whatever HP the winner is left at.
 
 **Hooks** (decided): one roll helper per catalogue row, in `mechanics.hpp`
 (libpkmn's `Rolls`), does the Calc override, the RNG draw and the Chance
@@ -296,7 +301,7 @@ src/common/
   rng.hpp             SplitMix64 RNG and its draw helpers
   options.hpp         Options<Log, Chance, Calc>
   rational.hpp        exact probabilities (libpkmn's Rational)
-  protocol.hpp        log plumbing: Writer, Log, NullLog (messages last)
+  protocol.hpp        log plumbing: ArgType, Writer, Log, FaintQueue
 src/gen3/
   README.md           layout decisions (numbered), deviations, field map
   data.hpp            Status, Phase, Request, Pokemon, Volatiles,
@@ -310,6 +315,8 @@ src/gen3/
   showdown.hpp        Showdown export parser -> helpers::Pokemon
   damage.hpp          Hit, crit_stage, can_crit, matchup, damage, apply_roll
   mechanics.hpp       update(), choices(), the roll helpers   (the frame)
+  protocol.hpp        the gen3 log messages (pkmn::protocol)
+  format.hpp          binary log -> Showdown's text lines
   calc.hpp            Calc and NullCalc; min_ko_roll                (todo)
 tools/
   generate.py         one-off data generator from pokeemerald/
@@ -323,6 +330,7 @@ tools/
   libpkmn_bench.zig   the same for libpkmn's Gen I (+ _options.zig)
   coverage.cpp        which moves on the teams have a written mechanic
   damage_oracle.cjs   writes damage_cases.inc from Showdown
+  display_names.cjs   writes data/display.hpp from Showdown's dex
   protocol_survey.cjs Showdown's gen3 log messages (README, "Protocol")
 ```
 
@@ -939,34 +947,67 @@ adapted (see Interface).
   ending after any turn without a success (`ActivePokemon::stall`), and
   Endure at +4 (likely a Showdown data bug, followed anyway). Committed
   (`a53cd5b`).
-- **Next session: the log** (2026-10-08, the user's call). Plan steps: the
-  opcodes written by `update`, then the formatter, then `check_showdown`
-  compares lines. Until then the realizability results are state-only (the
-  guard), so log-only differences are untested.
-  - Read first: README "Protocol" (the inventory, every decision so far:
-    libpkmn's `ArgType` values, hybrid `[from]`, 2-byte species and moves,
-    exact HP with the `|split|` triplet, nicknames as a formatter input,
-    a buffer that can't fill, the dropped messages); `common/protocol.hpp`
-    (Writer, NullWriter, Log: plumbing only, no messages).
-  - libpkmn references (`~/oak/cpp/extern/engine`): `src/lib/common/
-    protocol.zig` (ArgType and the reason enums, the Log methods) and
-    `src/pkg/protocol.ts` (its binary-to-Showdown text parser, the model
-    for our formatter); `src/test/integration.ts` for the `FILTER`.
-  - Sites: `mechanics.hpp` has 46 `// Log: <ArgType>` markers, written as
-    mechanics went in; the hit backbone and the frame (switch, move, damage,
-    crit, effectiveness, miss, faint, turn, win) mostly have none yet, so
-    list every site first.
-  - Showdown's line order and quirks to match: Pressure only in the
-    omniscient stream; Quick Claw not logged; Leech Seed, Taunt and Encore
-    draw accuracy first and log a miss where we fail (README shortlist,
-    log only); 0.11.11's forms (README "Protocol").
-  - Open, to settle with the user before writing: the opcode values for
-    `-nothing`, `-notarget`, `-anim`; where the formatter lives (a header
-    in `src/`, or tools only) and its interface; how the harness compares
-    (Showdown's raw lines after a `FILTER`, both `|split|` lines); the
-    buffer bound (derive it, or measure first with a soak); whether the
-    log lands in one pass or by groups of messages, each checked against
-    the traces.
+- **The log, group 1** (2026-10-08, committed): plumbing and opcodes
+  (`common/protocol.hpp`), the gen3 messages (`gen3/protocol.hpp`), the
+  formatter (`gen3/format.hpp`), display names from Showdown's dex
+  (`tools/display_names.cjs` -> `data/display.hpp`), and in `update`:
+  `move` (`[from]` Sleep Talk, Pursuit, lockedmove), `switch`, `drag`,
+  `cant`, `faint` (queued, as Showdown's faintMessages), `turn`, `win`,
+  `tie`, every `-damage` and `-heal`. Decisions in README "Protocol".
+  `check_showdown` now compares the log (`LOGGED`, both lines of each
+  `|split|` triplet) whenever the state guard passes; the move line's
+  `[still]` and `[miss]` are normalized away until group 2
+  (`MOVE_ATTRIBUTES`). The traces carry nicknames (`sets[].name`), so
+  regenerate old ones. Result: 184 of 200 games (seed 7) match to the
+  end, every failure by the log alone. Run 4 processes at most (the user's
+  12 threads are busy): split the trace by game and `xargs -P4`.
+- **Resume here: fix the 16 failures, then group 2.** Decided with the
+  user (2026-10-08), all following Showdown:
+  - **Residual ties, one coin per event.** Showdown sorts residual
+    handlers by order, priority, Speed, then subOrder (`comparePriority`,
+    `sim/battle.ts:408`), so with unequal Speeds it is Pokémon-major (as
+    now), but on an exact Speed tie the two Pokémon's handlers interleave
+    by subOrder, each tied pair with its own coin. gen3 subOrders: Ingrain
+    1, Rain Dish/Shed Skin/Speed Boost 3, Leftovers and berries 4, Leech
+    Seed 5, psn/tox/brn 6, Nightmare 7, Curse 8, binding 9, Uproar 11,
+    Encore 14, Taunt 15, Yawn 19; Truant 27, Perish 12, White Herb 29
+    come after. The comment in `end_of_turn` claiming Pokémon-major always
+    is wrong for ties. Record a coin only when the orders give different
+    states: (a) Leech Seed both ways with a capped heal, a faint mid-slot
+    or Liquid Ooze; (b) both last Pokémon fainting in the same damage
+    event. Compute both exactly before drawing (replacing the
+    over-approximating `residual_order_matters`). Both can happen in one
+    turn, each at most once: two 2-bit fields packed in the existing
+    `Turn::residual_tie` byte (bits 0-1 Leech Seed, 2-3 faint), so
+    `Actions` stays 121 B. Every other tie coin is unrecorded
+    (`log_order`).
+  - **`BeforeMove` in Showdown's order** (priorities from the dex):
+    recharge 11, sleep and freeze 10, Truant 9, flinch 8, Disable 7,
+    confusion 3, Attract 2, paralysis 1, Taunt 0 (Imprison: check). The
+    decomp checks Taunt before paralysis (game 27 of seed 7 shows
+    `cant par` where we print Taunt).
+  - Beat Up's hit order differs (game 8 of seed 7): undiagnosed. Games
+    13, 74 and 115: damage differences, undiagnosed (maybe the same
+    causes).
+  - **Then group 2**, Showdown's gen3 `tryMoveHit` order
+    (`data/mods/gen3/scripts.ts:263`): semi-invulnerable miss; type
+    immunity noted; the accuracy roll (also into Protect: an unrecorded
+    draw where only the log differs); `TryHit` (Protect's `-activate`,
+    absorbing abilities); `-immune` if naturally immune; then
+    `TryPrimaryHit` (Substitute: `-fail` `[still]`), then the status's
+    `setStatus` (`-fail|target|par` for the same status, `-fail|user`
+    `[still]` for another, `-immune` for a type, `-immune [from] ability`,
+    Safeguard's `-activate`). Messages: `-fail` (encoding written, not
+    wired), `-miss` (`protocol::miss` writes `[miss]` too), `-immune`,
+    `[still]`; then set `MOVE_ATTRIBUTES` true. The survey of which moves
+    get `[still]`, from the traces: plain `-fail|user` and heal moves'
+    `-fail|heal` do, Rest's and Endeavor's `-fail` don't, a status the
+    target already has is `-fail|target|par` without it; Counter, Fake
+    Out and Snore fail with no line at all.
+  - Later groups: statuses and volatiles (`-status`, `-curestatus`,
+    `-start`, `-end`, `-activate`, `-boost`...), side conditions and
+    weather, items and abilities, then derive the buffer bound
+    (`MAX_LOG_SIZE` is a placeholder 2048).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.
