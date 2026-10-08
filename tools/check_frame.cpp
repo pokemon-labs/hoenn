@@ -529,6 +529,90 @@ void check_confuse() {
   }
 }
 
+void check_status_moves() {
+  const helpers::Pokemon user = {
+      .species = Species::Gengar,
+      .moves = {Move::Toxic, Move::ThunderWave, Move::WillOWisp, Move::Glare},
+      .ability = Ability::Levitate,
+      .gender = Gender::Male,
+  };
+  const auto after = [&](uint8_t slot, helpers::Pokemon foe, auto&& setup) {
+    Battle b = started({user}, {foe});
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    update(b, Choice::move(slot), Choice::move(1), o);
+    return b;
+  };
+  const auto none = [](Battle&) {};
+  // IDLE has Immunity; this one doesn't.
+  helpers::Pokemon plain = IDLE;
+  plain.ability = Ability::ThickFat;
+  // Each lands on a plain target and uses PP.
+  {
+    Battle b = after(1, plain, none);
+    CHECK(b.sides[1].get(1).status.badly_poisoned());
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Toxic, 3) - 1);
+    CHECK(after(2, plain, none).sides[1].get(1).status.paralyzed());
+    CHECK(after(3, plain, none).sides[1].get(1).status.burned());
+    CHECK(after(4, plain, none).sides[1].get(1).status.paralyzed());
+  }
+  // The immunities.
+  {
+    CHECK(!after(1, helpers::detail::SKARMORY, none).sides[1].get(1).status.any());
+    CHECK(!after(2, DUGTRIO, none).sides[1].get(1).status.any());
+    helpers::Pokemon ghost = IDLE;
+    ghost.species = Species::Gengar;
+    ghost.ability = Ability::Levitate;
+    CHECK(!after(4, ghost, none).sides[1].get(1).status.any());
+    // Foresight lets Glare hit a Ghost.
+    CHECK(after(4, ghost, [](Battle& b) {
+            b.sides[1].active.volatiles.foresight = true;
+          }).sides[1].get(1).status.paralyzed());
+    helpers::Pokemon fire = IDLE;
+    fire.species = Species::Charizard;
+    fire.ability = Ability::Blaze;
+    CHECK(!after(3, fire, none).sides[1].get(1).status.any());
+    helpers::Pokemon limber = IDLE;
+    limber.species = Species::Hitmonlee;
+    limber.ability = Ability::Limber;
+    CHECK(!after(2, limber, none).sides[1].get(1).status.any());
+    // Not Snorlax's Immunity: Toxic fails, PP still used.
+    Battle b = started({user}, {SNORLAX});
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(!b.sides[1].get(1).status.any());
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Toxic, 3) - 1);
+  }
+  // Thunder Wave into Wonder Guard lands: status moves skip it.
+  {
+    helpers::Pokemon shedinja = IDLE;
+    shedinja.species = Species::Shedinja;
+    shedinja.ability = Ability::WonderGuard;
+    shedinja.gender = Gender::None;
+    CHECK(after(2, shedinja, none).sides[1].get(1).status.paralyzed());
+  }
+  // Substitute, Safeguard, an existing status; and a forced miss.
+  {
+    CHECK(!after(2, plain, [](Battle& b) {
+             b.sides[1].active.volatiles.substitute = true;
+             b.sides[1].active.substitute_hp = 10;
+           }).sides[1].get(1).status.any());
+    Battle b = after(2, plain, [](Battle& b) { b.sides[1].conditions.safeguard = 5; });
+    CHECK(!b.sides[1].get(1).status.any());
+    CHECK(b.sides[0].active.last_move == Move::ThunderWave);
+    CHECK(after(2, plain, [](Battle& b) {
+            b.sides[1].get(1).status = Status::brn();
+          }).sides[1].get(1).status.burned());
+    Battle c = started({user}, {plain});
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::False;
+    update(c, Choice::move(1), Choice::move(1), o);
+    CHECK(!c.sides[1].get(1).status.any());
+    CHECK(o.chance.actions.p1.hit == Optional::False);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -638,6 +722,7 @@ int main(int argc, char** argv) {
   check_moves();
   check_confusion();
   check_confuse();
+  check_status_moves();
   check_accuracy();
   check_turn_cap();
 

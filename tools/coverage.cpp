@@ -1,7 +1,7 @@
 // Which moves on the given teams the engine handles: the share of move
 // slots (and of damaging move slots) whose effect has a written mechanic,
 // then the most-used damaging and status moves still missing. A move counts
-// as handled if use_move runs its effect (detail::plain_hit); everything
+// as handled if use_move runs its effect (detail::handled); everything
 // else only uses PP.
 //
 // Usage: coverage team files...   (leave out all.txt, which repeats them)
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
   std::vector<std::pair<int, uint16_t>> missing;
   for (const auto& [m, n] : uses) {
     const MoveData& data = get(Move(m));
-    const bool ok = detail::plain_hit(data.effect);
+    const bool ok = detail::handled(data.effect);
     total += n;
     handled += ok ? n : 0;
     if (data.bp != 0) {

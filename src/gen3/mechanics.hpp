@@ -1610,6 +1610,106 @@ constexpr void confuse_move(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// The major status a primary status move inflicts, or None.
+constexpr Secondary primary_status(Effect effect) {
+  switch (effect) {
+  case Effect::Poison: return Secondary::Poison;
+  case Effect::Toxic: return Secondary::Toxic;
+  case Effect::Paralyze: return Secondary::Paralysis;
+  case Effect::WillOWisp: return Secondary::Burn;
+  default: return Secondary::None;
+  }
+}
+
+// The primary status moves: BattleScript_EffectPoison (bs1:986), Toxic
+// (bs1:686), Paralyze (bs1:1007; Thunder Wave, Stun Spore, Glare) and
+// Will-O-Wisp (bs1:2174). After the canceler, attackstring and ppreduce,
+// each script runs its checks in its own order, then accuracy, then
+// Safeguard, then seteffectprimary. The order only changes the result
+// flags, which moveend reads: the "already statused" and ability scripts
+// set none, NotAffected sets DOESNT_AFFECT_FOE, ButItFailed sets FAILED.
+// Paralyze's typecalc is only the type immunity (Thunder Wave into Ground,
+// Glare into Ghost, unless Foresight): Wonder Guard needs power (bsc:1409),
+// and Showdown's skips status moves too. Safeguard runs moveend as
+// Showdown does (see confuse_move).
+template <typename O>
+constexpr void status_move(Battle& battle, Player player, MoveState& m,
+                           Secondary s, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Side& foe_side = battle.side(foe(player));
+  const ActivePokemon& t = foe_side.active;
+  const Status status = foe_side.get(1).status;
+  const bool poison_immune = has_type(t, Type::Poison) || has_type(t, Type::Steel);
+
+  // The checks before accuracy: NONE fails with no flag, nonzero with these
+  // flags, 0 goes on.
+  constexpr uint8_t NONE = 0xFF;
+  const uint8_t failed = [&]() -> uint8_t {
+    switch (s) {
+    case Secondary::Poison:
+    case Secondary::Toxic:
+      if (t.ability == Ability::Immunity) return NONE;
+      if (t.volatiles.substitute) return MoveResult::FAILED;
+      if (status.poisoned()) return NONE;
+      // Poison checks the types before any other status, Toxic after.
+      if (s == Secondary::Poison && poison_immune) return MoveResult::DOESNT_AFFECT_FOE;
+      if (status.any()) return MoveResult::FAILED;
+      if (poison_immune) return MoveResult::DOESNT_AFFECT_FOE;
+      return 0;
+    case Secondary::Paralysis: {
+      if (t.ability == Ability::Limber) return NONE;
+      if (t.volatiles.substitute) return MoveResult::FAILED;
+      const Type type = get(m.move).type;
+      for (const Type d : t.types) {
+        const bool negated = t.volatiles.foresight && d == Type::Ghost &&
+                             (type == Type::Normal || type == Type::Fighting);
+        if (effectiveness(type, d) == Effectiveness::Immune && !negated) {
+          return MoveResult::DOESNT_AFFECT_FOE | MoveResult::FAILED;
+        }
+      }
+      if (status.paralyzed()) return NONE;
+      if (status.any()) return MoveResult::FAILED;
+      return 0;
+    }
+    case Secondary::Burn:
+      if (t.volatiles.substitute) return MoveResult::FAILED;
+      if (status.burned()) return NONE;
+      if (has_type(t, Type::Fire)) return MoveResult::DOESNT_AFFECT_FOE;
+      if (t.ability == Ability::WaterVeil) return NONE;
+      if (status.any()) return MoveResult::FAILED;
+      return 0;
+    default:
+      assert(false && "not a primary status");
+      return MoveResult::FAILED;
+    }
+  }();
+  if (failed != 0) {
+    if (failed != NONE) m.result |= failed;
+    return moveend(battle, player, m, options);
+  }
+
+  const uint32_t calc = accuracy(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::MISSED | MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (foe_side.conditions.safeguard != 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  set_status(battle, player, s);
+  moveend(battle, player, m, options);
+}
+
+// Whether use_move runs the effect's script (tools/coverage counts these);
+// every other effect only uses PP for now.
+constexpr bool handled(Effect effect) {
+  return plain_hit(effect) || effect == Effect::Confuse ||
+         primary_status(effect) != Secondary::None;
+}
+
 // HandleAction_UseMove (util:78): which move and slot the action uses, then
 // its script. Struggle uses no PP. A forced move is the locked move. Encore
 // applies even when it began after selection: the encored move replaces the
@@ -1661,6 +1761,9 @@ constexpr void use_move(Battle& battle, Player player, bool first,
 
   if (plain_hit(get(m.move).effect)) return hit(battle, player, m, options);
   if (effect == Effect::Confuse) return confuse_move(battle, player, m, options);
+  if (const Secondary s = primary_status(effect); s != Secondary::None) {
+    return status_move(battle, player, m, s, options);
+  }
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then

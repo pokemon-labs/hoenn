@@ -589,9 +589,7 @@ feels like progress; every later mechanic inherits the frame.
   secondaries, secondary stat drops and Meteor Mash's raise, Tri Attack,
   Hidden Power, Earthquake, Thunder, Sky Uppercut, Double-Edge, Explosion,
   Seismic Toss, Night Shade, Rapid Spin and Brick Break. `tools/coverage`
-  counts what's handled: 92% of damaging move slots in `teams/`, 59% of all
-  slots; the top missing moves are status moves (Toxic, Roar, Thunder Wave,
-  Calm Mind, Rest, Substitute, Protect, Spikes...).
+  counts what's handled (see "Next session" for the current numbers).
 
 **Not started:** every other move effect (they only use PP), switch-in
 abilities and items, the residuals, the ability and item dispatchers,
@@ -631,6 +629,11 @@ adapted (see Interface).
   (the canceler, the self-hit, Confuse Ray's `Effect::Confuse` and the
   `ConfuseHit` secondary), covered by `check_frame`. Still to write:
   Swagger, Flatter and Thrash's end. Only 2 slots in `teams/` confuse.
+- Done (2026-10-07): the primary status moves (Toxic, Poison Powder,
+  Thunder Wave, Stun Spore, Glare, Will-O-Wisp; `status_move`).
+  `detail::handled()` is what `tools/coverage` counts: 66% of move slots
+  (92% of damaging ones). Gap: Synchronize (24 holders in `teams/`) doesn't
+  pass the status back yet; it belongs to `moveend`'s ability dispatcher.
 - The release build's `soak` doesn't link: `soak.cpp` calls
   `__sanitizer_set_death_callback` without sanitizers. This predates the
   confusion and accuracy changes.
