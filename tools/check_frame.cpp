@@ -1325,6 +1325,46 @@ void check_stat_changes() {
   }
 }
 
+// Reflect and Light Screen; Return, Frustration and Reversal's power.
+void check_screens_and_power() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::Reflect;
+  user.moves[1] = Move::LightScreen;
+  Null null{};
+  {
+    Battle b = started({user}, {IDLE});
+    update(b, Choice::move(1), Choice::move(1), null);
+    update(b, Choice::move(2), Choice::move(1), null);
+    CHECK(b.sides[0].conditions.reflect == 3 && b.sides[0].conditions.light_screen == 4);
+    update(b, Choice::move(1), Choice::move(1), null); // fails
+    CHECK(b.sides[0].conditions.reflect == 2);
+  }
+  // Each power, through a forced max roll with no crit: the damage grows
+  // with the power, so compare against a fixed-power move of the same type.
+  const auto dealt = [&](helpers::Pokemon attacker, uint8_t slot, auto&& setup) {
+    Battle b = started({attacker}, {IDLE});
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None};
+    update(b, Choice::move(slot), Choice::move(1), o);
+    const Pokemon& t = b.sides[1].get(1);
+    return t.stats.hp - t.hp;
+  };
+  helpers::Pokemon normal = SNORLAX; // Body Slam (85), then the others
+  normal.moves[1] = Move::Return;
+  normal.moves[2] = Move::Frustration;
+  const auto none = [](Battle&) {};
+  CHECK(dealt(normal, 2, none) > dealt(normal, 1, none)); // Return 102
+  CHECK(dealt(normal, 3, none) <= 5);                     // Frustration 1
+  helpers::Pokemon fighter = SNORLAX;
+  fighter.moves[0] = Move::Reversal;
+  fighter.moves[1] = Move::BrickBreak; // 75
+  const auto low = [](Battle& b) { b.sides[0].get(1).hp = 1; };
+  const auto full = [](Battle&) {};
+  CHECK(dealt(fighter, 1, low) > 2 * dealt(fighter, 2, low));  // 200
+  CHECK(dealt(fighter, 1, full) < dealt(fighter, 2, full) / 2); // 20
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2247,6 +2287,7 @@ int main(int argc, char** argv) {
   check_knock_off();
   check_perish_song();
   check_stat_changes();
+  check_screens_and_power();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

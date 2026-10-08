@@ -777,10 +777,12 @@ adapted (see Interface).
 - Done (2026-10-07): the one-stat drops (Screech, Metal Sound...), Tickle
   (blocked by a Substitute, as Showdown), Superpower and Overheat, Haze,
   Psych Up (copies Focus Energy, as Showdown).
+- Done (2026-10-07): Reflect, Light Screen, Return, Frustration, Flail and
+  Reversal (the decomp and Showdown agree; power at least 1).
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Return, Thief, Mean Look, Encore, Solar Beam...). Uproar and Thrash (with the
+  (Thief, Mean Look, Encore, Solar Beam, Destiny Bond, Rock Blast, Mimic). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

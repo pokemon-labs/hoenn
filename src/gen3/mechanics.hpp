@@ -1676,6 +1676,9 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::KnockOff:
   case Effect::Superpower:
   case Effect::Overheat:
+  case Effect::Return:
+  case Effect::Frustration:
+  case Effect::Flail:
     return true;
   default:
     return false;
@@ -2361,6 +2364,21 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (data.effect == Effect::HiddenPower) {
     assert(m.move != Move::HiddenPower && side.get(1).hidden_power != 0);
     h.power = side.get(1).hidden_power;
+  }
+  // Return and Frustration (friendshiptodamagecalculation): 10 / 25 of the
+  // happiness or its complement, at least 1 as Showdown's gen3 (the `|| 1`
+  // of its basePowerCallback). Flail and Reversal (remaininghptopower): by
+  // hp * 48 / max HP, at least 1, as Showdown's gen3 basePowerCallback and
+  // the decomp's sFlailHpScaleToPowerTable agree.
+  if (data.effect == Effect::Return || data.effect == Effect::Frustration) {
+    const uint8_t happiness = side.get(1).happiness;
+    const uint16_t f = data.effect == Effect::Return ? happiness : uint16_t(255 - happiness);
+    h.power = f * 10 / 25 == 0 ? uint16_t(1) : uint16_t(f * 10 / 25);
+  } else if (data.effect == Effect::Flail) {
+    const Pokemon& mon = side.get(1);
+    uint32_t ratio = uint32_t(mon.hp) * 48 / mon.stats.hp;
+    if (ratio == 0) ratio = 1;
+    h.power = ratio < 2 ? 200 : ratio < 5 ? 150 : ratio < 10 ? 100 : ratio < 17 ? 80 : ratio < 33 ? 40 : 20;
   }
 
   // typecalc's immunities first, as Showdown (decided; README "Damage"). A
@@ -3474,6 +3492,26 @@ constexpr void perish_song(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectReflect (bs1:974) and LightScreen: after the canceler,
+// attackstring and ppreduce, Cmd_setreflect (bsc:6697) and setlightscreen
+// fail (MISSED) while the screen is up, otherwise set 5 turns on the user's
+// side; field_residuals counts them down. Showdown's side conditions agree.
+// Log: SideStart, or Fail.
+template <typename O>
+constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  SideConditions& c = battle.side(player).conditions;
+  uint8_t& turns = get(m.move).effect == Effect::Reflect ? c.reflect : c.light_screen;
+  if (turns != 0) {
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  turns = 5;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
 // ppreduce, a missed accuracy check (Protect, evasion) or an existing
 // Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
@@ -3572,7 +3610,8 @@ constexpr bool handled(Effect effect) {
          move_weather(effect) != Weather::None || effect == Effect::BeatUp ||
          effect == Effect::PerishSong || stat_down(effect).n != 0 ||
          effect == Effect::Tickle || effect == Effect::Haze ||
-         effect == Effect::PsychUp;
+         effect == Effect::PsychUp || effect == Effect::Reflect ||
+         effect == Effect::LightScreen;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3624,6 +3663,9 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Tickle) return tickle(battle, player, m, options);
   if (effect == Effect::Haze) return haze(battle, player, m, options);
   if (effect == Effect::PsychUp) return psych_up(battle, player, m, options);
+  if (effect == Effect::Reflect || effect == Effect::LightScreen) {
+    return screen(battle, player, m, options);
+  }
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
