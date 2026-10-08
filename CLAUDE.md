@@ -440,16 +440,20 @@ unchecked claims.
   `check_frame`). Audit Explosion, Self-Destruct, Destiny Bond, recoil and
   Perish Song the same way *(verify tie rules against Showdown)*. Open:
   sand or hail KOing both last Pokémon at once may be a tie in Showdown.
-- **Baton Pass** has its own switch-in (main:3158–3217, bsc:4648; README
-  decision 5).
+- **Baton Pass** (`baton_pass`, `baton_pass_in`, tested in `check_frame`)
+  has its own switch-in (main:3158–3217, bsc:4648; README decision 5).
   - Passes: stat stages; confusion (with its counter), Focus Energy,
-    Substitute and its HP, escape prevention, Curse, Leech Seed, Lock-On,
-    Perish Song and its timer, Ingrain, Mud Sport, Water Sport.
+    Substitute and its HP, escape prevention, Curse, Leech Seed, Perish
+    Song and its timer, Ingrain, Mud Sport, Water Sport.
+  - Follows Showdown (verified, `copyVolatileFrom` and `noCopy`) where it
+    differs: binding passes; the passer's Lock-On on the foe keeps its
+    count (the decomp resets it to 2); the foe's Lock-On on the passer is
+    lost. None of these moves is on `teams/`. Showdown also passes Charge
+    (TODO when Charge is written).
   - Doesn't pass: the toxic counter, the rest of the disable struct, the
-    last-move fields.
-  - If the passer had locked on to the foe, the foe's lock resets to 2
-    (main:3178–3186) *(verify against Showdown)*.
+    last-move fields. Fails with no bench; trapping doesn't stop it.
   - It doesn't cancel the foe's queued action: the request resumes at it.
+    A recipient that faints to Spikes ends the actions, as any faint.
 - **Sleep Talk** (`sleep_talk`, tested), as Showdown's gen3: only asleep;
   fails under a Choice Band lock or Encore (the cartridge agrees); picks
   uniformly among the slots `sleep_talk_banned` allows (a `move_slot` chance
@@ -469,25 +473,6 @@ unchecked claims.
   drag comes after the whole action. The dragged-in Pokémon takes Spikes
   and its switch-in effects, and the dragged-out one's queued move is
   cancelled.
-- **Sleep Talk** (`sleep_talk`, tested), as Showdown's gen3: only asleep;
-  fails under a Choice Band lock or Encore (the cartridge agrees); picks
-  uniformly among the slots `sleep_talk_banned` allows (a `move_slot` chance
-  action) and fails if the pick has no PP. The cartridge also leaves out
-  disabled, taunted, tormented and imprisoned moves and calls 0-PP moves.
-  The called move uses no PP and doesn't re-run the canceler (the decomp's
-  tracker stays at its end; Showdown's useMove skips BeforeMove).
-  Sleep Talk and Snore turns go back on the counter at switch-out
-  (`sleep_skipped`, Showdown's gen3 `skippedTime`, a real cartridge quirk).
-- **Roar and Whirlwind** (`roar`, `drag`, tested in `check_frame`).
-  Priority −6. The replacement is a uniform pick among the non-fainted
-  bench (`switch_target`, no request). Fails with no bench, against
-  Suction Cups, Ingrain or a semi-invulnerable target; Soundproof stops
-  Roar. As Showdown: no accuracy roll (the decomp's evasion could make it
-  miss), no level check, through a Substitute, and the drag comes after
-  the whole action. The dragged-in Pokémon takes Spikes and its switch-in
-  effects, and the dragged-out one's queued move is cancelled. Open:
-  Protect (the decomp checks it; Showdown's gen3 Roar has no protect flag
-  *(verify)*).
 - **Sleep Clause and Freeze Clause** are Smogon rules, always on, so
   compile-time constants with no field (Gen 3 OU has Sleep Clause Mod and
   Freeze Clause Mod). A foe's sleep fails while a living Pokémon on the
@@ -758,13 +743,15 @@ adapted (see Interface).
 - Done (2026-10-07): Focus Punch (`Turn::hit`, set in `hp_update`; a
   0-HP hit breaks focus too, as Showdown). `tools/coverage`: 89% of move
   slots, 95% of damaging ones.
+- Done (2026-10-07): Baton Pass (see the checklist), with the frame's
+  `BatonPass` request and resume. `tools/coverage`: 91% of move slots.
 - Noted for Counter and Mirror Coat: Showdown's gen3 protect flag is on
   them (the decomp's isn't), and the decomp counts Hidden Power as
   physical whatever its type where Showdown uses the type. Follow
   Showdown; they'll need physical and special damage in `Turn`.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Baton Pass, Wish, Leech Seed, Refresh,
-  Aromatherapy, Counter...). Uproar and Thrash (with the
+  (Wish, Leech Seed, Refresh, Aromatherapy, Counter, Giga Drain,
+  Taunt...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

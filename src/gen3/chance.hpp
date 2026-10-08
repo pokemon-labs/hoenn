@@ -81,7 +81,8 @@ namespace pkmn::gen3 {
 // - The decrement comes before the damage, so N gives N - 1 = 2-5 turns of
 //   chip damage, then a "freed" message on the Nth end of turn.
 // - It ends early if the binder switches out (main:3199) or the victim uses
-//   Rapid Spin (bsc:8826). Baton Pass doesn't pass it.
+//   Rapid Spin (bsc:8826). The decomp's Baton Pass doesn't pass it;
+//   Showdown's does (partiallytrapped has no noCopy), and this follows it.
 //
 // Uproar (util:1647). 2-5 turns in total. It ends early if the user is unable
 // to move (WasUnableToUseMove).
@@ -364,7 +365,7 @@ struct Durations {
     // but its count is kept the same way.
     uint8_t sleep[6];  // 1-5 (roll 2-5)
     // Volatiles on the active Pokémon. A switch clears them, except that
-    // Baton Pass keeps confusion and its count.
+    // Baton Pass keeps confusion and binding with their counts.
     uint8_t confusion; // 1-5 (roll 2-5), steps at CANCELER_CONFUSED
     uint8_t disable;   // 1-5 (roll 2-5), steps every end of turn
     uint8_t encore;    // 1-6 (roll 3-6), steps every end of turn
@@ -383,21 +384,23 @@ struct Durations {
     return p == Player::P1 ? p1 : p2;
   }
 
-  // A normal switch or a faint replacement on p's side to SLOT `slot`, as
-  // libpkmn's Chance.switched: the sleep counts swap with the SLOTs, the
-  // active Pokémon's volatile counts clear, and so does the foe's binding,
-  // since p was the binder (main:3199). Baton Pass keeps confusion and needs
-  // its own version.
-  constexpr void switched(Player p, uint8_t slot) {
+  // A switch on p's side to SLOT `slot` (a switch action, a faint
+  // replacement or Baton Pass), as libpkmn's Chance.switched: the sleep
+  // counts swap with the SLOTs, the active Pokémon's volatile counts clear,
+  // and so does the foe's binding, since p was the binder (main:3199).
+  // Baton Pass keeps confusion and, as Showdown, binding (baton_pass_in).
+  constexpr void switched(Player p, uint8_t slot, bool baton = false) {
     assert(slot >= 2 && slot <= 6);
     Side& d = get(p);
     const uint8_t out = d.sleep[0];
     d.sleep[0] = d.sleep[slot - 1];
     d.sleep[slot - 1] = out;
-    d.confusion = 0;
+    if (!baton) {
+      d.confusion = 0;
+      d.binding = 0;
+    }
     d.disable = 0;
     d.encore = 0;
-    d.binding = 0;
     d.attacking = 0;
     get(foe(p)).binding = 0;
   }

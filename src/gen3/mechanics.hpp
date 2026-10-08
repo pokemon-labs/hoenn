@@ -1,10 +1,10 @@
 // The turn frame: update() and choices(), as libpkmn's gen*/mechanics.zig.
 //
-// Plan step 2 (CLAUDE.md): the frame, the order of actions, switching and the
-// roll helpers it needs, with real and null Chance and Calc. Not here yet,
-// and marked TODO where they go: the hit backbone (a move does nothing),
-// switch-in effects (Spikes, abilities, items), the residuals, Future Sight,
-// Perish Song and Baton Pass.
+// Plan steps 2-4 (CLAUDE.md): the frame, the order of actions, switching,
+// the hit backbone, the residuals and the move effects written so far, with
+// the roll helpers, real and null Chance and Calc. Not here yet, and marked
+// TODO where they go: the other move effects (they only use PP), Future
+// Sight and Perish Song.
 //
 // The frame is one switch on request.phase whose cases fall through in turn
 // order (CLAUDE.md, "Turn phases"). A case resumed after a request first
@@ -920,18 +920,21 @@ constexpr void arrive_both(Battle& battle, bool start, O& options) {
   arrive(battle, foe(first), options);
 }
 
-// p's active Pokémon leaves for SLOT `slot`, which enters: a switch action
-// or a faint replacement, before the new Pokémon arrives. Switch-out clears
-// the foe's state that p's Pokémon was the source of (SwitchInClearSetData
-// and FaintClearSetData, main:3158-3199; README decision 9). Baton Pass will
-// need its own version.
+// p's active Pokémon leaves for SLOT `slot`, which enters: a switch action,
+// a faint replacement or Baton Pass (`baton`), before the new Pokémon
+// arrives. Switch-out clears the foe's state that p's Pokémon was the
+// source of (SwitchInClearSetData and FaintClearSetData, main:3158-3199;
+// README decision 9). Baton Pass leaves the foe's escape prevention and its
+// Lock-On (main:3158 skips them), and baton_pass_in restores what passes.
 template <typename O>
-constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options) {
+constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
+                     bool baton = false) {
   Side& side = battle.side(player);
   assert(slot >= 2 && slot <= 6);
   assert(side.get(slot).species != Species::None && !side.get(slot).fainted());
 
-  // TODO(plan step 4): Pursuit on the switching target (bs1:3088).
+  // TODO(plan step 4): Pursuit on the switching target (bs1:3088). Not on
+  // Baton Pass (Showdown's skipBeforeSwitchOutEventFlag).
   // switchoutabilities (bsc:9590): Natural Cure, as Showdown's onSwitchOut.
   // A cured sleep is public, so its count resets before the SLOTs swap.
   Pokemon& out = side.get(1);
@@ -954,11 +957,13 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options) {
   f.volatiles.infatuated = false;
   f.volatiles.wrapped = 0;
   f.wrapped_move = Move::None;
-  f.volatiles.escape_prevention = false;
-  f.volatiles.lock_on = 0;
+  if (!baton) {
+    f.volatiles.escape_prevention = false;
+    f.volatiles.lock_on = 0;
+  }
 
   std::swap(side.order[0], side.order[slot - 1]);
-  if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot);
+  if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot, baton);
   enter(battle, player);
 }
 
@@ -969,6 +974,51 @@ template <typename O>
 constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
                          O& options) {
   leave(battle, player, slot, options);
+  arrive(battle, player, options);
+}
+
+// Baton Pass's switch-in (README decision 5): the passer leaves, the
+// recipient enters, gets what passes and arrives (Spikes, its ability and
+// item; switchineffects, bs1:1713). What passes is the decomp's keep-list
+// (Cmd_switchindataupdate, bsc:4646; SwitchInClearSetData, main:3172-3209)
+// with Showdown's differences (its copyVolatileFrom, sim/pokemon.ts:1246,
+// copies every volatile without noCopy):
+// - Passed: the stat stages, confusion with its counter, Focus Energy,
+//   Substitute and its HP, escape prevention, Curse, Leech Seed, Perish Song
+//   and its timer, Ingrain, Mud Sport and Water Sport.
+// - Binding passes, as Showdown (partiallytrapped has no noCopy and its
+//   binder is still in); the decomp clears STATUS2_WRAPPED.
+// - Lock-On, as Showdown (gen4's lockon drops noCopy): the passer's lock on
+//   the foe keeps its count, where the decomp resets it to 2 (main:3178);
+//   the foe's lock on the passer is lost (its source has left), where the
+//   decomp keeps STATUS3_ALWAYS_HITS on the recipient.
+// - Not passed, by either: the toxic counter (decision 1), infatuation,
+//   Disable, Encore, Torment, Nightmare, Yawn, Foresight, Flash Fire. A
+//   Taunted Pokémon can't use Baton Pass, so Showdown passing Taunt can't
+//   show. TODO: Showdown passes Charge (no noCopy); settle with Charge.
+template <typename O>
+constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
+                             O& options) {
+  const ActivePokemon old = battle.side(player).active;
+  leave(battle, player, slot, options, true);
+  ActivePokemon& a = battle.side(player).active;
+  const Volatiles& v = old.volatiles;
+  Volatiles& n = a.volatiles;
+  a.boosts = old.boosts;
+  n.confusion = v.confusion;
+  n.focus_energy = v.focus_energy;
+  n.substitute = v.substitute;
+  a.substitute_hp = old.substitute_hp;
+  n.escape_prevention = v.escape_prevention;
+  n.cursed = v.cursed;
+  n.leech_seed = v.leech_seed;
+  n.perish_song = v.perish_song;
+  a.perish_song_timer = old.perish_song_timer;
+  n.rooted = v.rooted;
+  n.mud_sport = v.mud_sport;
+  n.water_sport = v.water_sport;
+  n.wrapped = v.wrapped;
+  a.wrapped_move = old.wrapped_move;
   arrive(battle, player, options);
 }
 
@@ -1098,6 +1148,9 @@ struct MoveState {
   // Roar or Whirlwind worked: the target is dragged out after the action,
   // as Showdown's forceSwitchFlag (sim/battle.ts:2828).
   bool drag;
+  // Baton Pass worked: the user's side picks the recipient after the action
+  // (Phase::BatonPass), as Showdown's switchFlag.
+  bool pass;
   // This turn's ProtectStruct; set by use_move, null only for the
   // residuals' MoveState, which never reads it.
   Turn* turn;
@@ -2919,6 +2972,29 @@ constexpr void drag(Battle& battle, Player user, O& options) {
   arrive(battle, target, options);
 }
 
+// BattleScript_EffectBatonPass (bs1:1694): after the canceler, attackstring
+// and ppreduce, it fails with no bench (jumpifcantswitch with
+// SWITCH_IGNORE_ESCAPE_PREVENTION, so trapping doesn't stop it; Showdown's
+// onHit checks canSwitch). Otherwise the user's side picks the recipient.
+// The decomp switches before moveend, so its moveend sees the recipient;
+// here moveend runs on the passer, which is the same for Baton Pass: it
+// sets no last move, a working pass doesn't Choice-lock, and it changes no
+// status for the item cures. Log: Fail, then the switch (Switch, [from]
+// Baton Pass) on resuming.
+template <typename O>
+constexpr void baton_pass(Battle& battle, Player player, MoveState& m,
+                          O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  if (bench(battle, player) == 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  m.pass = true;
+  moveend(battle, player, m, options);
+}
+
 // Whether Sleep Talk can't call `move`, as Showdown's gen3 Sleep Talk: the
 // nosleeptalk and charge flags, which are the decomp's list
 // (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
@@ -2978,6 +3054,7 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   assert(get(c.move).effect != Effect::SleepTalk);
   execute(battle, player, c, options);
   m.drag = c.drag;
+  m.pass = c.pass;
 }
 
 // The healing moves' effects (heal_move).
@@ -2998,7 +3075,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::BellyDrum || effect == Effect::Curse ||
          effect == Effect::Roar || effect == Effect::Substitute ||
          effect == Effect::Protect || effect == Effect::Endure ||
-         effect == Effect::Spikes || heals(effect);
+         effect == Effect::Spikes || heals(effect) ||
+         effect == Effect::BatonPass;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3036,6 +3114,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   }
   if (effect == Effect::Spikes) return spikes_move(battle, player, m, options);
   if (heals(effect)) return heal_move(battle, player, m, options);
+  if (effect == Effect::BatonPass) return baton_pass(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
@@ -3051,9 +3130,15 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
 // its script. Struggle uses no PP. A forced move is the locked move. Encore
 // applies even when it began after selection: the encored move replaces the
 // chosen one, unless it was overwritten, which ends the Encore. Returns
-// whether Roar or Whirlwind is to drag the foe out (MoveState::drag).
+// what follows the action.
+enum class After : uint8_t {
+  None,
+  Drag, // Roar or Whirlwind drags the foe out (MoveState::drag)
+  Pass, // Baton Pass asks for the recipient (MoveState::pass)
+};
+
 template <typename O>
-constexpr bool use_move(Battle& battle, Player player, bool first, Turn& turn,
+constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
                         O& options) {
   const Request& r = battle.request;
   const uint8_t i = index(player);
@@ -3094,7 +3179,8 @@ constexpr bool use_move(Battle& battle, Player player, bool first, Turn& turn,
   m.first = first;
   m.turn = &turn;
   execute(battle, player, m, options);
-  return m.drag;
+  assert(!(m.drag && m.pass));
+  return m.drag ? After::Drag : m.pass ? After::Pass : After::None;
 }
 
 // RunTurnActionsFunctions (main:4937) from action `from` (0, or after a
@@ -3105,21 +3191,32 @@ constexpr bool use_move(Battle& battle, Player player, bool first, Turn& turn,
 // Showdown's runAction (sim/battle.ts:2825). A dragged-out Pokémon's own
 // queued move is cancelled (Showdown's runAction skips an inactive
 // Pokémon's move); a switch can't be queued after a move.
+//
+// A Baton Pass that worked asks its side for the recipient, after the faint
+// check (Showdown's switch requests, sim/battle.ts:2844), and the actions
+// resume at the next one (update's BatonPass case).
 template <typename O>
 constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
   Turn turn{};
   for (uint8_t i = from; i < Request::END_OF_ACTIONS; i++) {
     const Player p = i == 0 ? battle.request.first : foe(battle.request.first);
     const Choice c = battle.request.choice[index(p)];
-    bool dragged = false;
+    After after = After::None;
     if (c.type() == Choice::Switch) {
       switch_to(battle, p, c.data(), options);
-    } else if (use_move(battle, p, i == 0, turn, options)) {
-      drag(battle, p, options);
-      dragged = true;
+    } else {
+      after = use_move(battle, p, i == 0, turn, options);
+      if (after == After::Drag) drag(battle, p, options);
     }
     if (Flow f = faints(battle, Phase::FaintAfterAction)) return f;
-    if (dragged) break;
+    if (after == After::Drag) break;
+    if (after == After::Pass) {
+      battle.request.phase = Phase::BatonPass;
+      battle.request.next = uint8_t(i + 1);
+      const Choice::Type c1 = p == Player::P1 ? Choice::Switch : Choice::Pass;
+      const Choice::Type c2 = p == Player::P2 ? Choice::Switch : Choice::Pass;
+      return Result::init(Result::None, c1, c2);
+    }
   }
   return std::nullopt;
 }
@@ -3642,10 +3739,16 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
         if (chosen != Move::Rage) side.active.volatiles.rage = false;
       }
     } else {
-      // TODO(plan step 4): finish Baton Pass's switch-in (README decision 5).
-      assert(false && "Baton Pass isn't implemented");
-      from = battle.request.next;
-      battle.request.phase = Phase::None;
+      // Finish Baton Pass's switch-in. A recipient that faints to Spikes
+      // ends the actions, as any faint.
+      Request& r = battle.request;
+      const Player passer = r.next == 1 ? r.first : foe(r.first);
+      baton_pass_in(battle, passer, (passer == Player::P1 ? c1 : c2).data(),
+                    options);
+      from = r.next;
+      r.phase = Phase::None;
+      r.next = 0;
+      if ((f = faints(battle, Phase::FaintAfterAction))) return checked(battle, *f);
     }
     if ((f = actions(battle, from, options))) return checked(battle, *f);
     [[fallthrough]];

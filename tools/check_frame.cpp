@@ -798,6 +798,89 @@ void check_roar() {
   }
 }
 
+// Baton Pass: the request and its resume at the foe's move, what passes,
+// passing last, failing with no bench, and a recipient fainting to Spikes.
+void check_baton_pass() {
+  helpers::Pokemon passer = JOLTEON;
+  passer.moves[0] = Move::BatonPass;
+  // The faster passer: P1 is asked for the recipient, P2's move waits.
+  {
+    Battle b = started({passer, DUGTRIO}, {IDLE});
+    ActivePokemon& a = b.sides[0].active;
+    a.boosts.atk = 2;
+    a.volatiles.substitute = true;
+    a.substitute_hp = 20;
+    a.volatiles.confusion = 3;
+    a.volatiles.focus_energy = true;
+    a.volatiles.escape_prevention = true; // Baton Pass ignores trapping
+    a.volatiles.lock_on = 2;              // the foe's: lost
+    a.volatiles.infatuated = true;
+    a.toxic = 3;
+    b.sides[1].active.volatiles.lock_on = 1; // the passer's: kept
+    Observed o{};
+    o.chance.durations.p1.confusion = 2;
+    o.calc.overrides.p1.confusion = Optional::False;
+    Result r = update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
+    CHECK(b.request.phase == Phase::BatonPass && b.request.next == 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BatonPass, 3) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3));
+    std::array<Choice, MAX_CHOICES> out{};
+    CHECK(choices(b, Player::P1, r.p1(), out) == 1 && out[0] == Choice::swap(2));
+    r = update(b, Choice::swap(2), Choice::pass(), o);
+    CHECK(r == Result::start() && b.turn == 2);
+    const ActivePokemon& in = b.sides[0].active;
+    CHECK(in.species == Species::Dugtrio);
+    CHECK(in.boosts.atk == 2);
+    CHECK(in.volatiles.substitute && in.substitute_hp == 20);
+    // Confusion stepped once, on Baton Pass itself.
+    CHECK(in.volatiles.confusion == 2 && o.chance.durations.p1.confusion == 3);
+    CHECK(in.volatiles.focus_energy && in.volatiles.escape_prevention);
+    CHECK(in.volatiles.lock_on == 0 && !in.volatiles.infatuated);
+    CHECK(in.toxic == 0);
+    CHECK(b.sides[1].active.volatiles.lock_on == 0); // 1, then end of turn
+    // The foe's Splash ran after the switch.
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
+  }
+  // The slower passer: the request comes last and the end of turn follows.
+  {
+    Battle b = started({passer, DUGTRIO}, {IDLE});
+    b.sides[0].active.stats.spe = 1;
+    Null null{};
+    Result r = update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
+    CHECK(b.request.next == Request::END_OF_ACTIONS);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
+    r = update(b, Choice::swap(2), Choice::pass(), null);
+    CHECK(r == Result::start() && b.turn == 2);
+    CHECK(b.sides[0].active.species == Species::Dugtrio);
+  }
+  // No bench: it fails and uses PP, and the turn goes on.
+  {
+    Battle b = started({passer}, {IDLE});
+    Null null{};
+    const Result r = update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(r == Result::start() && b.turn == 2);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BatonPass, 3) - 1);
+  }
+  // The recipient faints to Spikes: a replacement, and the foe's move is
+  // cancelled.
+  {
+    Battle b = started({passer, DUGTRIO, SNORLAX}, {IDLE});
+    b.sides[0].conditions.spikes = 1;
+    b.sides[0].get(2).hp = 1;
+    Null null{};
+    Result r = update(b, Choice::move(1), Choice::move(1), null);
+    r = update(b, Choice::swap(2), Choice::pass(), null);
+    CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
+    CHECK(b.request.phase == Phase::FaintAfterAction);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3));
+    r = update(b, Choice::swap(3), Choice::pass(), null);
+    CHECK(r == Result::start() && b.turn == 2);
+    CHECK(b.sides[0].active.species == Species::Snorlax);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -1707,6 +1790,7 @@ int main(int argc, char** argv) {
   check_status_moves();
   check_stat_moves();
   check_roar();
+  check_baton_pass();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

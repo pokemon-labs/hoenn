@@ -493,7 +493,7 @@ main = `src/battle_main.c`.
    | `STATUS3_LEECHSEED_BATTLER` | dropped; the drain heals the foe's active Pokémon if alive (util:1507) | never |
    | `battlerPreventingEscape` | dropped; `escape_prevention` stays | switches out normally, not on Baton Pass (main:3164) |
    | `wrappedBy` | dropped; `wrapped_move` kept for the log | switches out, Baton Pass included (main:3199) |
-   | `battlerWithSureHit` | dropped; `lock_on` (0–2) on the target | switches out normally; on Baton Pass it resets to 2 (main:3166, 3178–3186) |
+   | `battlerWithSureHit` | dropped; `lock_on` (0–2) on the target | switches out normally; on Baton Pass the decomp resets it to 2 (main:3166, 3178–3186), Showdown keeps the count and this follows it |
    - Lock-On and Mind Reader set 2 on the target (bsc:8134), end of turn
      decrements it (util:1734), and while it's nonzero the foe skips the
      accuracy roll (bsc:1056), OHKO moves included with the level check kept
