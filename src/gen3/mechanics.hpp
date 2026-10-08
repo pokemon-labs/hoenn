@@ -2668,6 +2668,40 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectSubstitute (bs1:1085), Cmd_setsubstitute (bsc:7808):
+// after the canceler, ppreduce and attackstring, it fails with a
+// Substitute already up or at max HP / 4 (at least 1) or less, setting no
+// result flag. Otherwise the Substitute gets max HP / 4 (at least 1), the
+// user loses that much, bypassing the new Substitute, and a binding on the
+// user ends. Showdown agrees on each point (data/moves.ts: substitute; its
+// `hp <= maxhp / 4` and floored directDamage match on integer HP; it ends
+// partiallytrapped silently). Log: Start Substitute, then Damage; or Fail
+// (weak).
+template <typename O>
+constexpr void substitute(Battle& battle, Player player, MoveState& m,
+                          O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  pp_reduce(battle, player, m);
+  m.attackstring = true;
+  ActivePokemon& a = battle.side(player).active;
+  const Pokemon& mon = battle.side(player).get(1);
+  const uint32_t quarter = fraction(mon, 4);
+  if (a.volatiles.substitute || mon.hp <= quarter) {
+    return moveend(battle, player, m, options);
+  }
+  assert(quarter <= UINT8_MAX);
+  a.volatiles.substitute = true;
+  a.substitute_hp = uint8_t(quarter);
+  if (a.volatiles.wrapped != 0) {
+    a.volatiles.wrapped = 0;
+    a.wrapped_move = Move::None;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).binding = 0;
+  }
+  // The user can't faint: its HP was above the quarter it loses.
+  passive_damage(battle, player, quarter, options);
+  moveend(battle, player, m, options);
+}
+
 // The SLOTs p's bench can send in, as a mask (bit s - 1 for SLOT s): the
 // Pokémon present and not fainted.
 constexpr uint8_t bench(const Battle& battle, Player player) {
@@ -2799,7 +2833,7 @@ constexpr bool handled(Effect effect) {
          stat_up(effect).n != 0 || stat_pair(effect).any() ||
          effect == Effect::Minimize || effect == Effect::DefenseCurl ||
          effect == Effect::BellyDrum || effect == Effect::Curse ||
-         effect == Effect::Roar;
+         effect == Effect::Roar || effect == Effect::Substitute;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -2831,6 +2865,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::BellyDrum) return belly_drum(battle, player, m, options);
   if (effect == Effect::Curse) return curse(battle, player, m, options);
   if (effect == Effect::Roar) return roar(battle, player, m, options);
+  if (effect == Effect::Substitute) return substitute(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then

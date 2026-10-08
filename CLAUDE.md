@@ -724,8 +724,10 @@ adapted (see Interface).
   their log sites with `// Log: <ArgType>` comments.
 - Done (2026-10-07): Roar and Whirlwind (see the checklist) and
   Soundproof's block in the canceler. `tools/coverage`: 78%.
+- Done (2026-10-07): Substitute (the decomp and Showdown agree; it ends a
+  binding on the user).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Substitute, Protect, Spikes, Focus Punch, Soft-Boiled, Recover, Baton
+  (Protect, Spikes, Focus Punch, Soft-Boiled, Recover, Baton
   Pass, Wish, Leech Seed...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.

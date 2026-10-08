@@ -787,6 +787,64 @@ void check_roar() {
   }
 }
 
+// Substitute: its cost and HP, the two failures, freeing from a binding,
+// and a hit that the Substitute takes.
+void check_substitute() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[0] = Move::Substitute;
+  const auto after = [&](helpers::Pokemon foe, auto&& setup) {
+    Battle b = started({user}, {foe});
+    setup(b);
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    return b;
+  };
+  const auto none = [](Battle&) {};
+  {
+    Battle b = after(IDLE, none);
+    const Pokemon& mon = b.sides[0].get(1);
+    CHECK(b.sides[0].active.volatiles.substitute);
+    CHECK(b.sides[0].active.substitute_hp == mon.stats.hp / 4);
+    CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 4);
+    CHECK(mon.moves[0].pp == max_pp(Move::Substitute, 3) - 1);
+  }
+  // At a quarter or less, or with one up, it fails at no cost.
+  {
+    Battle b = after(IDLE, [](Battle& b) {
+      b.sides[0].get(1).hp = uint16_t(b.sides[0].get(1).stats.hp / 4);
+    });
+    CHECK(!b.sides[0].active.volatiles.substitute);
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp / 4);
+    b = after(IDLE, [](Battle& b) {
+      b.sides[0].active.volatiles.substitute = true;
+      b.sides[0].active.substitute_hp = 7;
+    });
+    CHECK(b.sides[0].active.substitute_hp == 7);
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
+  }
+  // It ends a binding on the user.
+  {
+    Battle b = after(IDLE, [](Battle& b) {
+      b.sides[0].active.volatiles.wrapped = 3;
+      b.sides[0].active.wrapped_move = Move::Wrap;
+    });
+    CHECK(b.sides[0].active.volatiles.wrapped == 0);
+    CHECK(b.sides[0].active.wrapped_move == Move::None);
+  }
+  // A slower foe's hit (forced) lands on the Substitute, not the Pokémon.
+  {
+    Battle b = started({user}, {DUGTRIO});
+    b.sides[1].active.stats.spe = 1;
+    Observed o{};
+    o.calc.overrides.p2.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    const Pokemon& mon = b.sides[0].get(1);
+    CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 4);
+    CHECK(b.sides[0].active.substitute_hp < mon.stats.hp / 4 ||
+          !b.sides[0].active.volatiles.substitute);
+  }
+}
+
 void check_residuals() {
   helpers::Pokemon plain = IDLE;
   plain.ability = Ability::ThickFat;
@@ -1478,6 +1536,7 @@ int main(int argc, char** argv) {
   check_status_moves();
   check_stat_moves();
   check_roar();
+  check_substitute();
   check_residuals();
   check_items();
   check_move_abilities();
