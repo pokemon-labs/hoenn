@@ -805,6 +805,114 @@ void check_items() {
   }
 }
 
+helpers::Pokemon mon(Species species, Ability ability, std::array<Move, 4> moves,
+                     Gender gender = Gender::Male) {
+  helpers::Pokemon p{};
+  p.species = species;
+  p.ability = ability;
+  for (size_t i = 0; i < 4; i++) p.moves[i] = moves[i];
+  p.gender = gender;
+  return p;
+}
+
+void check_move_abilities() {
+  const helpers::Pokemon slammer =
+      mon(Species::Snorlax, Ability::ThickFat,
+          {Move::BodySlam, Move::Toxic, Move::ThunderWave, Move::Splash});
+  const helpers::Pokemon umbreon =
+      mon(Species::Umbreon, Ability::Synchronize, {Move::Splash});
+  const helpers::Pokemon electabuzz =
+      mon(Species::Electabuzz, Ability::Static, {Move::Splash});
+  const auto run = [](Battle& b, uint8_t m1, auto&& force) {
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    o.calc.overrides.p1.hits[0].damage = 85;
+    o.calc.overrides.p1.secondary = Optional::False;
+    force(o);
+    update(b, Choice::move(m1), Choice::move(1), o);
+    return o;
+  };
+  const auto none = [](Observed&) {};
+  {
+    // Synchronize passes Toxic back as plain poison, Thunder Wave as
+    // paralysis.
+    Battle b = started({slammer}, {umbreon});
+    run(b, 2, none);
+    CHECK(b.sides[1].get(1).status.badly_poisoned());
+    CHECK(b.sides[0].get(1).status.poisoned() &&
+          !b.sides[0].get(1).status.badly_poisoned());
+    Battle c = started({slammer}, {umbreon});
+    run(c, 3, none);
+    CHECK(c.sides[0].get(1).status.paralyzed());
+    // Not through the user's Safeguard (Showdown).
+    Battle d = started({slammer}, {umbreon});
+    d.sides[0].conditions.safeguard = 5;
+    run(d, 3, none);
+    CHECK(d.sides[1].get(1).status.paralyzed() && !d.sides[0].get(1).status.any());
+  }
+  {
+    // Static on contact, forced; not when the draw fails; no draw under
+    // the attacker's Safeguard.
+    Battle b = started({slammer}, {electabuzz});
+    run(b, 1, [](Observed& o) { o.calc.overrides.p1.hits[0].contact = Optional::True; });
+    CHECK(b.sides[0].get(1).status.paralyzed());
+    Battle c = started({slammer}, {electabuzz});
+    run(c, 1, [](Observed& o) { o.calc.overrides.p1.hits[0].contact = Optional::False; });
+    CHECK(!c.sides[0].get(1).status.any());
+    Battle d = started({slammer}, {electabuzz});
+    d.sides[0].conditions.safeguard = 5;
+    const Observed o = run(d, 1, none);
+    CHECK(!d.sides[0].get(1).status.any());
+    CHECK(o.chance.actions.p1.hits[0].contact == Optional::None);
+  }
+  {
+    // Static paralyzes a Synchronize attacker, which passes it back.
+    const helpers::Pokemon alakazam = mon(Species::Alakazam, Ability::Synchronize,
+                                          {Move::BodySlam});
+    Battle b = started({alakazam}, {electabuzz});
+    run(b, 1, [](Observed& o) { o.calc.overrides.p1.hits[0].contact = Optional::True; });
+    CHECK(b.sides[0].get(1).status.paralyzed());
+    CHECK(b.sides[1].get(1).status.paralyzed());
+  }
+  {
+    // Rough Skin: 1/16 of the attacker's max HP on contact.
+    Battle b = started({slammer},
+                       {mon(Species::Sharpedo, Ability::RoughSkin, {Move::Splash})});
+    run(b, 1, none);
+    const Pokemon& m = b.sides[0].get(1);
+    CHECK(m.hp == m.stats.hp - m.stats.hp / 16);
+  }
+  {
+    // Effect Spore: 1/10, then the forced pick. Poison takes; sleep doesn't
+    // yet (Sleep Clause pending).
+    const helpers::Pokemon breloom =
+        mon(Species::Breloom, Ability::EffectSpore, {Move::Splash});
+    Battle b = started({slammer}, {breloom});
+    const Observed o = run(b, 1, [](Observed& o) {
+      o.calc.overrides.p1.hits[0].contact = Optional::True;
+      o.calc.overrides.p1.spore = 2;
+    });
+    CHECK(b.sides[0].get(1).status.poisoned());
+    CHECK(o.chance.actions.p1.spore == 2);
+    Battle c = started({slammer}, {breloom});
+    run(c, 1, [](Observed& o) {
+      o.calc.overrides.p1.hits[0].contact = Optional::True;
+      o.calc.overrides.p1.spore = 1;
+    });
+    CHECK(!c.sides[0].get(1).status.any());
+  }
+  {
+    // Immunity cures a poison it got before (set here directly) at the
+    // next moveend.
+    Battle b = started({SNORLAX}, {IDLE});
+    b.sides[0].get(1).status = Status::psn();
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(!b.sides[0].get(1).status.any());
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -917,6 +1025,7 @@ int main(int argc, char** argv) {
   check_status_moves();
   check_residuals();
   check_items();
+  check_move_abilities();
   check_accuracy();
   check_turn_cap();
 

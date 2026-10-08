@@ -657,9 +657,12 @@ adapted (see Interface).
   Liechi, Petaya, Lansat, Starf) at end of turn only, as on the cartridge
   and in Showdown's gen3 mod. Not yet: Leppa, the flavor berries, King's
   Rock, Shell Bell.
-- **Then** (approved order): `moveend`'s abilities (Synchronize, Effect
-  Spore without sleep until Sleep Clause is designed, Flame Body, Static,
-  Poison Point, Rough Skin, the immunity cures); the absorbing abilities
+- Done (2026-10-07): `moveend`'s abilities: Synchronize (armed by any
+  poison, toxic, paralysis or burn that takes hold, `MoveState::synchronize`),
+  Color Change, Rough Skin, Effect Spore (its sleep waits for Sleep
+  Clause), Poison Point, Static, Flame Body, Cute Charm, the immunity cures.
+  Following Showdown, Safeguard blocks the ability-inflicted statuses.
+- **Then** (approved order): the absorbing abilities
   (Volt Absorb, Water Absorb, Flash Fire); then a proposal for switch-in
   abilities and Natural Cure. Uproar, Thrash and Yawn residuals wait. Then the status moves by `tools/coverage`'s
   order (Roar, Calm Mind, Rest, Substitute, Protect, Spikes...).

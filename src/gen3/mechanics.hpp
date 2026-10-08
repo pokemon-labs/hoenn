@@ -275,6 +275,36 @@ constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
   return index;
 }
 
+// Effect Spore's status: Random() & 3 redrawn while 0, so 1 sleep, 2
+// poison, 3 paralysis (MOVE_EFFECT_BURN replaced, util:2776); Showdown
+// samples the same three.
+template <typename O>
+constexpr uint8_t spore(Battle& battle, Player p, O& options) {
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).spore;
+  assert(forced <= 3);
+  const uint8_t which = forced != 0 ? forced : uint8_t(1 + battle.rng.range(3));
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).spore, which);
+    observe(options, 1, 3);
+  }
+  return which;
+}
+
+// A contact ability's chance on hit `i` (util:2768-2850): Effect Spore's
+// 1/10, or Static, Poison Point, Flame Body and Cute Charm's 1/3. Called
+// only when the effect could take hold.
+template <typename O>
+constexpr bool contact(Battle& battle, Player p, uint8_t i, uint32_t den,
+                       O& options) {
+  assert(i < 5);
+  Optional forced = Optional::None;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].contact;
+  Optional* field = nullptr;
+  if constexpr (detail::CHANCE<O>) field = &options.chance.actions.get(p).hits[i].contact;
+  return coin(battle, forced, field, 1, den, options);
+}
+
 // Starf Berry's stat: uniform over the stats below +6 among Atk, Def, Spe,
 // SpA and SpD (the decomp's rejection loop, util:3462; Showdown's onEat
 // samples the same set). Returns the stat, 1-5 in that order (STAT_ATK to
@@ -715,6 +745,14 @@ template <typename O> constexpr Result start(Battle& battle, O& options) {
 // matters to Encore, Disable, Mimic and the like (plan step 4).
 inline constexpr Move UNAVAILABLE = Move::None;
 
+// MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
+enum class Secondary : uint8_t {
+  None, Poison, Burn, Freeze, Paralysis, Toxic, Confusion, Flinch, TriAttack,
+  // MOVE_EFFECT_*_MINUS_1 on the target, in Boosts order (atk-acc), then
+  // MOVE_EFFECT_ATK_PLUS_1 and DEF_PLUS_1 with MOVE_EFFECT_AFFECTS_USER.
+  AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
+};
+
 // What one move execution tracks: the decomp's per-action globals
 // (gCurrentMove, gCurrMovePos, gMoveResultFlags, gHpDealt) and the
 // gHitMarker bits that this code reads. On the stack, as libpkmn gen2's
@@ -734,6 +772,10 @@ struct MoveState {
   bool first;        // the target acts after this, so a flinch can stop it
   bool ignore_on_air;      // HITMARKER_IGNORE_ON_AIR (Thunder, Sky Uppercut)
   bool ignore_underground; // HITMARKER_IGNORE_UNDERGROUND (Earthquake)
+  // HITMARKER_SYNCHRONIZE_EFFECT with synchronizeMoveEffect: the last poison,
+  // toxic, paralysis or burn this move's execution set (bsc:2503), for
+  // moveend's Synchronize cases. None when not armed.
+  Secondary synchronize;
 
   static constexpr uint8_t NO_SLOT = 4;
 };
@@ -1078,6 +1120,33 @@ constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
   return dealt;
 }
 
+// HP restored by datahpupdate with negative damage: capped at max HP.
+constexpr void heal(Pokemon& mon, uint32_t amount) {
+  const uint32_t room = uint32_t(mon.stats.hp - mon.hp);
+  mon.hp = uint16_t(mon.hp + (amount < room ? amount : room));
+}
+
+// Max HP / n, at least 1: every residual's fraction.
+constexpr uint32_t fraction(const Pokemon& mon, uint32_t n) {
+  const uint32_t d = mon.stats.hp / n;
+  return d == 0 ? 1 : d;
+}
+
+// Passive damage to p's active Pokémon (residuals, Rough Skin): datahpupdate
+// under HITMARKER_IGNORE_SUBSTITUTE | PASSIVE_HP_UPDATE and, for the
+// residuals, IGNORE_BIDE (util:1465), so no Substitute, Bide or Counter
+// bookkeeping; then tryfaintmon. Returns the HP lost (gHpDealt).
+template <typename O>
+constexpr uint16_t passive_damage(Battle& battle, Player player,
+                                   uint32_t damage, O& options) {
+  Pokemon& mon = battle.side(player).get(1);
+  assert(!mon.fainted());
+  const uint16_t dealt = mon.hp > damage ? uint16_t(damage) : mon.hp;
+  mon.hp = uint16_t(mon.hp - dealt);
+  if (mon.fainted()) faint(battle, player, options);
+  return dealt;
+}
+
 // ---------------------------------------------------------------------------
 // Held items (ItemBattleEffects, util:3243): one function per mode, called
 // where the decomp calls it (decided 2026-10-07).
@@ -1167,96 +1236,6 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
   return true;
 }
 
-// Cmd_moveend (bsc:4210) with moveendall: the cases in the decomp's order.
-template <typename O>
-constexpr void moveend(Battle& battle, Player player, const MoveState& m,
-                       O& options) {
-  Side& side = battle.side(player);
-  ActivePokemon& a = side.active;
-  Side& target_side = m.self ? side : battle.side(foe(player));
-  ActivePokemon& t = target_side.active;
-  const Pokemon& target = target_side.get(1);
-  const MoveData& data = get(m.move);
-  const bool no_effect = m.result & MoveResult::NO_EFFECT;
-  // TODO(plan step 4): the dynamic type (Hidden Power, Weather Ball).
-  const Type type = data.type;
-
-  // MOVEEND_RAGE
-  if (!m.self && t.volatiles.rage && !target.fainted() && !no_effect &&
-      m.damaged && data.bp != 0 && t.boosts.atk < 6) {
-    t.boosts.atk++;
-  }
-
-  // MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
-  // Power's damage is recorded under its base type, Normal, so Hidden Power
-  // Fire doesn't thaw (datahpupdate, bsc:1852).
-  if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
-      !physical(type) && !no_effect && type == Type::Fire &&
-      data.effect != Effect::HiddenPower) {
-    target_side.get(1).status = Status::none();
-  }
-
-  // TODO(plan step 4): MOVEEND_SYNCHRONIZE_TARGET, ON_DAMAGE_ABILITIES,
-  // IMMUNITY_ABILITIES and SYNCHRONIZE_ATTACKER (AbilityBattleEffects).
-
-  // MOVEEND_CHOICE_MOVE. A Baton Pass that worked doesn't lock, and skips
-  // the check that the locked move is still known.
-  bool skip = false;
-  if (m.obeys && holds(side, HoldEffect::ChoiceBand) &&
-      m.move != Move::Struggle && a.choice_move == Move::None) {
-    skip = m.move == Move::BatonPass && !(m.result & MoveResult::FAILED);
-    if (!skip) a.choice_move = m.move;
-  }
-  if (!skip) {
-    bool known = false;
-    for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
-    if (!known) a.choice_move = Move::None;
-  }
-
-  // TODO(plan step 4): MOVEEND_CHANGED_ITEMS (Trick, Thief, Covet).
-
-  // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends the
-  // attacker's semi-invulnerable turn.
-  if (no_effect || m.unable) {
-    a.volatiles.on_air = false;
-    a.volatiles.underground = false;
-    a.volatiles.underwater = false;
-  }
-
-  // MOVEEND_ITEM_EFFECTS_ALL: ITEMEFFECT_MOVE_END's cures. The decomp
-  // stops at the first Pokémon whose item acts (util:3740); Showdown's
-  // onUpdate cures both, and this follows it.
-  for (const Player p : {Player::P1, Player::P2}) {
-    if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
-  }
-
-  // TODO(plan step 4): MOVEEND_KINGSROCK_SHELLBELL (ItemBattleEffects).
-
-  // MOVEEND_SUBSTITUTE
-  for (Side& s : battle.sides) {
-    if (s.active.substitute_hp == 0) s.active.volatiles.substitute = false;
-  }
-
-  // MOVEEND_UPDATE_LAST_MOVES
-  if (m.attackstring) a.last_printed_move = m.move;
-  if (data.effect != Effect::BatonPass) {
-    a.last_move = m.obeys ? m.move : UNAVAILABLE;
-    a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
-    if (m.obeys && !no_effect) {
-      t.last_landed_move = m.move;
-      t.last_hit_type = type;
-    } else {
-      t.last_landed_move = UNAVAILABLE;
-    }
-  }
-
-  // MOVEEND_MIRROR_MOVE
-  if ((data.flags & Flag::MirrorMoveAffected) && m.obeys && !m.self &&
-      !target.fainted() && !no_effect) {
-    t.last_taken_move = m.move;
-  }
-}
-
 // The effects whose script is BattleScript_EffectHit, maybe after setting a
 // move effect or a hit marker: the plain hits (Quick Attack and Vital Throw
 // differ only in the table; Pursuit only when the target switches,
@@ -1313,14 +1292,6 @@ constexpr bool plain_hit(Effect effect) {
   }
 }
 
-// MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
-enum class Secondary : uint8_t {
-  None, Poison, Burn, Freeze, Paralysis, Toxic, Confusion, Flinch, TriAttack,
-  // MOVE_EFFECT_*_MINUS_1 on the target, in Boosts order (atk-acc), then
-  // MOVE_EFFECT_ATK_PLUS_1 and DEF_PLUS_1 with MOVE_EFFECT_AFFECTS_USER.
-  AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
-};
-
 // The stage a stat change moves: 0 Atk, 1 Def, 2 Spe, 3 SpA, 4 SpD, 5 Acc.
 constexpr int8_t& stage(Boosts& b, uint8_t stat) {
   switch (stat) {
@@ -1361,17 +1332,16 @@ constexpr Secondary secondary_of(Effect effect) {
   }
 }
 
-// Whether a major status `s` would take hold on p's foe now: SetMoveEffect's
-// checks for a secondary (not primary, not certain; bsc:2408-2560) after
-// its preamble. Safeguard, then each status's type and ability immunities,
-// and an existing status. Freeze Clause (Smogon, always on, as Showdown's
-// freezeclausemod: no freeze while a Pokémon on that side is frozen) and
-// sun stop a freeze.
-constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
-  const Side& side = battle.side(foe(player));
+// Whether a major status `s` can take hold on `target`'s active Pokémon:
+// SetMoveEffect's checks (bsc:2408-2560) without Safeguard. Not on a
+// fainted Pokémon (its preamble), then each status's type and ability
+// immunities, and an existing status. Freeze Clause (Smogon, always on, as
+// Showdown's freezeclausemod: no freeze while a Pokémon on that side is
+// frozen) and sun stop a freeze.
+constexpr bool can_status(const Battle& battle, Player target, Secondary s) {
+  const Side& side = battle.side(target);
   const ActivePokemon& t = side.active;
-  if (side.conditions.safeguard != 0) return false;
-  if (side.get(1).status.any()) return false;
+  if (side.get(1).fainted() || side.get(1).status.any()) return false;
   switch (s) {
   case Secondary::Poison:
   case Secondary::Toxic:
@@ -1395,12 +1365,20 @@ constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
   }
 }
 
-// Sets a major status on p's foe, as SetMoveEffect does once statusChanged
-// (bsc:2565): freezing also cancels its multi-turn move. Changing the status
-// restarts the toxic counter (data.hpp, Status). TODO(plan step 4):
-// Synchronize (HITMARKER_SYNCHRONIZE_EFFECT).
-constexpr void set_status(Battle& battle, Player player, Secondary s) {
-  Side& side = battle.side(foe(player));
+// Whether a move's major status `s` takes hold on p's foe: Safeguard, then
+// can_status.
+constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
+  return battle.side(foe(player)).conditions.safeguard == 0 &&
+         can_status(battle, foe(player), s);
+}
+
+// Sets a major status on `target`, as SetMoveEffect does once statusChanged
+// (bsc:2476): freezing also cancels its multi-turn move, and poison, toxic,
+// paralysis and burn arm Synchronize (bsc:2503). Changing the status
+// restarts the toxic counter (data.hpp, Status).
+constexpr void inflict(Battle& battle, Player target, Secondary s,
+                       MoveState& m) {
+  Side& side = battle.side(target);
   Status& status = side.get(1).status;
   switch (s) {
   case Secondary::Poison: status = Status::psn(); break;
@@ -1414,6 +1392,7 @@ constexpr void set_status(Battle& battle, Player player, Secondary s) {
   default: assert(false && "not a major status");
   }
   side.active.toxic = 0;
+  if (s != Secondary::Freeze) m.synchronize = s;
 }
 
 // MOVE_EFFECT_CONFUSION taking hold on `target` (bsc:2541): the counter is
@@ -1538,18 +1517,251 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
     constexpr Secondary TRI[3] = {Secondary::Burn, Secondary::Freeze,
                                   Secondary::Paralysis};
     const Secondary which = TRI[rolls::tri_attack(battle, player, options) - 1];
-    if (status_takes(battle, player, which)) set_status(battle, player, which);
+    if (status_takes(battle, player, which)) inflict(battle, foe(player), which, m);
     break;
   }
   case Secondary::Toxic:
     if (status_takes(battle, player, s)) {
-      set_status(battle, player, s);
+      inflict(battle, foe(player), s, m);
     } else {
       m.result |= MoveResult::DOESNT_AFFECT_FOE;
     }
     break;
   default:
-    set_status(battle, player, s);
+    inflict(battle, foe(player), s, m);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Abilities after a move (AbilityBattleEffects, util:2560): one function per
+// mode, called from moveend (decided 2026-10-07).
+// ---------------------------------------------------------------------------
+
+// ABILITYEFFECT_SYNCHRONIZE and ATK_SYNCHRONIZE (util:2957, 2973): if
+// `holder` has Synchronize and this execution armed it, the poison (toxic
+// becomes poison), paralysis or burn passes to the other Pokémon, which
+// arms it again for the next case. The cartridge skips Safeguard here
+// (HITMARKER_STATUS_ABILITY_EFFECT); Showdown's Safeguard blocks it
+// (data/moves.ts:15598), and this follows Showdown.
+constexpr void synchronize(Battle& battle, Player holder, MoveState& m) {
+  if (battle.side(holder).active.ability != Ability::Synchronize ||
+      m.synchronize == Secondary::None) {
+    return;
+  }
+  const Secondary s =
+      m.synchronize == Secondary::Toxic ? Secondary::Poison : m.synchronize;
+  m.synchronize = Secondary::None;
+  const Player other = foe(holder);
+  if (battle.side(other).conditions.safeguard == 0 && can_status(battle, other, s)) {
+    inflict(battle, other, s, m);
+  }
+}
+
+// ABILITYEFFECT_ON_DAMAGE (util:2735): the target's Color Change, or its
+// contact ability acting on the attacker (p). Only after the target's own
+// HP took damage from a move with an effect, so never on a self-targeting
+// move or a confusion self-hit. Statuses skip Safeguard on the cartridge;
+// Showdown's Safeguard blocks them, and this follows Showdown.
+// TODO(plan step 4): Effect Spore's sleep, with Sleep Clause.
+template <typename O>
+constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
+                                 O& options) {
+  if (m.self || !m.damaged || (m.result & MoveResult::NO_EFFECT)) return;
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  const Pokemon& target_mon = battle.side(target).get(1);
+  const MoveData& data = get(m.move);
+
+  if (t.ability == Ability::ColorChange) {
+    if (m.move != Move::Struggle && data.bp != 0 && !has_type(t, data.type) &&
+        !target_mon.fainted()) {
+      t.types[0] = data.type;
+      t.types[1] = data.type;
+    }
+    return;
+  }
+
+  Side& side = battle.side(player);
+  Pokemon& user = side.get(1);
+  if (user.fainted() || !(data.flags & Flag::MakesContact)) return;
+  const auto takes = [&](Secondary s) {
+    return side.conditions.safeguard == 0 && can_status(battle, player, s);
+  };
+  Secondary s = Secondary::None;
+  switch (t.ability) {
+  case Ability::RoughSkin:
+    passive_damage(battle, player, fraction(user, 16), options);
+    return;
+  case Ability::EffectSpore: {
+    if (!takes(Secondary::Poison) && !takes(Secondary::Paralysis)) return;
+    if (!rolls::contact(battle, player, 0, 10, options)) return;
+    const uint8_t which = rolls::spore(battle, player, options);
+    if (which == 1) return;
+    s = which == 2 ? Secondary::Poison : Secondary::Paralysis;
+    if (takes(s)) inflict(battle, player, s, m);
+    return;
+  }
+  case Ability::PoisonPoint: s = Secondary::Poison; break;
+  case Ability::Static: s = Secondary::Paralysis; break;
+  case Ability::FlameBody: s = Secondary::Burn; break;
+  case Ability::CuteCharm: {
+    ActivePokemon& a = side.active;
+    const Gender g1 = user.gender;
+    const Gender g2 = target_mon.gender;
+    if (target_mon.fainted() || a.ability == Ability::Oblivious ||
+        a.volatiles.infatuated || g1 == Gender::None || g2 == Gender::None ||
+        g1 == g2) {
+      return;
+    }
+    if (rolls::contact(battle, player, 0, 3, options)) a.volatiles.infatuated = true;
+    return;
+  }
+  default:
+    return;
+  }
+  if (takes(s) && rolls::contact(battle, player, 0, 3, options)) {
+    inflict(battle, player, s, m);
+  }
+}
+
+// ABILITYEFFECT_IMMUNITY (util:2850), which moveend repeats until nothing
+// changes, so it covers both Pokémon: an ability cures the status it
+// prevents (one gained before the ability, by Baton Pass, Trace or Skill
+// Swap). Cured sleep and confusion are public, so their counts reset.
+template <typename O> constexpr void ability_immunity(Battle& battle, O& options) {
+  for (const Player p : {Player::P1, Player::P2}) {
+    Side& side = battle.side(p);
+    Pokemon& mon = side.get(1);
+    Volatiles& v = side.active.volatiles;
+    const Status st = mon.status;
+    switch (side.active.ability) {
+    case Ability::Immunity:
+      if (st.poisoned()) mon.status = Status::none();
+      break;
+    case Ability::OwnTempo:
+      if (v.confusion != 0) {
+        v.confusion = 0;
+        if constexpr (CHANCE<O>) options.chance.durations.get(p).confusion = 0;
+      }
+      break;
+    case Ability::Limber:
+      if (st.paralyzed()) mon.status = Status::none();
+      break;
+    case Ability::Insomnia:
+    case Ability::VitalSpirit:
+      if (st.asleep()) {
+        mon.status = Status::none();
+        v.nightmare = false;
+        if constexpr (CHANCE<O>) options.chance.durations.get(p).sleep[0] = 0;
+      }
+      break;
+    case Ability::WaterVeil:
+      if (st.burned()) mon.status = Status::none();
+      break;
+    case Ability::MagmaArmor:
+      if (st.frozen()) mon.status = Status::none();
+      break;
+    case Ability::Oblivious:
+      v.infatuated = false;
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+// Cmd_moveend (bsc:4210) with moveendall: the cases in the decomp's order.
+template <typename O>
+constexpr void moveend(Battle& battle, Player player, MoveState& m,
+                       O& options) {
+  Side& side = battle.side(player);
+  ActivePokemon& a = side.active;
+  Side& target_side = m.self ? side : battle.side(foe(player));
+  ActivePokemon& t = target_side.active;
+  const Pokemon& target = target_side.get(1);
+  const MoveData& data = get(m.move);
+  const bool no_effect = m.result & MoveResult::NO_EFFECT;
+  // TODO(plan step 4): the dynamic type (Hidden Power, Weather Ball).
+  const Type type = data.type;
+
+  // MOVEEND_RAGE
+  if (!m.self && t.volatiles.rage && !target.fainted() && !no_effect &&
+      m.damaged && data.bp != 0 && t.boosts.atk < 6) {
+    t.boosts.atk++;
+  }
+
+  // MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
+  // Power's damage is recorded under its base type, Normal, so Hidden Power
+  // Fire doesn't thaw (datahpupdate, bsc:1852).
+  if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
+      !physical(type) && !no_effect && type == Type::Fire &&
+      data.effect != Effect::HiddenPower) {
+    target_side.get(1).status = Status::none();
+  }
+
+  // MOVEEND_SYNCHRONIZE_TARGET, ON_DAMAGE_ABILITIES, IMMUNITY_ABILITIES,
+  // SYNCHRONIZE_ATTACKER. No self-targeting move arms Synchronize (Rest's
+  // sleep doesn't), so its target case is the foe's.
+  if (!m.self) synchronize(battle, foe(player), m);
+  ability_on_damage(battle, player, m, options);
+  ability_immunity(battle, options);
+  synchronize(battle, player, m);
+
+  // MOVEEND_CHOICE_MOVE. A Baton Pass that worked doesn't lock, and skips
+  // the check that the locked move is still known.
+  bool skip = false;
+  if (m.obeys && holds(side, HoldEffect::ChoiceBand) &&
+      m.move != Move::Struggle && a.choice_move == Move::None) {
+    skip = m.move == Move::BatonPass && !(m.result & MoveResult::FAILED);
+    if (!skip) a.choice_move = m.move;
+  }
+  if (!skip) {
+    bool known = false;
+    for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
+    if (!known) a.choice_move = Move::None;
+  }
+
+  // TODO(plan step 4): MOVEEND_CHANGED_ITEMS (Trick, Thief, Covet).
+
+  // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends the
+  // attacker's semi-invulnerable turn.
+  if (no_effect || m.unable) {
+    a.volatiles.on_air = false;
+    a.volatiles.underground = false;
+    a.volatiles.underwater = false;
+  }
+
+  // MOVEEND_ITEM_EFFECTS_ALL: ITEMEFFECT_MOVE_END's cures. The decomp
+  // stops at the first Pokémon whose item acts (util:3740); Showdown's
+  // onUpdate cures both, and this follows it.
+  for (const Player p : {Player::P1, Player::P2}) {
+    if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
+  }
+
+  // TODO(plan step 4): MOVEEND_KINGSROCK_SHELLBELL (ItemBattleEffects).
+
+  // MOVEEND_SUBSTITUTE
+  for (Side& s : battle.sides) {
+    if (s.active.substitute_hp == 0) s.active.volatiles.substitute = false;
+  }
+
+  // MOVEEND_UPDATE_LAST_MOVES
+  if (m.attackstring) a.last_printed_move = m.move;
+  if (data.effect != Effect::BatonPass) {
+    a.last_move = m.obeys ? m.move : UNAVAILABLE;
+    a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
+    if (m.obeys && !no_effect) {
+      t.last_landed_move = m.move;
+      t.last_hit_type = type;
+    } else {
+      t.last_landed_move = UNAVAILABLE;
+    }
+  }
+
+  // MOVEEND_MIRROR_MOVE
+  if ((data.flags & Flag::MirrorMoveAffected) && m.obeys && !m.self &&
+      !target.fainted() && !no_effect) {
+    t.last_taken_move = m.move;
   }
 }
 
@@ -1825,7 +2037,7 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  set_status(battle, player, s);
+  inflict(battle, foe(player), s, m);
   moveend(battle, player, m, options);
 }
 
@@ -1965,33 +2177,6 @@ constexpr bool residual_order_matters(const Battle& battle) {
          could_lose(battle, Player::P1) || could_lose(battle, Player::P2);
 }
 
-// HP restored by datahpupdate with negative damage: capped at max HP.
-constexpr void heal(Pokemon& mon, uint32_t amount) {
-  const uint32_t room = uint32_t(mon.stats.hp - mon.hp);
-  mon.hp = uint16_t(mon.hp + (amount < room ? amount : room));
-}
-
-// Max HP / n, at least 1: every residual's fraction.
-constexpr uint32_t fraction(const Pokemon& mon, uint32_t n) {
-  const uint32_t d = mon.stats.hp / n;
-  return d == 0 ? 1 : d;
-}
-
-// A residual's damage to p's active Pokémon: datahpupdate under
-// HITMARKER_IGNORE_SUBSTITUTE | PASSIVE_HP_UPDATE, and IGNORE_BIDE
-// (util:1465), so no Substitute, Bide or Counter bookkeeping; then
-// tryfaintmon. Returns the HP lost (gHpDealt).
-template <typename O>
-constexpr uint16_t residual_damage(Battle& battle, Player player,
-                                   uint32_t damage, O& options) {
-  Pokemon& mon = battle.side(player).get(1);
-  assert(!mon.fainted());
-  const uint16_t dealt = mon.hp > damage ? uint16_t(damage) : mon.hp;
-  mon.hp = uint16_t(mon.hp - dealt);
-  if (mon.fainted()) faint(battle, player, options);
-  return dealt;
-}
-
 // ITEMEFFECT_NORMAL (util:3317) for p's active Pokémon, at
 // ENDTURN_ITEMS1 (move_turn false) and ENDTURN_ITEMS2 (true). Leftovers,
 // the HP berries and the pinch berries need move_turn false, so they act
@@ -2118,7 +2303,7 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
                    has_type(a, Type::Ground) || a.ability == Ability::SandVeil
              : has_type(a, Type::Ice));
     if (immune) continue;
-    residual_damage(battle, p, fraction(side.get(1), 16), options);
+    passive_damage(battle, p, fraction(side.get(1), 16), options);
     if (Flow over = outcome(battle)) return over;
   }
   return std::nullopt;
@@ -2184,9 +2369,9 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   Pokemon& seeder_mon = battle.side(seeder).get(1);
   if (v.leech_seed && alive() && !seeder_mon.fainted()) {
     const bool ooze = a.ability == Ability::LiquidOoze;
-    const uint16_t drained = residual_damage(battle, player, fraction(mon, 8), options);
+    const uint16_t drained = passive_damage(battle, player, fraction(mon, 8), options);
     if (ooze) {
-      residual_damage(battle, seeder, drained, options);
+      passive_damage(battle, seeder, drained, options);
     } else {
       heal(seeder_mon, drained);
     }
@@ -2196,23 +2381,23 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's
   // counter, at most 15, times 1/16; 1/8.
   if (alive() && mon.status.poisoned() && !mon.status.badly_poisoned()) {
-    residual_damage(battle, player, fraction(mon, 8), options);
+    passive_damage(battle, player, fraction(mon, 8), options);
     if (Flow over = outcome(battle)) return over;
   }
   if (alive() && mon.status.badly_poisoned()) {
     if (a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
-    residual_damage(battle, player, fraction(mon, 16) * a.toxic, options);
+    passive_damage(battle, player, fraction(mon, 16) * a.toxic, options);
     if (Flow over = outcome(battle)) return over;
   }
   if (alive() && mon.status.burned()) {
-    residual_damage(battle, player, fraction(mon, 8), options);
+    passive_damage(battle, player, fraction(mon, 8), options);
     if (Flow over = outcome(battle)) return over;
   }
 
   // ENDTURN_NIGHTMARES (util:1553): 1/4 while asleep, else it ends.
   if (v.nightmare && alive()) {
     if (mon.status.asleep()) {
-      residual_damage(battle, player, fraction(mon, 4), options);
+      passive_damage(battle, player, fraction(mon, 4), options);
       if (Flow over = outcome(battle)) return over;
     } else {
       v.nightmare = false;
@@ -2221,7 +2406,7 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
 
   // ENDTURN_CURSE (util:1574): 1/4.
   if (v.cursed && alive()) {
-    residual_damage(battle, player, fraction(mon, 4), options);
+    passive_damage(battle, player, fraction(mon, 4), options);
     if (Flow over = outcome(battle)) return over;
   }
 
@@ -2238,7 +2423,7 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
     if (freed) {
       a.wrapped_move = Move::None;
     } else {
-      residual_damage(battle, player, fraction(mon, 16), options);
+      passive_damage(battle, player, fraction(mon, 16), options);
       if (Flow over = outcome(battle)) return over;
     }
   }
