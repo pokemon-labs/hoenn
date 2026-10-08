@@ -303,6 +303,36 @@ constexpr uint8_t sleep_talk(Battle& battle, Player p, uint8_t mask,
   return slot;
 }
 
+// Roar or Whirlwind's pick: uniform over the SLOTs in `mask` (bit s - 1
+// for SLOT s, 2-6), the bench Pokémon that can come in (Showdown's
+// getRandomSwitchable; the decomp redraws Random() % 6 until it hits one,
+// bsc:7346). Returns the SLOT.
+template <typename O>
+constexpr uint8_t switch_target(Battle& battle, Player p, uint8_t mask,
+                                O& options) {
+  assert(mask != 0 && (mask & 1) == 0 && mask < 64);
+  uint8_t n = 0;
+  for (uint8_t s = 2; s <= 6; s++) n = uint8_t(n + (mask >> (s - 1) & 1));
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).switch_target;
+  assert(forced == 0 || (forced >= 2 && forced <= 6 && (mask >> (forced - 1) & 1)));
+  uint8_t slot = forced;
+  if (forced == 0) {
+    uint8_t k = uint8_t(battle.rng.range(n));
+    for (uint8_t s = 2; s <= 6; s++) {
+      if ((mask >> (s - 1) & 1) && k-- == 0) {
+        slot = s;
+        break;
+      }
+    }
+  }
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).switch_target, slot);
+    observe(options, 1, n);
+  }
+  return slot;
+}
+
 // Effect Spore's status: Random() & 3 redrawn while 0, so 1 sleep, 2
 // poison, 3 paralysis (MOVE_EFFECT_BURN replaced, util:2776); Showdown
 // samples the same three.
@@ -1041,11 +1071,50 @@ struct MoveState {
   // (its tracker stays at CANCELER_END, as Showdown's useMove skips
   // BeforeMove), and the move uses no PP.
   bool called;
+  // Roar or Whirlwind worked: the target is dragged out after the action,
+  // as Showdown's forceSwitchFlag (sim/battle.ts:2828).
+  bool drag;
 
   static constexpr uint8_t NO_SLOT = 4;
 };
 
 constexpr bool physical(Type type) { return type < Type::Mystery; }
+
+constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m);
+
+// The sound moves (sSoundMovesTable, util:688). Showdown's gen3 `sound` flag
+// is on the same moves, plus Perish Song and Heal Bell, which handle
+// Soundproof themselves in both.
+constexpr bool sound(Move move) {
+  switch (move) {
+  case Move::Growl:
+  case Move::Roar:
+  case Move::Sing:
+  case Move::Supersonic:
+  case Move::Screech:
+  case Move::Snore:
+  case Move::Uproar:
+  case Move::MetalSound:
+  case Move::GrassWhistle:
+  case Move::HyperVoice: return true;
+  default: return false;
+  }
+}
+
+// ABILITYEFFECT_MOVES_BLOCK (util:2645) on the foe, from Cmd_attackcanceler
+// (bsc:932): Soundproof stops a sound move after attackstring and ppreduce
+// (BattleScript_SoundproofProtected, bs1:4158), with no result flag. It
+// runs for a move Sleep Talk calls too, whose canceler tracker is already
+// at its end. Showdown's Soundproof (onTryHit) agrees, and its move uses PP
+// first. Returns whether it stopped the move. Log: Immune, from the ability.
+constexpr bool soundproof(Battle& battle, Player player, MoveState& m) {
+  if (battle.side(foe(player)).active.ability != Ability::Soundproof || !sound(m.move)) {
+    return false;
+  }
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  return true;
+}
 
 // AtkCanceler_UnableToUseMove (util:1987), then the rest of
 // Cmd_attackcanceler (bsc:915). Returns whether the move goes ahead; if not,
@@ -1064,7 +1133,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // A move Sleep Talk calls: Sleep Talk's canceler already ran.
   if (m.called) {
     m.obeys = true;
-    return true;
+    return !soundproof(battle, player, m);
   }
 
   // CANCELER_FLAGS
@@ -1236,7 +1305,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     mon.status = Status::none();
   }
 
-  // TODO(plan step 4): ABILITYEFFECT_MOVES_BLOCK (Soundproof).
+  if (soundproof(battle, player, m)) return false;
 
   // No PP left (BattleScript_NoPPForMove, bs1:3556): only if the PP went
   // to 0 after selection, by Spite or Pressure from a faster foe.
@@ -2599,6 +2668,68 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// The SLOTs p's bench can send in, as a mask (bit s - 1 for SLOT s): the
+// Pokémon present and not fainted.
+constexpr uint8_t bench(const Battle& battle, Player player) {
+  const Side& side = battle.side(player);
+  uint8_t mask = 0;
+  for (uint8_t s = 2; s <= 6; s++) {
+    const Pokemon& mon = side.get(s);
+    if (mon.species != Species::None && !mon.fainted()) mask |= uint8_t(1 << (s - 1));
+  }
+  return mask;
+}
+
+// BattleScript_EffectRoar (bs1:593), for Roar and Whirlwind, with
+// Showdown's differences where they show (gen3 Roar, data/moves.ts:15159,
+// forceSwitch in sim/battle-actions.ts:1342):
+// - After the canceler (Soundproof stops Roar, a sound move), attackstring
+//   and ppreduce: Suction Cups and Ingrain fail it (Showdown's onDragOut),
+//   then a semi-invulnerable target (accuracycheck with
+//   NO_ACC_CALC_CHECK_LOCK_ON; Showdown's invulnerability step), then an
+//   empty bench (forcerandomswitch; Showdown's canSwitch).
+// - No accuracy roll: Showdown's accuracy is `true`, where the decomp
+//   rolls ACC_CURR_MOVE (bs1:600), so evasion could make it miss.
+// - No level check: TryDoForceSwitchOut (bsc:7163) only draws when the
+//   user's level is lower, and Showdown has none.
+// - The drag happens after the whole action (Showdown's forceSwitchFlag;
+//   the decomp drags before moveend), so this only sets m.drag.
+// - It hits through a Substitute in both. TODO(plan step 4): Protect. The
+//   decomp's NO_ACC_CALC_CHECK_LOCK_ON checks it; Showdown's gen3 Roar has
+//   no protect flag *(verify)*.
+template <typename O>
+constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const ActivePokemon& t = battle.side(foe(player)).active;
+  // BattleScript_AbilityPreventsPhasingOut and BattleScript_PrintMonIsRooted
+  // set no result flag. Log: Activate (Suction Cups, Ingrain).
+  if (t.ability == Ability::SuctionCups || t.volatiles.rooted) {
+    return moveend(battle, player, m, options);
+  }
+  if ((t.volatiles.lock_on == 0 && t.volatiles.semi_invulnerable()) ||
+      bench(battle, foe(player)) == 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  m.drag = true;
+  moveend(battle, player, m, options);
+}
+
+// Roar or Whirlwind's drag (Showdown's dragIn, sim/battle-actions.ts:162):
+// a random bench Pokémon replaces `target`'s, as a switch (switch-out
+// effects, Spikes, the switch-in ability and item). `user` made the draw.
+// Log: Drag.
+template <typename O>
+constexpr void drag(Battle& battle, Player user, O& options) {
+  const Player target = foe(user);
+  assert(!battle.side(target).get(1).fainted());
+  const uint8_t slot = rolls::switch_target(battle, user, bench(battle, target), options);
+  leave(battle, target, slot, options);
+  arrive(battle, target, options);
+}
+
 // Whether Sleep Talk can't call `move`, as Showdown's gen3 Sleep Talk: the
 // nosleeptalk and charge flags, which are the decomp's list
 // (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
@@ -2656,6 +2787,7 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   c.first = m.first;
   assert(get(c.move).effect != Effect::SleepTalk);
   execute(battle, player, c, options);
+  m.drag = c.drag;
 }
 
 // Whether use_move runs the effect's script (tools/coverage counts these);
@@ -2666,7 +2798,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Yawn || effect == Effect::SleepTalk ||
          stat_up(effect).n != 0 || stat_pair(effect).any() ||
          effect == Effect::Minimize || effect == Effect::DefenseCurl ||
-         effect == Effect::BellyDrum || effect == Effect::Curse;
+         effect == Effect::BellyDrum || effect == Effect::Curse ||
+         effect == Effect::Roar;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -2697,6 +2830,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   }
   if (effect == Effect::BellyDrum) return belly_drum(battle, player, m, options);
   if (effect == Effect::Curse) return curse(battle, player, m, options);
+  if (effect == Effect::Roar) return roar(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
@@ -2711,9 +2845,10 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
 // HandleAction_UseMove (util:78): which move and slot the action uses, then
 // its script. Struggle uses no PP. A forced move is the locked move. Encore
 // applies even when it began after selection: the encored move replaces the
-// chosen one, unless it was overwritten, which ends the Encore.
+// chosen one, unless it was overwritten, which ends the Encore. Returns
+// whether Roar or Whirlwind is to drag the foe out (MoveState::drag).
 template <typename O>
-constexpr void use_move(Battle& battle, Player player, bool first,
+constexpr bool use_move(Battle& battle, Player player, bool first,
                         O& options) {
   const Request& r = battle.request;
   const uint8_t i = index(player);
@@ -2753,22 +2888,31 @@ constexpr void use_move(Battle& battle, Player player, bool first,
   assert(m.move != Move::None);
   m.first = first;
   execute(battle, player, m, options);
+  return m.drag;
 }
 
 // RunTurnActionsFunctions (main:4937) from action `from` (0, or after a
 // Baton Pass the next one). Each action ends in HandleAction_TryFinish
 // (util:638): a faint ends the actions (cancelallactions, bsc:5850).
+//
+// Roar's drag comes after its action, before the faint check, as
+// Showdown's runAction (sim/battle.ts:2825). A dragged-out Pokémon's own
+// queued move is cancelled (Showdown's runAction skips an inactive
+// Pokémon's move); a switch can't be queued after a move.
 template <typename O>
 constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
   for (uint8_t i = from; i < Request::END_OF_ACTIONS; i++) {
     const Player p = i == 0 ? battle.request.first : foe(battle.request.first);
     const Choice c = battle.request.choice[index(p)];
+    bool dragged = false;
     if (c.type() == Choice::Switch) {
       switch_to(battle, p, c.data(), options);
-    } else {
-      use_move(battle, p, i == 0, options);
+    } else if (use_move(battle, p, i == 0, options)) {
+      drag(battle, p, options);
+      dragged = true;
     }
     if (Flow f = faints(battle, Phase::FaintAfterAction)) return f;
+    if (dragged) break;
   }
   return std::nullopt;
 }

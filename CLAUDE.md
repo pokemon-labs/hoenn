@@ -459,10 +459,16 @@ unchecked claims.
   tracker stays at its end; Showdown's useMove skips BeforeMove).
   Sleep Talk and Snore turns go back on the counter at switch-out
   (`sleep_skipped`, Showdown's gen3 `skippedTime`, a real cartridge quirk).
-- **Roar and Whirlwind.** Priority −6. The replacement is a random
-  non-fainted bench Pokémon (a chance action, no request). Fails with no
-  bench, against Suction Cups, against Ingrain. The dragged-in Pokémon takes
-  Spikes and doesn't act. Protect and Substitute interaction *(verify)*.
+- **Roar and Whirlwind** (`roar`, `drag`, tested in `check_frame`).
+  Priority −6. The replacement is a uniform pick among the non-fainted
+  bench (`switch_target`, no request). Fails with no bench, against
+  Suction Cups, Ingrain or a semi-invulnerable target; Soundproof stops
+  Roar. As Showdown: no accuracy roll (the decomp's evasion could make it
+  miss), no level check, through a Substitute, and the drag comes after
+  the whole action. The dragged-in Pokémon takes Spikes and its switch-in
+  effects, and the dragged-out one's queued move is cancelled. Open:
+  Protect (the decomp checks it; Showdown's gen3 Roar has no protect flag
+  *(verify)*).
 - **Sleep Clause and Freeze Clause** are Smogon rules, always on, so
   compile-time constants with no field (Gen 3 OU has Sleep Clause Mod and
   Freeze Clause Mod). A foe's sleep fails while a living Pokémon on the
@@ -716,8 +722,10 @@ adapted (see Interface).
   marks the move MISSED, as the decomp. Ghost Curse's Protect check waits
   for Protect. `tools/coverage`: 75% of move slots. New mechanics mark
   their log sites with `// Log: <ArgType>` comments.
-- **Then:** the status moves by `tools/coverage`'s order (Roar,
-  Substitute, Protect, Spikes, Focus Punch, Soft-Boiled, Recover, Baton
+- Done (2026-10-07): Roar and Whirlwind (see the checklist) and
+  Soundproof's block in the canceler. `tools/coverage`: 78%.
+- **Then:** the status moves by `tools/coverage`'s order
+  (Substitute, Protect, Spikes, Focus Punch, Soft-Boiled, Recover, Baton
   Pass, Wish, Leech Seed...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.

@@ -713,6 +713,80 @@ void check_stat_moves() {
   }
 }
 
+// Roar and Whirlwind: the drag (forced and observed), Spikes on the
+// dragged-in Pokémon, the failures, Soundproof, and a cancelled action.
+void check_roar() {
+  helpers::Pokemon roarer = SNORLAX;
+  roarer.moves[0] = Move::Roar;
+  roarer.moves[1] = Move::Whirlwind;
+  const std::vector<helpers::Pokemon> foes = {IDLE, JOLTEON, DUGTRIO};
+  const auto after = [&](uint8_t slot, uint8_t target, auto&& setup) {
+    Battle b = started({roarer}, foes);
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.switch_target = target;
+    update(b, Choice::move(slot), Choice::move(1), o);
+    return std::pair{b, o};
+  };
+  const auto none = [](Battle&) {};
+  // A forced pick: Dugtrio comes in, one of two choices.
+  {
+    auto [b, o] = after(1, 3, none);
+    CHECK(b.sides[1].get(1).species == Species::Dugtrio);
+    CHECK(b.sides[1].get(3).species == Species::Snorlax);
+    CHECK(o.chance.actions.p1.switch_target == 3);
+    o.chance.probability.reduce();
+    CHECK(o.chance.probability.p == 1 && o.chance.probability.q == 2);
+  }
+  // A fainted Pokémon can't be picked; Spikes hit the one dragged in.
+  {
+    auto [b, o] = after(1, 0, [](Battle& b) {
+      b.sides[1].get(3).hp = 0;
+      b.sides[1].conditions.spikes = 1;
+    });
+    const Pokemon& in = b.sides[1].get(1);
+    CHECK(in.species == Species::Jolteon);
+    CHECK(in.hp == in.stats.hp - in.stats.hp / 8);
+    CHECK(o.chance.actions.p1.switch_target == 2);
+  }
+  // Suction Cups, Ingrain and Soundproof stop it; each uses PP.
+  // Whirlwind isn't a sound move.
+  {
+    const auto stays = [&](uint8_t slot, auto&& setup) {
+      auto [b, o] = after(slot, 0, setup);
+      return b.sides[1].get(1).species == Species::Snorlax &&
+             o.chance.actions.p1.switch_target == 0 &&
+             b.sides[0].get(1).moves[slot - 1].pp == max_pp(roarer.moves[slot - 1], 3) - 1;
+    };
+    CHECK(stays(1, [](Battle& b) { b.sides[1].active.ability = Ability::SuctionCups; }));
+    CHECK(stays(1, [](Battle& b) { b.sides[1].active.volatiles.rooted = true; }));
+    CHECK(stays(1, [](Battle& b) { b.sides[1].active.ability = Ability::Soundproof; }));
+    CHECK(!stays(2, [](Battle& b) { b.sides[1].active.ability = Ability::Soundproof; }));
+  }
+  // No bench: it fails.
+  {
+    Battle b = started({roarer}, {IDLE});
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].get(1).species == Species::Snorlax);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Roar, 3) - 1);
+  }
+  // Both Roar: the faster drags the slower out, whose Roar is cancelled.
+  {
+    helpers::Pokemon fast = JOLTEON;
+    fast.moves[0] = Move::Roar;
+    helpers::Pokemon slow = SNORLAX;
+    slow.moves[0] = Move::Roar;
+    Battle b = started({fast, DUGTRIO}, {slow, DUGTRIO});
+    Observed o{};
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).species == Species::Jolteon);
+    CHECK(b.sides[1].get(1).species == Species::Dugtrio);
+    CHECK(b.sides[1].get(2).moves[0].pp == max_pp(Move::Roar, 3));
+    CHECK(o.chance.actions.p2.switch_target == 0);
+  }
+}
+
 void check_residuals() {
   helpers::Pokemon plain = IDLE;
   plain.ability = Ability::ThickFat;
@@ -1403,6 +1477,7 @@ int main(int argc, char** argv) {
   check_confuse();
   check_status_moves();
   check_stat_moves();
+  check_roar();
   check_residuals();
   check_items();
   check_move_abilities();
