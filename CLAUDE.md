@@ -662,9 +662,13 @@ adapted (see Interface).
   Color Change, Rough Skin, Effect Spore (its sleep waits for Sleep
   Clause), Poison Point, Static, Flame Body, Cute Charm, the immunity cures.
   Following Showdown, Safeguard blocks the ability-inflicted statuses.
-- **Then** (approved order): the absorbing abilities
-  (Volt Absorb, Water Absorb, Flash Fire); then a proposal for switch-in
-  abilities and Natural Cure. Uproar, Thrash and Yawn residuals wait. Then the status moves by `tools/coverage`'s
+- Done (2026-10-07): the absorbing abilities (`absorbed()`, from
+  `JumpIfMoveFailed` after a passed accuracy check, in the hit and status
+  paths; Flash Fire takes Will-O-Wisp). Destiny Bond's setup there is still
+  a TODO.
+- **Then:** a proposal for the switch-in abilities (Sand Stream, Drizzle,
+  Intimidate, Trace) and Natural Cure, with the battle start's order and
+  its tie draw. Uproar, Thrash and Yawn residuals wait. Then the status moves by `tools/coverage`'s
   order (Roar, Calm Mind, Rest, Substitute, Protect, Spikes...).
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.

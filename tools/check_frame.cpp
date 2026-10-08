@@ -913,6 +913,61 @@ void check_move_abilities() {
   }
 }
 
+void check_absorbing() {
+  const helpers::Pokemon zapper =
+      mon(Species::Jolteon, Ability::VoltAbsorb,
+          {Move::Thunderbolt, Move::ThunderWave, Move::Flamethrower, Move::WillOWisp});
+  const helpers::Pokemon lanturn =
+      mon(Species::Lanturn, Ability::VoltAbsorb, {Move::Splash});
+  const helpers::Pokemon houndoom =
+      mon(Species::Houndoom, Ability::FlashFire, {Move::Splash});
+  const auto run = [](Battle& b, uint8_t m1) {
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    o.calc.overrides.p1.secondary = Optional::False;
+    update(b, Choice::move(m1), Choice::move(1), o);
+    return o;
+  };
+  {
+    // Volt Absorb heals a quarter instead of taking the hit; PP is used and
+    // nothing else is drawn.
+    Battle b = started({zapper}, {lanturn});
+    Pokemon& l = b.sides[1].get(1);
+    l.hp = 10;
+    const Observed o = run(b, 1);
+    CHECK(l.hp == 10 + l.stats.hp / 4);
+    CHECK(o.chance.actions.p1.hits[0].damage == 0);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Thunderbolt, 3) - 1);
+    // Thunder Wave has no power, so it isn't absorbed.
+    Battle c = started({zapper}, {lanturn});
+    run(c, 2);
+    CHECK(c.sides[1].get(1).status.paralyzed());
+  }
+  {
+    // Flash Fire: no damage and the boost; not while frozen.
+    Battle b = started({zapper}, {houndoom});
+    run(b, 3);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+    CHECK(b.sides[1].active.volatiles.flash_fire);
+    Battle c = started({zapper}, {houndoom});
+    c.sides[1].get(1).status = Status::frz();
+    Observed o{};
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    o.calc.overrides.p1.hits[0].damage = 85;
+    o.calc.overrides.p1.secondary = Optional::False;
+    o.calc.overrides.p2.thaw = Optional::False;
+    update(c, Choice::move(3), Choice::move(1), o);
+    CHECK(c.sides[1].get(1).hp < c.sides[1].get(1).stats.hp);
+    CHECK(!c.sides[1].active.volatiles.flash_fire);
+    // Will-O-Wisp into a Flash Fire that isn't Fire type (as from Trace).
+    Battle d = started({zapper}, {IDLE});
+    d.sides[1].active.ability = Ability::FlashFire;
+    run(d, 4);
+    CHECK(!d.sides[1].get(1).status.any());
+    CHECK(d.sides[1].active.volatiles.flash_fire);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -1026,6 +1081,7 @@ int main(int argc, char** argv) {
   check_residuals();
   check_items();
   check_move_abilities();
+  check_absorbing();
   check_accuracy();
   check_turn_cap();
 

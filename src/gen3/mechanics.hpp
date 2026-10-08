@@ -1537,6 +1537,40 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
 // mode, called from moveend (decided 2026-10-07).
 // ---------------------------------------------------------------------------
 
+// ABILITYEFFECT_ABSORBING (util:2662), from JumpIfMoveFailed (bsc:1009)
+// once the accuracy check passed: the foe's Volt Absorb or Water Absorb
+// takes a damaging Electric or Water move, healing a quarter of its max HP
+// through a Substitute unless already full (BattleScript_MoveHPDrain,
+// bs1:4078, which marks the move DOESNT_AFFECT_FOE); Flash Fire takes any
+// Fire move, Will-O-Wisp included, unless the holder is frozen
+// (BattleScript_FlashFireBoost, bs1:4101). Showdown agrees (gen3 Volt
+// Absorb skips Thunder Wave; gen4 Flash Fire's frozen check). Returns
+// whether the move was absorbed; its script then goes to moveend, after
+// attackstring and ppreduce.
+constexpr bool absorbed(Battle& battle, Player player, MoveState& m) {
+  Side& side = battle.side(foe(player));
+  ActivePokemon& t = side.active;
+  Pokemon& target = side.get(1);
+  const MoveData& data = get(m.move);
+  switch (t.ability) {
+  case Ability::VoltAbsorb:
+  case Ability::WaterAbsorb: {
+    const Type type =
+        t.ability == Ability::VoltAbsorb ? Type::Electric : Type::Water;
+    if (data.type != type || data.bp == 0) return false;
+    if (target.hp != target.stats.hp) heal(target, fraction(target, 4));
+    m.result |= MoveResult::DOESNT_AFFECT_FOE;
+    return true;
+  }
+  case Ability::FlashFire:
+    if (data.type != Type::Fire || target.status.frozen()) return false;
+    t.volatiles.flash_fire = true;
+    return true;
+  default:
+    return false;
+  }
+}
+
 // ABILITYEFFECT_SYNCHRONIZE and ATK_SYNCHRONIZE (util:2957, 2973): if
 // `holder` has Synchronize and this execution armed it, the poison (toxic
 // becomes poison), paralysis or burn passes to the other Pokémon, which
@@ -1835,9 +1869,15 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       return;
     }
   }
-  // TODO(plan step 4): what JumpIfMoveFailed does after a hit (bsc:1009):
-  // Destiny Bond's setup and the absorbing abilities (Volt Absorb, Water
-  // Absorb, Flash Fire).
+  // JumpIfMoveFailed (bsc:1009) after a hit: the absorbing abilities.
+  // TODO(plan step 4): Destiny Bond's setup (TrySetDestinyBondToHappen).
+  if (affects && absorbed(battle, player, m)) {
+    m.attackstring = true;
+    pp_reduce(battle, player, m);
+    moveend(battle, player, m, options);
+    if (effect == Effect::Explosion) faint(battle, player, options);
+    return;
+  }
 
   m.attackstring = true;
   pp_reduce(battle, player, m);
@@ -1940,6 +1980,9 @@ constexpr void confuse_move(Battle& battle, Player player, MoveState& m,
     m.result |= MoveResult::MISSED | MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
+  // accuracycheck's JumpIfMoveFailed: the absorbing abilities. Of the
+  // status moves only Will-O-Wisp can be taken, by Flash Fire.
+  if (absorbed(battle, player, m)) return moveend(battle, player, m, options);
   if (foe_side.conditions.safeguard != 0) {
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
@@ -2033,6 +2076,9 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
     m.result |= MoveResult::MISSED | MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
+  // accuracycheck's JumpIfMoveFailed: the absorbing abilities. Of the
+  // status moves only Will-O-Wisp can be taken, by Flash Fire.
+  if (absorbed(battle, player, m)) return moveend(battle, player, m, options);
   if (foe_side.conditions.safeguard != 0) {
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
