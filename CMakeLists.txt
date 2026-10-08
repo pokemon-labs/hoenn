@@ -57,6 +57,10 @@ target_link_libraries(check_frame PRIVATE pkmn_gen3 pkmn_warnings)
 add_executable(soak tools/soak.cpp)
 target_link_libraries(soak PRIVATE pkmn_gen3 pkmn_warnings)
 
+# The choices and Chance's Actions determine the result (tools/check_chance.cpp).
+add_executable(check_chance tools/check_chance.cpp)
+target_link_libraries(check_chance PRIVATE pkmn_gen3 pkmn_warnings)
+
 # Which moves on the teams have a written mechanic (tools/coverage.cpp).
 add_executable(coverage tools/coverage.cpp)
 target_link_libraries(coverage PRIVATE pkmn_gen3 pkmn_warnings)
@@ -73,6 +77,8 @@ if(PKMN_TEAM_FILES)
   add_test(NAME check_frame COMMAND check_frame ${PKMN_TEAM_FILES})
   # A short soak; run the binary by hand for long ones.
   add_test(NAME soak COMMAND soak --games 100 ${PKMN_TEAM_FILES})
+  add_test(NAME check_chance
+           COMMAND check_chance --games 2 --samples 32 ${PKMN_TEAM_FILES})
 else()
   add_test(NAME check_frame COMMAND check_frame)
   message(WARNING "No teams in ${PKMN_TEAMS_DIR}; check_teams won't run")

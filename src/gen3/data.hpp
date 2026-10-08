@@ -195,6 +195,8 @@ struct Request {
     if (phase == Phase::BatonPass) return next == 1 || next == END_OF_ACTIONS;
     return next == 0;
   }
+
+  friend constexpr bool operator==(const Request&, const Request&) = default;
 };
 
 static_assert(sizeof(Request) == 10);
@@ -238,6 +240,8 @@ struct Stats {
   uint16_t spe;
   uint16_t spa;
   uint16_t spd;
+
+  friend constexpr bool operator==(const Stats&, const Stats&) = default;
 };
 
 // One stat from CALC_STAT (src/pokemon.c:2814), before the nature. The decomp
@@ -330,6 +334,8 @@ struct MoveSlot {
   Move id;
   uint8_t pp;
   uint8_t pp_ups;
+
+  friend constexpr bool operator==(const MoveSlot&, const MoveSlot&) = default;
 };
 
 // CalculatePPWithBonus (src/pokemon.c:4650): each PP Up adds a fifth of the
@@ -385,6 +391,8 @@ struct Pokemon {
     }
     return true;
   }
+
+  friend constexpr bool operator==(const Pokemon&, const Pokemon&) = default;
 };
 
 // The flags and small counters the decomp packs into status2 and status3,
@@ -442,6 +450,8 @@ struct Volatiles {
            wrapped <= 6 && lock_on <= 2 && yawn <= 2 &&
            (on_air + underground + underwater) <= 1;
   }
+
+  friend constexpr bool operator==(const Volatiles&, const Volatiles&) = default;
 };
 
 // The stat stages, −6 to 6. Baton Pass keeps them.
@@ -460,6 +470,8 @@ struct Boosts {
     }
     return true;
   }
+
+  friend constexpr bool operator==(const Boosts&, const Boosts&) = default;
 };
 
 // The battle copy of the active Pokémon (decomp: gBattleMons plus everything
@@ -549,6 +561,8 @@ struct ActivePokemon {
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
            first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF;
   }
+
+  friend constexpr bool operator==(const ActivePokemon&, const ActivePokemon&) = default;
 };
 
 // Per-side timers (SideTimer, gWishFutureKnock). 0 is inactive.
@@ -568,6 +582,8 @@ struct SideConditions {
            safeguard <= 5 && mist <= 5 && wish <= 2 && wisher <= 6 &&
            (wish == 0) == (wisher == 0) && future_sight <= 3;
   }
+
+  friend constexpr bool operator==(const SideConditions&, const SideConditions&) = default;
 };
 
 struct Side {
@@ -599,6 +615,8 @@ struct Side {
     return active.valid() && conditions.valid() &&
            detail::valid(future_sight_move) && detail::valid(recycle_item);
   }
+
+  friend constexpr bool operator==(const Side&, const Side&) = default;
 };
 
 enum class Weather : uint8_t { None, Rain, Sun, Sandstorm, Hail };
@@ -613,6 +631,8 @@ struct Field {
     if (weather == Weather::None) return weather_turns == 0 && !permanent;
     return weather_turns <= 5;
   }
+
+  friend constexpr bool operator==(const Field&, const Field&) = default;
 };
 
 struct Battle {
@@ -641,6 +661,8 @@ struct Battle {
     }
     return turn != 0 || request.phase == Phase::None;
   }
+
+  friend constexpr bool operator==(const Battle&, const Battle&) = default;
 };
 
 static_assert(sizeof(Stats) == 12);

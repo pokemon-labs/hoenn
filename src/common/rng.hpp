@@ -52,6 +52,8 @@ struct RNG {
     assert(den > 0);
     return range(den) < num;
   }
+
+  friend constexpr bool operator==(const RNG&, const RNG&) = default;
 };
 
 static_assert(sizeof(RNG) == 8);

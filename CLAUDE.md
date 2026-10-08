@@ -276,6 +276,8 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   and the probability after every update; a crash prints the game's seed,
   and `--replay SEED` plays that game alone. Run it by hand in debug for
   long soaks (`--games N --seed N`).
+- `check_chance`: the chance-key test (see Testing); `--games N
+  --samples N`, `--replay SEED`. Run it in release for long runs.
 - `check_frame`: the turn frame (start, order, Quick Claw and speed-tie rolls
   with Chance and Calc, trapping, faint requests and resuming, the turn cap),
   a few step-3 scenarios (a forced plain hit and its probability, PP, an
@@ -309,6 +311,7 @@ tools/
   check_data.cpp      static_asserts on the generated tables
   check_teams.cpp     parses teams/adv/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
+  check_chance.cpp    (c1, c2, Actions) determines the result
   check_frame.cpp     the turn frame and step 3, plus a self-play soak
   soak.cpp            long random self-play runs, replayable by seed
   coverage.cpp        which moves on the teams have a written mechanic
@@ -563,6 +566,15 @@ feels like progress; every later mechanic inherits the frame.
   its side loses); double KO on the first action (does the replacement act,
   and in what order); Baton Pass resumes at the foe's move and the toxic
   counter restarts.
+- **The chance-key test** (the user's spec, 2026-10-08; `check_chance`). At a
+  state, sample many (RNG seed, `randomize_hidden`) pairs, run `update` for
+  each choice pair, and fill a map from `(c1, c2, Actions)` to the result.
+  Two samples with the same key must give the same result: no collisions.
+  This tests the "no hashing" rule in "Chance" directly. The result is the
+  battle under `mask_hidden` (no seed, hidden counters set to 1 if active),
+  the `Durations`, the `Result` and the probability. It finds collisions
+  only among branches the samples reach; mutating the damage-roll or the
+  sleep-end record is caught.
 - **For now, testing is random battles in debug** (`soak`, decided
   2026-10-07): run many games under ASan/UBSan after each change.
 - **Matching Showdown** is the target. Once the mechanics and the log are

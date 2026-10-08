@@ -506,6 +506,33 @@ constexpr void randomize_hidden(Battle& battle, const Durations& durations) {
   }
 }
 
+// The battle with what Chance's observation doesn't determine taken out: the
+// RNG seed, and every true hidden counter that randomize_hidden resamples
+// (or that an infliction rolls) set to 1 if active. What's left, with the
+// Durations, is the state that the choices and the Actions must determine
+// (CLAUDE.md, "Chance"; tools/check_chance.cpp tests it). Keep this list the
+// same as randomize_hidden's.
+constexpr void mask_hidden(Battle& battle) {
+  battle.rng = {};
+  for (Side& side : battle.sides) {
+    for (Pokemon& mon : side.pokemon) {
+      if (mon.status.asleep() && !mon.status.self_inflicted()) {
+        mon.status = Status::slp(1);
+      }
+    }
+    ActivePokemon& a = side.active;
+    Volatiles& v = a.volatiles;
+    // No pointers to the members: packing will make them bitfields.
+    const auto mask = [](uint8_t c) { return uint8_t(c != 0); };
+    v.confusion = mask(v.confusion);
+    v.wrapped = mask(v.wrapped);
+    v.uproar = mask(v.uproar);
+    v.thrash = mask(v.thrash);
+    a.disable_timer = mask(a.disable_timer);
+    a.encore_timer = mask(a.encore_timer);
+  }
+}
+
 static_assert([] {
   // Seen asleep at count 4 (three steps): the roll was 4 or 5, so 1 or 2
   // turns remain.
