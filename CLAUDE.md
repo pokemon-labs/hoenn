@@ -678,7 +678,8 @@ compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
 through the damage cases. birch still runs on ADV-Simulator and must be
 adapted (see Interface).
 
-**Next session** (step 4, on branch `step4`; ask before each open choice):
+**Next session** (step 4, on `main`; `step3` and `step4` were merged
+2026-10-08; ask before each open choice):
 
 - **Decisions for the user**, each blocking what follows it:
   - Decided (2026-10-07): confusion's self-hit follows Showdown (typeless
@@ -704,7 +705,6 @@ adapted (see Interface).
     Mirror Coat, Magic Coat and Snatch are unblocked.
   - Skipping the damage roll when every roll KOs (fewer chance nodes, but
     it changes the `Actions` key). Can wait for the birch adaptation.
-  - Merge `step3` and `step4` into main?
 - Done (2026-10-07): accuracy switched to Showdown's arithmetic; confusion
   (the canceler, the self-hit, Confuse Ray's `Effect::Confuse` and the
   `ConfuseHit` secondary), covered by `check_frame`. Still to write:
