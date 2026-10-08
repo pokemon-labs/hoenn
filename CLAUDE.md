@@ -808,10 +808,12 @@ adapted (see Interface).
   Showdown agree). Following Showdown's onMoveAborted, sleep and freeze now
   cancel a multi-turn move in the canceler, where the decomp waits for the
   end of the turn (main:3944) or keeps it.
+- Done (2026-10-08): Destiny Bond (`faint_target`; the decomp and
+  Showdown agree in singles).
 - **Then (resume here):** the moves on `teams/adv/` still missing, by
   `tools/coverage` (7848 slots without `all.txt`; the older 15696 counted
   it twice, and the older "six left" missed seven single-slot moves):
-  Destiny Bond 5 (the TODO in `hit()`), Rock
+  Rock
   Blast 4 (first 2-5 multi-hit; `Action::multi_hit`), Mimic 2, then Water
   Spout, Imprison, Memento, Fake Out, Pain Split, Nightmare and Gust at 1
   each. Then the realizability test (see Testing), not started. Uproar and

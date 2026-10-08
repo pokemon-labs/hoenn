@@ -1245,6 +1245,33 @@ void check_solar_beam() {
   CHECK(t.hp < hp && !a.volatiles.multiple_turns);
 }
 
+// Destiny Bond: the foe that KOs the user faints too (both last: a tie);
+// the user's next move attempt ends it.
+void check_destiny_bond() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[1] = Move::DestinyBond;
+  Observed o{};
+  o.calc.overrides.p2.hit = Optional::True;
+  {
+    Battle b = started({user}, {SNORLAX});
+    b.sides[0].get(1).hp = 1;
+    const Result r = update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).fainted() && b.sides[1].get(1).fainted());
+    CHECK(r.type() == Result::Tie);
+  }
+  {
+    Battle b = started({user, DUGTRIO}, {SNORLAX, DUGTRIO});
+    update(b, Choice::move(2), Choice::move(2), o);
+    CHECK(b.sides[0].active.volatiles.destiny_bond);
+    b.sides[0].get(1).hp = 1;
+    // Thunderbolt first ends it, so the KO costs Snorlax nothing.
+    o.calc.overrides.p1.hit = Optional::True;
+    const Result r = update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[0].get(1).fainted() && !b.sides[1].get(1).fainted());
+    CHECK(r.p1() == Choice::Switch && r.p2() == Choice::Pass);
+  }
+}
+
 // The weather moves: 5 turns counting this one, replacing an ability's
 // permanent weather, failing on the same weather.
 void check_weather_moves() {
@@ -2468,6 +2495,7 @@ int main(int argc, char** argv) {
   check_thief();
   check_encore();
   check_solar_beam();
+  check_destiny_bond();
   check_perish_song();
   check_stat_changes();
   check_screens_and_power();

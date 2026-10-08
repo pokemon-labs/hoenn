@@ -660,6 +660,27 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   }
 }
 
+// tryfaintmon BS_TARGET after p's move hit the foe (bsc:2965): the foe
+// faints if it's at 0 HP, and if it had used Destiny Bond, p faints too
+// unless it already has (BattleScript_DestinyBondTakesLife, bs1:3379). The
+// decomp arms Destiny Bond when the move passes its accuracy check
+// (TrySetDestinyBondToHappen, bsc:1020); Showdown checks the volatile when
+// the foe faints to a move (data/moves.ts destinybond onFaint), which is the
+// same in singles. A future attack doesn't trigger it in Showdown.
+template <typename O>
+constexpr void faint_target(Battle& battle, Player player, O& options) {
+  const Player defender = foe(player);
+  if (!battle.side(defender).get(1).fainted()) return;
+  const bool bond = battle.side(defender).active.volatiles.destiny_bond;
+  faint(battle, defender, options);
+  Pokemon& user = battle.side(player).get(1);
+  if (bond && !user.fainted()) {
+    // Log: Activate Destiny Bond, then Faint.
+    user.hp = 0;
+    faint(battle, player, options);
+  }
+}
+
 // Spikes on a switch-in (Cmd_switchineffects, bsc:5180): max HP /
 // ((5 - layers) * 2), at least 1, so 1/8, 1/6 or 1/4. Flying types and
 // Levitate are immune. Returns whether the Pokémon fainted, in which case
@@ -2450,7 +2471,6 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     }
   }
   // JumpIfMoveFailed (bsc:1009) after a hit: the absorbing abilities.
-  // TODO(plan step 4): Destiny Bond's setup (TrySetDestinyBondToHappen).
   if (affects && absorbed(battle, player, m)) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
@@ -2586,7 +2606,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // tryfaintmon
-  if (target.fainted()) faint(battle, defender, options);
+  faint_target(battle, player, options);
   moveend(battle, player, m, options);
   if (effect == Effect::Explosion) faint(battle, player, options);
 }
@@ -3515,7 +3535,7 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
     d = survive(battle, player, m, d, i, options);
     m.hp_dealt = hp_update(battle, defender, d, m);
   }
-  if (target.fainted()) faint(battle, defender, options);
+  faint_target(battle, player, options);
   moveend(battle, player, m, options);
 }
 
@@ -3664,6 +3684,22 @@ constexpr void encore(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectDestinyBond (bs1:1334), Cmd_setdestinybond
+// (bsc:8279): it never fails. The canceler clears it at the user's next
+// move attempt (CANCELER_FLAGS), a switch-in's Spikes check and fainting
+// clear it, and Baton Pass doesn't pass it; faint_target() acts on it.
+// Showdown's gen3 agrees (its onBeforeMove, onMoveAborted, noCopy). Log:
+// SingleMove Destiny Bond.
+template <typename O>
+constexpr void destiny_bond(Battle& battle, Player player, MoveState& m,
+                            O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  battle.side(player).active.volatiles.destiny_bond = true;
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectRefresh (bs1:2520), Cmd_cureifburnedparalyzedorpoisoned
 // (bsc:9119): the user's poison, burn or paralysis is cured; otherwise it
 // fails (asleep, frozen or healthy). Showdown agrees. Log: CureStatus, or
@@ -3742,7 +3778,7 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Tickle || effect == Effect::Haze ||
          effect == Effect::PsychUp || effect == Effect::Reflect ||
          effect == Effect::LightScreen || effect == Effect::MeanLook ||
-         effect == Effect::Encore;
+         effect == Effect::Encore || effect == Effect::DestinyBond;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3799,6 +3835,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   }
   if (effect == Effect::MeanLook) return mean_look(battle, player, m, options);
   if (effect == Effect::Encore) return encore(battle, player, m, options);
+  if (effect == Effect::DestinyBond) return destiny_bond(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
