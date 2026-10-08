@@ -1122,6 +1122,11 @@ struct Turn {
   // focuspunch lostFocus; the decomp's physicalDmg || specialDmg, which
   // also needs HP lost). Focus Punch reads it.
   bool hit[2];
+  // ProtectStruct.physicalDmg and specialDmg: the HP the foe's last
+  // physical or special move took from the Pokémon itself (gHpDealt) this
+  // turn, 0 if none. Counter and Mirror Coat read them.
+  uint16_t physical[2];
+  uint16_t special[2];
 };
 
 // What one move execution tracks: the decomp's per-action globals
@@ -1454,12 +1459,14 @@ inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
 // Whether the foe's Protect or Detect blocks m (DEFENDER_IS_PROTECTED,
 // bsc:57). Showdown's protect flag agrees with the decomp's
 // FLAG_PROTECT_AFFECTED on every gen3 move that checks it, except Counter
-// and Mirror Coat, which take Showdown's when they're written. Log:
+// and Mirror Coat: Showdown's protect flag is on them, and this follows it.
+// Log:
 // Activate Protect.
 constexpr bool protected_from(const MoveState& m, Player player) {
   assert(m.turn != nullptr);
   return m.turn->protect[index(foe(player))] &&
-         (get(m.move).flags & Flag::ProtectAffected);
+         ((get(m.move).flags & Flag::ProtectAffected) ||
+          m.move == Move::Counter || m.move == Move::MirrorCoat);
 }
 
 constexpr uint32_t accuracy(const Battle& battle, Player player,
@@ -1544,10 +1551,11 @@ constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m) {
 
 // Cmd_datahpupdate (bsc:1844) on p's target, for a move's damage: a
 // Substitute takes it if there is one, otherwise the Pokémon does, and the
-// damage counts toward its Bide. Returns gHpDealt.
-//
-// TODO(plan step 4): the per-turn physical and special damage that Counter
-// and Mirror Coat read (ProtectStruct, README decision 2).
+// damage counts toward its Bide and, by the move's table type, toward
+// Counter's or Mirror Coat's (bsc:1938): Hidden Power is Normal there, so
+// always physical. Showdown's gen3 Counter counts Hidden Power and Mirror
+// Coat leaves it out explicitly (data/mods/gen3/moves.ts:176, 420), so they
+// agree. Returns gHpDealt.
 constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
                              MoveState& m) {
   Side& side = battle.side(target);
@@ -1566,7 +1574,12 @@ constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
   m.damaged = true;
   // Future Sight's hit, at the end of the turn, has no Turn: no Focus Punch
   // is left to read it.
-  if (m.turn != nullptr) m.turn->hit[index(target)] = true;
+  if (m.turn != nullptr) {
+    m.turn->hit[index(target)] = true;
+    const MoveData& data = get(m.move);
+    const bool phys = data.effect == Effect::HiddenPower || physical(data.type);
+    (phys ? m.turn->physical : m.turn->special)[index(target)] = dealt;
+  }
   return dealt;
 }
 
@@ -1613,7 +1626,8 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // Double-Edge is MOVE_EFFECT_RECOIL_33 (bs1:2567). Explosion (bs1:374) and
 // Seismic Toss and Night Shade (Effect::LevelDamage, bs1:1195) are
 // variations on the same path, handled in hit(), as are Rapid Spin
-// (MOVE_EFFECT_RAPIDSPIN, bs1:1716) and Brick Break (bs1:2418).
+// (MOVE_EFFECT_RAPIDSPIN, bs1:1716), Brick Break (bs1:2418), and Counter
+// and Mirror Coat (bs1:1217, 1801).
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1654,6 +1668,8 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::RapidSpin:
   case Effect::BrickBreak:
   case Effect::Snore:
+  case Effect::Counter:
+  case Effect::MirrorCoat:
     return true;
   default:
     return false;
@@ -2250,6 +2266,27 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
   Pokemon& user = battle.side(player).get(1);
 
+  // Counter and Mirror Coat (BattleScript_EffectCounter, bs1:1217;
+  // BattleScript_EffectMirrorCoat, bs1:1801): Cmd_counterdamagecalculator
+  // (bsc:7943) fails before the accuracy check (FailedFromAtkString) unless
+  // the foe's physical or special move took HP this turn; then the plain
+  // hit for twice that, with typecalc's immunities (Ghost to Counter, Dark
+  // to Mirror Coat) and adjustsetdamage, but no crit or roll. Showdown's
+  // gen3 onTry agrees. A failure under Pressure still costs 2 PP, as
+  // Showdown deducts before onTry; the decomp spares it
+  // (ppNotAffectedByPressure). Log: Fail.
+  uint32_t taken = 0;
+  if (effect == Effect::Counter || effect == Effect::MirrorCoat) {
+    taken = (effect == Effect::Counter ? m.turn->physical
+                                       : m.turn->special)[index(player)];
+    if (taken == 0) {
+      m.attackstring = true;
+      pp_reduce(battle, player, m);
+      m.result |= MoveResult::FAILED;
+      return moveend(battle, player, m, options);
+    }
+  }
+
   // Explosion (bs1:374): attackstring and ppreduce come first, which
   // changes nothing; tryexplosion fails if any active Pokémon has Damp
   // (BattleScript_DampStopsExplosion goes to moveend); otherwise the user's
@@ -2333,8 +2370,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // Seismic Toss and Night Shade: the user's level, with no crit or roll
     // (dmgtolevel, then adjustsetdamage, bsc:5878, which has the same
     // survival checks).
-    uint32_t d = user.level;
-    if (effect != Effect::LevelDamage) {
+    uint32_t d = taken != 0 ? 2 * taken : user.level;
+    if (effect != Effect::LevelDamage && taken == 0) {
       if (can_crit(battle, player)) {
         h.crit = rolls::crit(battle, player, 0,
                              crit_stage(battle, player, m.move), options);

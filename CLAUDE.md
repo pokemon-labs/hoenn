@@ -755,14 +755,14 @@ adapted (see Interface).
   Showdown agree). Fixed: every end of sleep now goes through `wake()`,
   which also clears `sleep_skipped`; a cure other than waking used to
   leave it for the next sleep. 94%.
+- Done (2026-10-07): Counter and Mirror Coat (`Turn::physical` and
+  `special`, set in `hp_update`). Protect blocks them, as Showdown. Both
+  count Hidden Power as physical whatever its type (Showdown's gen3 says
+  so explicitly; an older note here said otherwise). 95%.
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
-- Noted for Counter and Mirror Coat: Showdown's gen3 protect flag is on
-  them (the decomp's isn't), and the decomp counts Hidden Power as
-  physical whatever its type where Showdown uses the type. Follow
-  Showdown; they'll need physical and special damage in `Turn`.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Counter, Giga Drain, Taunt, Sunny Day, Rain Dance...). Uproar and Thrash (with the
+  (Giga Drain, Taunt, Sunny Day, Rain Dance, Endeavor...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

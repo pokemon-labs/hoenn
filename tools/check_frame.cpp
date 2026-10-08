@@ -12,6 +12,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/options.hpp"
@@ -1021,6 +1022,60 @@ void check_cures() {
   }
 }
 
+// Counter and Mirror Coat: twice the HP the foe's physical or special move
+// took, failing otherwise; Hidden Power counts as physical whatever its
+// type; Ghost is immune to Counter.
+void check_counter() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[0] = Move::Counter;
+  user.moves[1] = Move::MirrorCoat;
+  helpers::Pokemon slammer = SNORLAX;
+  slammer.moves[2] = Move::HiddenPower;
+  slammer.ivs = {31, 30, 31, 30, 30, 31}; // Fire
+  // Returns the user's HP lost and the foe's.
+  const auto run = [&](helpers::Pokemon foe, uint8_t slot, uint8_t foe_slot) {
+    Battle b = started({user}, {foe});
+    Observed o{};
+    o.calc.overrides.p2.secondary = Optional::False;
+    o.calc.overrides.p2.hits[0].crit = Optional::False;
+    update(b, Choice::move(slot), Choice::move(foe_slot), o);
+    const Pokemon& u = b.sides[0].get(1);
+    const Pokemon& f = b.sides[1].get(1);
+    return std::pair{u.stats.hp - u.hp, f.stats.hp - f.hp};
+  };
+  CHECK(started({user}, {slammer}).sides[1].get(1).moves[2].id == Move::HiddenPowerFire);
+  {
+    auto [lost, dealt] = run(slammer, 1, 1); // Counter, Body Slam
+    CHECK(lost > 0 && dealt == 2 * lost);
+    std::tie(lost, dealt) = run(slammer, 2, 1); // Mirror Coat, Body Slam
+    CHECK(lost > 0 && dealt == 0);
+    std::tie(lost, dealt) = run(JOLTEON, 2, 1); // Mirror Coat, Thunderbolt
+    CHECK(lost > 0 && dealt == 2 * lost);
+    std::tie(lost, dealt) = run(JOLTEON, 1, 1); // Counter, Thunderbolt
+    CHECK(lost > 0 && dealt == 0);
+    std::tie(lost, dealt) = run(slammer, 1, 3); // Counter, Hidden Power Fire
+    CHECK(lost > 0 && dealt == 2 * lost);
+    std::tie(lost, dealt) = run(slammer, 2, 3); // Mirror Coat, Hidden Power
+    CHECK(lost > 0 && dealt == 0);
+  }
+  // No damage taken: it fails and uses PP.
+  {
+    Battle b = started({user}, {IDLE});
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Counter, 3) - 1);
+  }
+  // A Ghost type is immune to Counter.
+  {
+    helpers::Pokemon ghost = slammer;
+    ghost.species = Species::Gengar;
+    ghost.ability = Ability::Levitate;
+    auto [lost, dealt] = run(ghost, 1, 1); // Counter, Body Slam
+    CHECK(lost > 0 && dealt == 0);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -1934,6 +1989,7 @@ int main(int argc, char** argv) {
   check_wish();
   check_leech_seed();
   check_cures();
+  check_counter();
   check_substitute();
   check_protect();
   check_spikes_and_heals();
