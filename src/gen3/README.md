@@ -171,6 +171,51 @@ entries here are the exceptions.
   them; the decomp uses `GetWhoStrikesFirst` at the start
   (main:3841) and battler-ID order for replacements (util:1880).
 
+### Showdown and the cartridge disagree
+
+A shortlist of the visible differences found so far; we follow Showdown in
+every one (CLAUDE.md, "Mechanics references"). The details are in the code
+comments at each site and in the entries above. "Log only" means the state
+is the same and only the messages differ.
+
+| Mechanic | Cartridge (pokeemerald) | Showdown (what we do) |
+|---|---|---|
+| Damage arithmetic | integer steps of `CalculateBaseDamage` | Showdown's modifier chain ("Damage") |
+| Accuracy | combined integer stage ratios | accuracy then evasion stage as fractions |
+| Crit vs immunity | crit drawn before the type check | immunity first, no crit draw |
+| Quick Claw | `gRandomTurnNumber < 0xFFFF * 20 / 100`, about 1/5; moves only | exactly 1/5; also orders two switches |
+| Two switches | battler-ID order | speed order |
+| Switch-in effects | Intimidate and Trace after the action | Spikes, ability, item on arrival, in speed order |
+| Confusion self-hit | Reflect and type items apply; no Focus Band behind a Substitute | typeless 40 power; Focus Band always |
+| Knock Off | link battles: a stolen item can come back | the item is gone for good (decision 8) |
+| Perish Song | own pass after Future Sight | counts in the residual pass |
+| Leech Seed KO of the last Pokémon | no `checkteamslost` | the battle ends there |
+| Sleep Talk's pick | skips disabled, taunted... moves; calls 0-PP moves | uniform over allowed slots; fails on 0 PP |
+| Statuses from contact abilities | ignore Safeguard | Safeguard blocks them |
+| Status berries at move end | only the first Pokémon | both |
+| Protect's chance after 4 uses | indexes past its 4-entry table (bsc:6514) | stays at 1/8 |
+| Roar and Whirlwind | a lower-level user can fail (`TryDoForceSwitchOut`) | no level check |
+| Safeguard vs Confuse Ray | script ends without moveend | fails normally |
+| Tickle | no Substitute check | fails into a Substitute |
+| Drain moves | Substitute's half rounds down; drains on no effect | rounds up; no drain without effect |
+| Counter under Pressure, failed | spares the PP | costs 2 PP |
+| Baton Pass | binding not passed; Lock-On reset | binding passes; Lock-On keeps its count |
+| Beat Up | own formula, no roll, no screens (bsc:8957) | typeless special hit with a roll ("Damage") |
+| Mean Look | — | ignores Protect |
+| Last move after a lost turn | `MOVE_UNAVAILABLE` (Encore, Mimic fail) | keeps the previous move |
+| 2-5 hit moves | stop after Endure or Focus Band | keep hitting |
+| Sleep or freeze on a charging Pokémon | cancels the charge at once | charge kept until the move is aborted |
+| Memento | user faints into Protect, Substitute, Fly; fails at -6/-6 | user lives if blocked; faints at -6/-6 |
+| Pain Split | the HP change counts as damage | not damage (Counter, Focus Punch) |
+| Thief and Covet | can't take Enigma Berry or Mail | can |
+| Imprison under Pressure | costs extra PP | doesn't |
+| Nightmare | no Protect check | Protect blocks it |
+| Leech Seed, Taunt, Encore vs Protect/evasion | fail before the accuracy draw | draw first, so a miss is logged (log only) |
+| Quick Claw activation | — | not logged by Showdown's gen3 (log only) |
+
+Not yet compared with Showdown: everything not on `teams/adv/` (Uproar,
+Thrash, Bide, Future Sight, Transform...).
+
 ### Damage
 
 `damage.hpp`, written 2026-10-07. Decided:

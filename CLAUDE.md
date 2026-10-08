@@ -135,6 +135,8 @@ competitive play, not cartridge-exact behaviour for every input.
   clauses and for the team format, which aren't cartridge mechanics.
   Exception, decided: the damage formula follows Showdown's arithmetic
   (`src/gen3/README.md`, "Damage").
+- **Where they disagree:** the shortlist in `src/gen3/README.md`,
+  "Mechanics" ("Showdown and the cartridge disagree").
 
 ## Interface (libpkmn's shape)
 
@@ -600,9 +602,25 @@ feels like progress; every later mechanic inherits the frame.
     `problematic`), and dumps the history on failure. Unlike libpkmn, it
     can't share Showdown's PRNG, so the comparison is "realizable", not
     equal.
-  - Open: infer the `Actions` from the log and force them through Calc
-    (deterministic; rare branches such as a min roll and a crit and a 10%
-    secondary would exceed a retry cap) or search at random. The reverse
+  - Open: how to find the branch of ours that matches a Showdown turn (we
+    can't share its PRNG, so we search our outcomes for one that matches):
+    1. **Infer and force.** Read the random events off Showdown's log
+       (crit, miss, the damage roll from the HP lost, a secondary, full
+       paralysis...), write them into a Calc `Actions`, run `update` once,
+       compare. Deterministic, one run, and a mismatch is a bug. Costs a
+       parser from every log line to the `Actions` field behind it, and
+       depends on our log, which isn't written.
+    2. **Search at random.** Rerun `update` from fresh seeds (and
+       `randomize_hidden`) until one matches, up to a cap. No inference
+       code. Rare branches exceed any sane cap (a crit and a min roll and
+       a 10% secondary is about 1 in 2,500), and a failure can't tell a bug
+       from bad luck.
+    Recommended (not decided): a hybrid. Infer and force the yes/no events
+    (hit, crit, secondaries, full paralysis, the duration ticks), and
+    enumerate the 16 damage rolls per hit instead of inferring them. Until
+    our log exists, compare state (HP, status, boosts, volatiles) instead
+    of log lines.
+  - Also open: the reverse
     direction (our outcomes realizable in Showdown) and comparing branch
     frequencies with Chance's `probability`. Which `@pkmn/sim` version to
     pin, and whether `check_damage` moves to it.
