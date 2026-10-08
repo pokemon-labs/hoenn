@@ -1187,6 +1187,33 @@ void check_endeavor() {
   }
 }
 
+// Beat Up, as Showdown: one hit per healthy party member in SLOT order,
+// each ally's base Atk against the target's base Def, typeless special.
+void check_beat_up() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::BeatUp;
+  helpers::Pokemon statused = JOLTEON;
+  statused.status = Status::par();
+  helpers::Pokemon fainted = SNORLAX;
+  fainted.hp = 0;
+  Battle b = started({user, SNORLAX, statused, DUGTRIO, fainted}, {IDLE});
+  Observed o{};
+  for (HitDraws& h : o.calc.overrides.p1.hits) {
+    h.crit = Optional::False;
+    h.damage = 100;
+  }
+  update(b, Choice::move(1), Choice::move(1), o);
+  const Pokemon& t = b.sides[1].get(1);
+  CHECK(t.stats.hp - t.hp == 10 + 16 + 12);
+  CHECK(o.chance.actions.p1.hits[2].damage == 100);
+  CHECK(o.chance.actions.p1.hits[3].damage == 0);
+  // Light Screen halves each hit (before the +2).
+  b = started({user, SNORLAX, statused, DUGTRIO, fainted}, {IDLE});
+  b.sides[1].conditions.light_screen = 5;
+  update(b, Choice::move(1), Choice::move(1), o);
+  CHECK(t.stats.hp - b.sides[1].get(1).hp == 6 + 9 + 7);
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2105,6 +2132,7 @@ int main(int argc, char** argv) {
   check_taunt();
   check_weather_moves();
   check_endeavor();
+  check_beat_up();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

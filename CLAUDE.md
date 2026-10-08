@@ -611,7 +611,7 @@ feels like progress; every later mechanic inherits the frame.
   the log plumbing.
 - `gen3/data.hpp`: the full `Battle` draft (816 B, unpacked) with `valid()`,
   including the turn-0 rule; `calc_stats`, `hidden_power`, `max_pp`.
-- `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (101 B) and
+- `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (109 B) and
   `Durations` (22 B).
 - `gen3/helpers.hpp` and `gen3/showdown.hpp`: all 327 teams in `teams/adv/`
   parse and build.
@@ -767,10 +767,12 @@ adapted (see Interface).
 - Done (2026-10-07): Rain Dance, Sunny Day, Sandstorm and Hail (the decomp
   and Showdown agree). 97%.
 - Done (2026-10-07): Endeavor (the decomp and Showdown agree).
+- Done (2026-10-07): Beat Up, as Showdown (README "Damage"); `Action::hits`
+  grew to 6 (`MAX_HITS`, decided). The survival step is `survive()`.
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Beat Up, Knock Off, Perish Song, Superpower, Return...). Uproar and Thrash (with the
+  (Knock Off, Perish Song, Superpower, Return, Thief...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

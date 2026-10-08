@@ -242,7 +242,7 @@ constexpr uint8_t tri_attack(Battle& battle, Player p, O& options) {
 template <typename O>
 constexpr bool crit(Battle& battle, Player p, uint8_t i, uint8_t stage,
                     O& options) {
-  assert(i < 5 && stage < 5);
+  assert(i < MAX_HITS && stage < 5);
   const uint8_t n = CRITICAL_HIT_CHANCE[stage];
   Optional forced = Optional::None;
   if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].crit;
@@ -256,7 +256,7 @@ constexpr bool crit(Battle& battle, Player p, uint8_t i, uint8_t stage,
 template <typename O>
 constexpr bool focus_band(Battle& battle, Player p, uint8_t i, uint8_t param,
                           O& options) {
-  assert(i < 5);
+  assert(i < MAX_HITS);
   Optional forced = Optional::None;
   if constexpr (detail::CALC<O>) {
     forced = options.calc.overrides.get(p).hits[i].focus_band;
@@ -273,7 +273,7 @@ constexpr bool focus_band(Battle& battle, Player p, uint8_t i, uint8_t param,
 // (85-100%). Actions holds the percentage.
 template <typename O>
 constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
-  assert(i < 5);
+  assert(i < MAX_HITS);
   uint8_t forced = 0;
   if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].damage;
   assert(forced == 0 || (forced >= 85 && forced <= 100));
@@ -366,7 +366,7 @@ constexpr uint8_t spore(Battle& battle, Player p, O& options) {
 template <typename O>
 constexpr bool contact(Battle& battle, Player p, uint8_t i, uint32_t den,
                        O& options) {
-  assert(i < 5);
+  assert(i < MAX_HITS);
   Optional forced = Optional::None;
   if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].contact;
   Optional* field = nullptr;
@@ -2242,6 +2242,28 @@ static_assert([] {
   return true;
 }());
 
+// adjustnormaldamage's and adjustsetdamage's survival (bsc:1677, 5878):
+// a lethal hit `d` on the foe's Pokémon itself (not its Substitute) leaves
+// it at 1 HP under False Swipe, Endure, or a Focus Band that activates
+// (hit `i`'s draw). Endure comes first, so the band's draw can't matter
+// then (Showdown's Endure onDamage has the higher priority). Returns the
+// damage to deal. Log: Activate Endure, or Focus Band.
+template <typename O>
+constexpr uint32_t survive(Battle& battle, Player player, const MoveState& m,
+                           uint32_t d, uint8_t i, O& options) {
+  const Player defender = foe(player);
+  const Side& foe_side = battle.side(defender);
+  const Pokemon& target = foe_side.get(1);
+  if (foe_side.active.volatiles.substitute || target.hp > d) return d;
+  const ItemData item = item_data(target.item);
+  bool survives = get(m.move).effect == Effect::FalseSwipe ||
+                  m.turn->endure[index(defender)];
+  if (!survives && item.effect == HoldEffect::FocusBand) {
+    survives = rolls::focus_band(battle, player, i, item.param, options);
+  }
+  return survives ? target.hp - 1u : d;
+}
+
 // BattleScript_EffectHit (bs1:236), from the attack canceler on.
 template <typename O>
 constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
@@ -2396,18 +2418,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       d = apply_roll(damage(battle, player, h),
                      rolls::damage(battle, player, 0, options));
     }
-    if (!foe_side.active.volatiles.substitute && target.hp <= d) {
-      const ItemData item = item_data(target.item);
-      // Endure before Focus Band, whose draw then can't matter
-      // (adjustnormaldamage, bsc:1677; Showdown's Endure onDamage has the
-      // higher priority). Log: Activate Endure, or Focus Band.
-      bool survives = data.effect == Effect::FalseSwipe ||
-                      m.turn->endure[index(defender)];
-      if (!survives && item.effect == HoldEffect::FocusBand) {
-        survives = rolls::focus_band(battle, player, 0, item.param, options);
-      }
-      if (survives) d = target.hp - 1u;
-    }
+    d = survive(battle, player, m, d, 0, options);
     // datahpupdate
     m.hp_dealt = hp_update(battle, defender, d, m);
   }
@@ -3221,6 +3232,57 @@ constexpr void weather_move(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// Beat Up, as Showdown's gen3 Beat Up (data/mods/gen3/moves.ts:31, gen4's
+// base power 10), which differs visibly from BattleScript_EffectBeatUp
+// (bs1:1940, Cmd_trydobeatup, bsc:8957): after the canceler, one accuracy
+// check (with Protect), attackstring and ppreduce, then one hit per party
+// member that isn't fainted or statused when the move starts, in SLOT order
+// (Showdown's side.pokemon), until the target faints. Each hit is a
+// typeless special hit through damage() with that member's base Atk
+// against the target's base Def (Hit::ally), with its own crit, damage
+// roll and Focus Band draws; Light Screen halves it and Mirror Coat counts
+// it. The decomp uses its own formula with no roll, ignores the screens
+// and goes in party order. With no such member it fails. No contact, no
+// secondary. Log: Activate Beat Up [of] the member per hit, then HitCount.
+template <typename O>
+constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  const uint32_t calc = accuracy(battle, player, m);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  const Side& side = battle.side(player);
+  const Player defender = foe(player);
+  const Pokemon& target = battle.side(defender).get(1);
+  Species allies[6] = {};
+  uint8_t n = 0;
+  for (uint8_t s = 1; s <= 6; s++) {
+    const Pokemon& ally = side.get(s);
+    if (ally.species != Species::None && !ally.fainted() && !ally.status.any()) {
+      allies[n++] = ally.species;
+    }
+  }
+  if (n == 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  for (uint8_t i = 0; i < n && !target.fainted(); i++) {
+    Hit h = Hit::of(m.move);
+    h.ally = allies[i];
+    if (can_crit(battle, player)) {
+      h.crit = rolls::crit(battle, player, i, crit_stage(battle, player, m.move), options);
+    }
+    uint32_t d = apply_roll(damage(battle, player, h), rolls::damage(battle, player, i, options));
+    d = survive(battle, player, m, d, i, options);
+    m.hp_dealt = hp_update(battle, defender, d, m);
+  }
+  if (target.fainted()) faint(battle, defender, options);
+  moveend(battle, player, m, options);
+}
+
 // BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
 // ppreduce, a missed accuracy check (Protect, evasion) or an existing
 // Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
@@ -3316,7 +3378,7 @@ constexpr bool handled(Effect effect) {
          effect == Effect::BatonPass || effect == Effect::Wish ||
          effect == Effect::LeechSeed || effect == Effect::Refresh ||
          effect == Effect::HealBell || effect == Effect::Taunt ||
-         move_weather(effect) != Weather::None;
+         move_weather(effect) != Weather::None || effect == Effect::BeatUp;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3360,6 +3422,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Refresh) return refresh(battle, player, m, options);
   if (effect == Effect::HealBell) return heal_bell(battle, player, m, options);
   if (effect == Effect::Taunt) return taunt(battle, player, m, options);
+  if (effect == Effect::BeatUp) return beat_up(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }

@@ -198,6 +198,12 @@ entries here are the exceptions.
   base power callbacks and `onModifyMove` do (Hidden Power, Weather Ball ×2
   in weather, Revenge, Pursuit, Flail, Return...). Modifiers come from the
   battle state inside `damage()`.
+- **Beat Up is Showdown's** (2026-10-07): each hit goes through `damage()`
+  as a typeless special hit with the ally's base Atk against the target's
+  base Def (`Hit::ally`), so it rolls 85–100%, Light Screen halves it and
+  Mirror Coat returns it. The decomp's `Cmd_trydobeatup` (bsc:8957) has
+  its own formula with no roll and no screens. Up to six hits, so
+  `Action::hits` has six entries (decided 2026-10-07).
 
 Showdown's model, in order:
 

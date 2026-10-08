@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iterator>
 #include <type_traits>
 
 #include "../common/data.hpp"
@@ -189,9 +190,15 @@ namespace pkmn::gen3 {
 // Multi-hit count         2,3,4,5: 3/8,3/8,1/8,1/8    1     bsc:7147, two draws
 //                                                            folded into one
 //                                                            outcome
-// Crit                    1/n, n by crit stage        5     bsc:1282, per hit
-// Damage roll             85-100, 1/16 each           5     bsc:1662, per hit
-// Focus Band (defender)   10/100, lethal hits only    5     bsc:1677 and 5878
+// Crit                    1/n, n by crit stage        6     bsc:1282, per hit
+//                                                            (Beat Up: one
+//                                                            per healthy party
+//                                                            member, up to 6)
+// Damage roll             85-100, 1/16 each           6     bsc:1662, per hit
+//                                                            (Beat Up: as
+//                                                            Showdown; the
+//                                                            decomp has none)
+// Focus Band (defender)   10/100, lethal hits only    6     bsc:1677 and 5878
 //                                                            (fixed damage),
 //                                                            per hit
 // Contact ability         Static, Flame Body, Poison  5     util:2774-2844,
@@ -239,8 +246,9 @@ namespace pkmn::gen3 {
 // P's Pokémon can tick in an update. (Verify that Sleep Talk's called move
 // doesn't re-run the attack canceler and tick twice.)
 //
-// So the most per player in one update is one move execution with up to five
-// hits, one confusion self-hit instead of the move, and one Future Sight hit.
+// So the most per player in one update is one move execution with up to six
+// hits (five for the multi-hit moves, six for Beat Up), one confusion
+// self-hit instead of the move, and one Future Sight hit.
 
 // One damaging hit. A multi-hit move fills hits[0..n-1].
 //
@@ -280,7 +288,7 @@ struct Action {
   Optional protect;      // Protect, Detect or Endure succeeding (bsc:6514)
   Optional hit;          // accuracy (bsc:1176), once per move
   uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147)
-  HitDraws hits[5];
+  HitDraws hits[6];       // MAX_HITS
   uint8_t spore;         // Effect Spore's status: 1 sleep, 2 poison,
                          // 3 paralysis
   Optional kings_rock;   // True = flinched. A flinch is set at most once and
@@ -341,8 +349,11 @@ struct Actions {
 };
 
 static_assert(sizeof(HitDraws) == 4);
-static_assert(sizeof(Action) == 49);
-static_assert(sizeof(Actions) == 3 + 2 * 49);
+// The most hits one move execution draws for (Beat Up's six).
+inline constexpr uint8_t MAX_HITS = std::size(Action{}.hits);
+static_assert(MAX_HITS == 6);
+static_assert(sizeof(Action) == 53);
+static_assert(sizeof(Actions) == 3 + 2 * 53);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 

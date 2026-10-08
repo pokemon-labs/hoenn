@@ -40,6 +40,11 @@ struct Hit {
   uint16_t power; // Spit Up reaches 300
   Type type;
   bool crit;
+  // Beat Up's hit for this party member, as Showdown's gen3 Beat Up
+  // (data/mods/gen3/moves.ts:31): a typeless special hit whose SpA is the
+  // ally's base Atk and whose SpD is the target's base Def, with no stages
+  // or modifiers on either. None for every other hit.
+  Species ally = Species::None;
 
   // A hit with the move's table power and type and no crit.
   static constexpr Hit of(Move move) {
@@ -154,9 +159,12 @@ constexpr uint32_t apply_stage(uint32_t stat, int8_t stage) {
   return stat * r.num / r.den;
 }
 
-// The move counts as typeless: Struggle is "???" in Showdown, so it gets no
-// STAB, no type matchup and no type-keyed modifier, and is physical.
-constexpr bool typeless(const Hit& hit) { return hit.move == Move::Struggle; }
+// The move counts as typeless: Struggle and Beat Up are "???" in Showdown,
+// so they get no STAB, no type matchup and no type-keyed modifier. Struggle
+// is physical, Beat Up special.
+constexpr bool typeless(const Hit& hit) {
+  return hit.move == Move::Struggle || hit.ally != Species::None;
+}
 
 } // namespace detail
 
@@ -260,9 +268,10 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
          defender.species != Species::None);
 
   const bool typeless = detail::typeless(hit);
+  const bool beat_up = hit.ally != Species::None;
   // Mystery matches no type-keyed modifier below.
   const Type type = typeless ? Type::Mystery : hit.type;
-  const bool physical = typeless || type < Type::Mystery;
+  const bool physical = !beat_up && (typeless || type < Type::Mystery);
   const HoldEffect attacker_effect = item_data(attacker_mon.item).effect;
   const HoldEffect defender_effect = item_data(defender_mon.item).effect;
   const Weather weather = effective_weather(battle);
@@ -351,6 +360,7 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
                                                        : mod::TENTH_MORE);
   }
   atk = modify(atk, m);
+  if (beat_up) atk = get(hit.ally).stats.atk;
 
   // The defending stat: the stage (a crit ignores a raised one), then
   // ModifyDef or ModifySpD.
@@ -377,6 +387,7 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
     }
   }
   def = modify(def, m);
+  if (beat_up) def = get(defender_mon.species).stats.def;
   // Self-Destruct and Explosion halve Def, at least 1.
   if (effect == Effect::Explosion && physical) def = def / 2 > 0 ? def / 2 : 1;
   assert(def != 0);
