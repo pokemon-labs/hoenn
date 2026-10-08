@@ -983,6 +983,37 @@ void check_spikes_and_heals() {
         }) == 1 + max / 4 - max / 16); // then sand's residual
 }
 
+// Focus Punch: a hit on the user first breaks its focus (PP still used);
+// a hit on its Substitute doesn't.
+void check_focus_punch() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[0] = Move::FocusPunch;
+  const auto after = [&](helpers::Pokemon foe, auto&& setup) {
+    Battle b = started({user}, {foe});
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    o.calc.overrides.p2.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return b;
+  };
+  const auto none = [](Battle&) {};
+  {
+    Battle b = after(DUGTRIO, none);
+    CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::FocusPunch, 3) - 1);
+  }
+  CHECK(after(IDLE, none).sides[1].get(1).hp < after(IDLE, none).sides[1].get(1).stats.hp);
+  {
+    Battle b = after(DUGTRIO, [](Battle& b) {
+      b.sides[0].active.volatiles.substitute = true;
+      b.sides[0].active.substitute_hp = 200;
+    });
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
+    CHECK(b.sides[1].get(1).hp < b.sides[1].get(1).stats.hp);
+  }
+}
+
 void check_residuals() {
   helpers::Pokemon plain = IDLE;
   plain.ability = Ability::ThickFat;
@@ -1679,6 +1710,7 @@ int main(int argc, char** argv) {
   check_substitute();
   check_protect();
   check_spikes_and_heals();
+  check_focus_punch();
   check_residuals();
   check_items();
   check_move_abilities();

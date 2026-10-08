@@ -755,8 +755,15 @@ adapted (see Interface).
 - Done (2026-10-07): the Spikes move and the healing moves (Recover, Slack
   Off, Soft-Boiled, Milk Drink, Morning Sun, Synthesis, Moonlight); the
   decomp and Showdown agree. `tools/coverage`: 87%.
+- Done (2026-10-07): Focus Punch (`Turn::hit`, set in `hp_update`; a
+  0-HP hit breaks focus too, as Showdown). `tools/coverage`: 89% of move
+  slots, 95% of damaging ones.
+- Noted for Counter and Mirror Coat: Showdown's gen3 protect flag is on
+  them (the decomp's isn't), and the decomp counts Hidden Power as
+  physical whatever its type where Showdown uses the type. Follow
+  Showdown; they'll need physical and special damage in `Turn`.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Focus Punch, Baton Pass, Wish, Leech Seed, Refresh,
+  (Baton Pass, Wish, Leech Seed, Refresh,
   Aromatherapy, Counter...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.

@@ -1060,6 +1060,10 @@ enum class Secondary : uint8_t {
 struct Turn {
   bool protect[2]; // ProtectStruct.protected: Protect or Detect worked
   bool endure[2];  // ProtectStruct.endured: Endure worked
+  // A damaging move hit the Pokémon itself, not its Substitute (Showdown's
+  // focuspunch lostFocus; the decomp's physicalDmg || specialDmg, which
+  // also needs HP lost). Focus Punch reads it.
+  bool hit[2];
 };
 
 // What one move execution tracks: the decomp's per-action globals
@@ -1500,6 +1504,9 @@ constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
   const uint16_t dealt = mon.hp > damage ? uint16_t(damage) : mon.hp;
   mon.hp = uint16_t(mon.hp - dealt);
   m.damaged = true;
+  // Future Sight's hit, at the end of the turn, has no Turn: no Focus Punch
+  // is left to read it.
+  if (m.turn != nullptr) m.turn->hit[index(target)] = true;
   return dealt;
 }
 
@@ -1559,6 +1566,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Recoil:
   case Effect::DoubleEdge:
   case Effect::Explosion:
+  case Effect::FocusPunch:
   case Effect::LevelDamage:
   case Effect::HiddenPower:
   case Effect::Thunder:
@@ -2167,6 +2175,17 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
     m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  // BattleScript_EffectFocusPunch (bs1:2260): after the canceler,
+  // jumpifnodamage. A user that a damaging move hit this turn loses its
+  // focus: ppreduce, no attackstring, no result flag. Otherwise the plain
+  // hit from its accuracy check (BattleScript_HitFromAccCheck). Showdown's
+  // gen3 onTry agrees (data/mods/gen4/moves.ts:528); its lostFocus also
+  // counts a hit that took no HP, and this follows it (Turn::hit). Log:
+  // Cant Focus Punch.
+  if (effect == Effect::FocusPunch && m.turn->hit[index(player)]) {
+    pp_reduce(battle, player, m);
     return moveend(battle, player, m, options);
   }
   Pokemon& user = battle.side(player).get(1);
@@ -3614,7 +3633,10 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
       select(battle, Player::P2, c2);
       order(battle, options);
       // CheckFocusPunch_ClearVarsBeforeTurnStarts (main:4906): Focus Punch's
-      // setup is only a message (bs1:3709). Then TryClearRageStatuses.
+      // setup is only a message (bs1:3709), which the decomp skips for a
+      // sleeping user (main:4915) and Showdown doesn't (its focuspunch
+      // condition's onStart; Log: SingleTurn Focus Punch). Then
+      // TryClearRageStatuses.
       for (Side& side : battle.sides) {
         const Move chosen = battle.request.move[&side - battle.sides];
         if (chosen != Move::Rage) side.active.volatiles.rage = false;
