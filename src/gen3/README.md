@@ -486,10 +486,10 @@ main = `src/battle_main.c`.
    decomp, which recomputes them from the species.
 8. **Knock Off sets the item to the sentinel `Item::KnockedOff`** (inert, no
    hold effect); there's no Knocked Off flag. Non-link path; see "Mechanics"
-   above. Open: the sentinel isn't in the generator yet (add it after
-   `Other`), and only identity checks (`item == Item::None`) must handle it.
-   Grep the decomp's `ITEM_NONE` comparisons to confirm only Thief, Covet,
-   Trick and Knock Off care (Recycle?).
+   above. The generator adds it after `Other` (2026-10-07). Only identity
+   checks (`item == Item::None`) must handle it; Thief, Covet and Trick
+   will need to refuse a knocked-off Pokémon. Open: grep the decomp's
+   `ITEM_NONE` comparisons to confirm nothing else cares (Recycle?).
 9. **Battler-ID fields become victim-side state.** In singles the other
    battler is always the foe, so clearing at the right foe switch replaces
    the IDs:

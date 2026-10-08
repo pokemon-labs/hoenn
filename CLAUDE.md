@@ -769,10 +769,12 @@ adapted (see Interface).
 - Done (2026-10-07): Endeavor (the decomp and Showdown agree).
 - Done (2026-10-07): Beat Up, as Showdown (README "Damage"); `Action::hits`
   grew to 6 (`MAX_HITS`, decided). The survival step is `survive()`.
+- Done (2026-10-07): Knock Off, as Showdown (README decision 8), with
+  `Item::KnockedOff` now in the generator. 98%.
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
 - **Then:** the status moves by `tools/coverage`'s order
-  (Knock Off, Perish Song, Superpower, Return, Thief...). Uproar and Thrash (with the
+  (Perish Song, Superpower, Return, Thief, Mean Look...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
@@ -781,7 +783,7 @@ adapted (see Interface).
 **Open:**
 
 - Check the `Actions` and `Durations` drafts against the `Battle` layout.
-- `Item::KnockedOff` and a `Move` sentinel for `MOVE_UNAVAILABLE` in the
+- A `Move` sentinel for `MOVE_UNAVAILABLE` in the
   generator; bounds of `bide_damage` and `future_sight_damage` (u32 for now).
 - The per-`Effect` behaviour (hand-written with the mechanics).
 - Extend `tools/coverage` to the abilities and hold effects `teams/` uses.

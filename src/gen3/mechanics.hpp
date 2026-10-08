@@ -1627,8 +1627,8 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // Seismic Toss and Night Shade (Effect::LevelDamage, bs1:1195) are
 // variations on the same path, handled in hit(), as are Rapid Spin
 // (MOVE_EFFECT_RAPIDSPIN, bs1:1716), Brick Break (bs1:2418), and Counter
-// and Mirror Coat (bs1:1217, 1801), Endeavor (bs1:2479) and the draining
-// moves (bs1:323).
+// and Mirror Coat (bs1:1217, 1801), Endeavor (bs1:2479), Knock Off
+// (bs1:2475) and the draining moves (bs1:323).
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1673,6 +1673,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::MirrorCoat:
   case Effect::Absorb:
   case Effect::Endeavor:
+  case Effect::KnockOff:
     return true;
   default:
     return false;
@@ -2424,6 +2425,19 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   secondary(battle, player, m, options);
+
+  // Knock Off (bs1:2475, MOVE_EFFECT_KNOCK_OFF, bsc:2858), as Showdown's
+  // gen4 onAfterHit (data/mods/gen4/moves.ts:718; README decision 8): after
+  // a hit on the target itself (not its Substitute) with the user still
+  // in, its item becomes the inert Item::KnockedOff, unless a living
+  // target's Sticky Hold keeps it. Its Choice Band lock ends with it
+  // (bsc:2885). Log: EndItem [from] Knock Off, or Activate Sticky Hold.
+  if (effect == Effect::KnockOff && m.damaged && !user.fainted() &&
+      target.item != Item::None && target.item != Item::KnockedOff &&
+      !(foe_side.active.ability == Ability::StickyHold && !target.fainted())) {
+    target.item = Item::KnockedOff;
+    foe_side.active.choice_move = Move::None;
+  }
 
   // Rapid Spin's certain MOVE_EFFECT_RAPIDSPIN on the user, if the move
   // affected the target: Cmd_rapidspinfree (bsc:8821) runs once per release, so

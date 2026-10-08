@@ -1214,6 +1214,45 @@ void check_beat_up() {
   CHECK(t.stats.hp - b.sides[1].get(1).hp == 6 + 9 + 7);
 }
 
+// Knock Off: the item becomes inert, a Choice Band lock ends, Sticky Hold
+// and a Substitute keep it.
+void check_knock_off() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::KnockOff;
+  const auto run = [&](helpers::Pokemon foe, auto&& setup) {
+    Battle b = started({user}, {foe});
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::True;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return b;
+  };
+  const auto none = [](Battle&) {};
+  {
+    Battle b = run(holding(IDLE, Item::Leftovers), [](Battle& b) {
+      b.sides[1].active.choice_move = Move::Splash;
+    });
+    CHECK(b.sides[1].get(1).item == Item::KnockedOff);
+    CHECK(b.sides[1].active.choice_move == Move::None);
+    // Leftovers no longer heal.
+    const Pokemon& t = b.sides[1].get(1);
+    CHECK(t.hp < t.stats.hp);
+  }
+  {
+    helpers::Pokemon sticky = holding(IDLE, Item::Leftovers);
+    sticky.species = Species::Muk;
+    sticky.ability = Ability::StickyHold;
+    CHECK(run(sticky, none).sides[1].get(1).item == Item::Leftovers);
+  }
+  {
+    Battle b = run(holding(IDLE, Item::Leftovers), [](Battle& b) {
+      b.sides[1].active.volatiles.substitute = true;
+      b.sides[1].active.substitute_hp = 200;
+    });
+    CHECK(b.sides[1].get(1).item == Item::Leftovers);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -2133,6 +2172,7 @@ int main(int argc, char** argv) {
   check_weather_moves();
   check_endeavor();
   check_beat_up();
+  check_knock_off();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

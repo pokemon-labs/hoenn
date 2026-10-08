@@ -474,6 +474,8 @@ def gen_items():
     # Cmd_tryswapitems (Trick) and the Thief/Covet steal check refuse it.
     held.append(("Mail", "None", 0))
     held.append(("Other", "None", 0))
+    # Knock Off's sentinel (README decision 8): inert, never gains an item.
+    held.append(("KnockedOff", "None", 0))
     assert len(held) < 256
 
     item_enum = "\n".join(f"  {n}," for n, _, _ in held)
@@ -487,10 +489,12 @@ def gen_items():
 namespace pkmn::gen3 {{
 
 // Items with a hold effect (src/data/items.h) plus the Enigma Berry, in
-// cartridge order, then two stand-ins. Mail is any of the 12 Mail items, which
-// Trick, Thief and Covet can't move (nor the Enigma Berry). Other is any other
-// holdable item without a battle effect (balls, evolution stones and so on).
-// Those only matter to Trick, Knock Off, Thief and Covet.
+// cartridge order, then two stand-ins and a sentinel. Mail is any of the 12
+// Mail items, which Trick, Thief and Covet can't move (nor the Enigma Berry).
+// Other is any other holdable item without a battle effect (balls, evolution
+// stones and so on). Those only matter to Trick, Knock Off, Thief and Covet.
+// KnockedOff is what Knock Off leaves (src/gen3/README.md, decision 8): no
+// hold effect, and the Pokémon can never gain an item.
 enum class Item : uint8_t {{
   None,
 {item_enum}
