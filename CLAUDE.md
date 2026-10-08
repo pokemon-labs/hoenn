@@ -577,9 +577,10 @@ feels like progress; every later mechanic inherits the frame.
 
 - Plan step 4, begun (branch `step4`): `tools/soak` (random self-play,
   replayable per-game seeds, a 100-game `ctest` case); status and flinch
-  secondaries, Tri Attack, Hidden Power, Earthquake, Thunder, Sky Uppercut,
-  Double-Edge, Explosion, Seismic Toss and Night Shade. About two thirds of
-  the damaging move slots in `teams/` now work.
+  secondaries, secondary stat drops and Meteor Mash's raise, Tri Attack,
+  Hidden Power, Earthquake, Thunder, Sky Uppercut, Double-Edge, Explosion,
+  Seismic Toss, Night Shade, Rapid Spin and Brick Break. About 85% of the
+  damaging move slots in `teams/` now work.
 
 **Not started:** every other move effect (they only use PP), switch-in
 abilities and items, the residuals, the ability and item dispatchers,
