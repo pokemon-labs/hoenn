@@ -1076,6 +1076,44 @@ void check_counter() {
   }
 }
 
+// Giga Drain: half the HP dealt (rounded down, at least 1), half a
+// Substitute's damage rounded up, and Liquid Ooze turning it into damage.
+void check_drain() {
+  helpers::Pokemon drainer = JOLTEON;
+  drainer.moves[0] = Move::GigaDrain;
+  const auto run = [&](helpers::Pokemon foe, auto&& setup) {
+    Battle b = started({drainer}, {foe});
+    b.sides[0].get(1).hp = 100;
+    setup(b);
+    Observed o{};
+    o.calc.overrides.p1.hits[0].crit = Optional::False;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return b;
+  };
+  {
+    Battle b = run(IDLE, [](Battle&) {});
+    const Pokemon& f = b.sides[1].get(1);
+    const uint32_t dealt = f.stats.hp - f.hp;
+    CHECK(dealt > 1 && b.sides[0].get(1).hp == 100 + dealt / 2);
+  }
+  {
+    Battle b = run(IDLE, [](Battle& b) {
+      b.sides[1].active.volatiles.substitute = true;
+      b.sides[1].active.substitute_hp = 5;
+    });
+    CHECK(b.sides[0].get(1).hp == 103); // ceil(5 / 2)
+  }
+  {
+    helpers::Pokemon ooze = IDLE;
+    ooze.species = Species::Tentacruel;
+    ooze.ability = Ability::LiquidOoze;
+    Battle b = run(ooze, [](Battle&) {});
+    const Pokemon& f = b.sides[1].get(1);
+    const uint32_t dealt = f.stats.hp - f.hp;
+    CHECK(dealt > 1 && b.sides[0].get(1).hp == 100 - dealt / 2);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -1990,6 +2028,7 @@ int main(int argc, char** argv) {
   check_leech_seed();
   check_cures();
   check_counter();
+  check_drain();
   check_substitute();
   check_protect();
   check_spikes_and_heals();

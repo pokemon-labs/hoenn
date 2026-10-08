@@ -1627,7 +1627,7 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // Seismic Toss and Night Shade (Effect::LevelDamage, bs1:1195) are
 // variations on the same path, handled in hit(), as are Rapid Spin
 // (MOVE_EFFECT_RAPIDSPIN, bs1:1716), Brick Break (bs1:2418), and Counter
-// and Mirror Coat (bs1:1217, 1801).
+// and Mirror Coat (bs1:1217, 1801) and the draining moves (bs1:323).
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
   case Effect::Hit:
@@ -1670,6 +1670,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Snore:
   case Effect::Counter:
   case Effect::MirrorCoat:
+  case Effect::Absorb:
     return true;
   default:
     return false;
@@ -2408,6 +2409,24 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     a.volatiles.leech_seed = false;
     side.conditions.spikes = 0;
     if constexpr (CHANCE<O>) options.chance.durations.get(player).binding = 0;
+  }
+
+  // Absorb, Mega Drain and Giga Drain (BattleScript_EffectAbsorb, bs1:323):
+  // negativedamage (bsc:6925), half the HP dealt, at least 1, healed past
+  // the user's Substitute, or taken from it if the target has Liquid Ooze.
+  // As Showdown, half a Substitute's damage rounds up (gen4 Substitute's
+  // drain, data/mods/gen4/moves.ts:1332; the decomp floors it) and a move
+  // with no effect drains nothing (the decomp still drains 1). The user's
+  // Liquid Ooze faint comes before the target's (bs1:358). Log: Heal
+  // [from] drain, or Damage [from] Liquid Ooze.
+  if (effect == Effect::Absorb && affects && m.hp_dealt != 0) {
+    uint16_t drain = m.damaged ? uint16_t(m.hp_dealt / 2) : uint16_t((m.hp_dealt + 1) / 2);
+    if (drain == 0) drain = 1;
+    if (foe_side.active.ability == Ability::LiquidOoze) {
+      passive_damage(battle, player, drain, options);
+    } else {
+      heal(user, drain);
+    }
   }
 
   // seteffectwithchance: the certain recoil of Effect::Recoil
