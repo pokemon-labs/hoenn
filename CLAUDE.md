@@ -627,10 +627,10 @@ adapted (see Interface).
   - Skipping the damage roll when every roll KOs (fewer chance nodes, but
     it changes the `Actions` key). Can wait for the birch adaptation.
   - Merge `step3` and `step4` into main?
-- Done (2026-10-07, uncommitted): accuracy switched to Showdown's
-  arithmetic; the confusion canceler and self-hit (`check_frame` covers
-  both). Nothing inflicts confusion yet (Confuse Ray, Swagger, the
-  confusion secondaries, Thrash's end).
+- Done (2026-10-07): accuracy switched to Showdown's arithmetic; confusion
+  (the canceler, the self-hit, Confuse Ray's `Effect::Confuse` and the
+  `ConfuseHit` secondary), covered by `check_frame`. Still to write:
+  Swagger, Flatter and Thrash's end. Only 2 slots in `teams/` confuse.
 - The release build's `soak` doesn't link: `soak.cpp` calls
   `__sanitizer_set_death_callback` without sanitizers. This predates the
   confusion and accuracy changes.

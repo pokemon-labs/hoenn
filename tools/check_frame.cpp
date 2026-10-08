@@ -459,6 +459,76 @@ void check_confusion() {
   }
 }
 
+void check_confuse() {
+  const helpers::Pokemon confuser = {
+      .species = Species::Gengar,
+      .moves = {Move::ConfuseRay, Move::Psybeam},
+      .ability = Ability::Levitate,
+      .gender = Gender::Male,
+  };
+  {
+    // Confuse Ray: a hidden 2-5 counter, public count 1, no draw recorded
+    // (accuracy 100). Gengar is faster, so Snorlax's tick comes this turn.
+    Battle b = started({confuser}, {SNORLAX});
+    Observed o{};
+    update(b, Choice::move(1), Choice::move(1), o);
+    const uint8_t c = b.sides[1].active.volatiles.confusion;
+    // Snorlax ticked once after being confused: 1-4 left, count 2.
+    CHECK(c >= 1 && c <= 4);
+    CHECK(o.chance.durations.p2.confusion == 2);
+    CHECK(o.chance.actions.p2.confusion_end == Optional::False);
+    CHECK(o.chance.actions.p2.confusion != Optional::None);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::ConfuseRay, 3) - 1);
+  }
+  {
+    // It fails into Own Tempo, a Substitute, Safeguard or an existing
+    // confusion, which keeps its counter.
+    helpers::Pokemon tempo = IDLE;
+    tempo.species = Species::Slowbro;
+    tempo.ability = Ability::OwnTempo;
+    Battle b = started({confuser}, {tempo});
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].active.volatiles.confusion == 0);
+
+    Battle c = started({confuser}, {IDLE});
+    c.sides[1].active.volatiles.substitute = true;
+    c.sides[1].active.substitute_hp = 10;
+    update(c, Choice::move(1), Choice::move(1), null);
+    CHECK(c.sides[1].active.volatiles.confusion == 0);
+
+    Battle d = started({confuser}, {IDLE});
+    d.sides[1].conditions.safeguard = 5;
+    update(d, Choice::move(1), Choice::move(1), null);
+    CHECK(d.sides[1].active.volatiles.confusion == 0);
+    CHECK(d.sides[0].active.last_move == Move::ConfuseRay);
+
+    Battle e = started({confuser}, {IDLE});
+    e.sides[1].active.volatiles.confusion = 5;
+    Observed o{};
+    o.calc.overrides.p2.confusion = Optional::False;
+    update(e, Choice::move(1), Choice::move(1), o);
+    // Not reset to a fresh roll: 5, then Splash's tick.
+    CHECK(e.sides[1].active.volatiles.confusion == 4);
+  }
+  {
+    // Psybeam's 10% confusion, forced.
+    Battle b = started({confuser}, {IDLE});
+    Observed o{};
+    o.calc.overrides.p1.secondary = Optional::True;
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[1].active.volatiles.confusion >= 1);
+    CHECK(o.chance.actions.p1.secondary == Optional::True);
+    // Not through Safeguard: nothing is drawn.
+    Battle c = started({confuser}, {IDLE});
+    c.sides[1].conditions.safeguard = 5;
+    Observed q{};
+    update(c, Choice::move(2), Choice::move(1), q);
+    CHECK(c.sides[1].active.volatiles.confusion == 0);
+    CHECK(q.chance.actions.p1.secondary == Optional::None);
+  }
+}
+
 // accuracy() against Showdown's gen3 arithmetic, worked by hand
 // (data/mods/gen3/scripts.ts:319-363). Returns the outcomes of 100 that hit.
 uint32_t accuracy_of(const Battle& b, Move move) {
@@ -567,6 +637,7 @@ int main(int argc, char** argv) {
   check_faints();
   check_moves();
   check_confusion();
+  check_confuse();
   check_accuracy();
   check_turn_cap();
 

@@ -1169,6 +1169,7 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::FreezeHit:
   case Effect::ParalyzeHit:
   case Effect::FlinchHit:
+  case Effect::ConfuseHit:
   case Effect::TriAttack:
   case Effect::AttackDownHit:
   case Effect::DefenseDownHit:
@@ -1188,7 +1189,7 @@ constexpr bool plain_hit(Effect effect) {
 
 // MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
 enum class Secondary : uint8_t {
-  None, Poison, Burn, Freeze, Paralysis, Toxic, Flinch, TriAttack,
+  None, Poison, Burn, Freeze, Paralysis, Toxic, Confusion, Flinch, TriAttack,
   // MOVE_EFFECT_*_MINUS_1 on the target, in Boosts order (atk-acc), then
   // MOVE_EFFECT_ATK_PLUS_1 and DEF_PLUS_1 with MOVE_EFFECT_AFFECTS_USER.
   AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
@@ -1219,6 +1220,7 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::FreezeHit: return Secondary::Freeze;
   case Effect::ParalyzeHit:
   case Effect::Thunder: return Secondary::Paralysis;
+  case Effect::ConfuseHit: return Secondary::Confusion;
   case Effect::FlinchHit: return Secondary::Flinch;
   case Effect::TriAttack: return Secondary::TriAttack;
   case Effect::AttackDownHit: return Secondary::AtkDown;
@@ -1288,6 +1290,17 @@ constexpr void set_status(Battle& battle, Player player, Secondary s) {
   side.active.toxic = 0;
 }
 
+// MOVE_EFFECT_CONFUSION taking hold on `target` (bsc:2541): the counter is
+// Random() % 4 + 2, hidden, so it's drawn without Chance (CLAUDE.md,
+// "Chance"), and the public count starts at 1.
+template <typename O>
+constexpr void confuse(Battle& battle, Player target, O& options) {
+  ActivePokemon& t = battle.side(target).active;
+  assert(t.volatiles.confusion == 0);
+  t.volatiles.confusion = uint8_t(2 + battle.rng.range(4));
+  if constexpr (CHANCE<O>) options.chance.durations.get(target).confusion = 1;
+}
+
 // seteffectwithchance (bsc:2923) and SetMoveEffect (bsc:2380) for a move's
 // secondary effect on its target, after the damage. The chance is the
 // table's, doubled by Serene Grace; it's drawn only when the effect could
@@ -1349,6 +1362,12 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
               stage(t.boosts, stat) > -6;
     break;
   }
+  case Secondary::Confusion:
+    // Safeguard stops it as a secondary (bsc:2257, MOVE_EFFECT_CONFUSION is
+    // 7), then Own Tempo or an existing confusion (bsc:2534).
+    matters = side.conditions.safeguard == 0 &&
+              t.ability != Ability::OwnTempo && t.volatiles.confusion == 0;
+    break;
   case Secondary::Flinch:
     // Set only if the target hasn't moved yet this turn (bsc:2685).
     matters = m.first && !t.volatiles.flinched &&
@@ -1382,6 +1401,9 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   case Secondary::SpdDown:
   case Secondary::AccDown:
     stage(t.boosts, uint8_t(uint8_t(s) - uint8_t(Secondary::AtkDown)))--;
+    break;
+  case Secondary::Confusion:
+    confuse(battle, foe(player), options);
     break;
   case Secondary::Flinch:
     t.volatiles.flinched = true;
@@ -1553,6 +1575,41 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (effect == Effect::Explosion) faint(battle, player, options);
 }
 
+// BattleScript_EffectConfuse (bs1:903): Confuse Ray, Supersonic and Sweet
+// Kiss. After the canceler, attackstring and ppreduce, it stops at Own
+// Tempo, a Substitute or an existing confusion, then checks accuracy, then
+// Safeguard. On the cartridge Safeguard's script ends with end2 (bs1:3257),
+// skipping moveend, so the move isn't recorded as used; Showdown fails the
+// move normally, and this follows it.
+template <typename O>
+constexpr void confuse_move(Battle& battle, Player player, MoveState& m,
+                            O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Side& foe_side = battle.side(foe(player));
+  const ActivePokemon& t = foe_side.active;
+  // BattleScript_OwnTempoPrevents and BattleScript_AlreadyConfused set no
+  // result flag.
+  if (t.ability == Ability::OwnTempo) return moveend(battle, player, m, options);
+  if (t.volatiles.substitute) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (t.volatiles.confusion != 0) return moveend(battle, player, m, options);
+  const uint32_t calc = accuracy(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::MISSED | MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (foe_side.conditions.safeguard != 0) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  confuse(battle, foe(player), options);
+  moveend(battle, player, m, options);
+}
+
 // HandleAction_UseMove (util:78): which move and slot the action uses, then
 // its script. Struggle uses no PP. A forced move is the locked move. Encore
 // applies even when it began after selection: the encored move replaces the
@@ -1603,6 +1660,7 @@ constexpr void use_move(Battle& battle, Player player, bool first,
   m.ignore_underground = effect == Effect::Earthquake;
 
   if (plain_hit(get(m.move).effect)) return hit(battle, player, m, options);
+  if (effect == Effect::Confuse) return confuse_move(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
