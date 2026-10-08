@@ -140,7 +140,7 @@ void check_order() {
     CHECK(first(b, Choice::move(1), Choice::move(1), o) == Player::P2);
     CHECK(o.chance.actions.turn.quick_claw == Optional::True);
     o.chance.probability.reduce();
-    CHECK(o.chance.probability.p == 13107 && o.chance.probability.q == 65536);
+    CHECK(o.chance.probability.p == 1 && o.chance.probability.q == 5);
     Observed n{};
     n.calc.overrides.turn.quick_claw = Optional::False;
     CHECK(first(b, Choice::move(1), Choice::move(1), n) == Player::P1);

@@ -387,8 +387,7 @@ unchecked claims.
   - Quick Claw is drawn lazily, at the first read where it can change the
     order, and kept in `Request` (the padding byte) so the end-of-turn order
     reuses it across a request (decided). Two holders share the one draw, so
-    both proccing is a speed tie. *(verify against Showdown, which may roll
-    per holder)*
+    both proccing is a speed tie. Showdown agrees, and its 1/5 is used.
   - End of turn re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`, util:1209):
     an independent speed-tie draw, the same Quick Claw value, and the
     chosen moves' priority (`ignoreChosenMoves` is FALSE). *(verify)* Which

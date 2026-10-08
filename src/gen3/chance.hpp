@@ -147,7 +147,7 @@ namespace pkmn::gen3 {
 // Site                    Outcome                     Mult  Notes
 // Quick Claw              gRandomTurnNumber (u16)     1     main:4013, read in
 //                         < 0xFFFF * 20 / 100                GetWhoStrikesFirst.
-//                         = 13107/65536                      ONE draw per turn
+//                         (1/5 here, as Showdown)            ONE draw per turn
 //                                                            serves both sides,
 //                                                            so two holders
 //                                                            proc together. Also
@@ -311,7 +311,7 @@ struct Action {
 
 // Draws for the whole turn, each at most once per update.
 struct Turn {
-  Optional quick_claw;  // gRandomTurnNumber < 13107; one draw serves both
+  Optional quick_claw;  // 1/5 (Showdown's); one draw serves both
                         // sides (main:4013)
   uint8_t speed_tie;    // move order: 1 = P1 first, 2 = P2 first
   uint8_t residual_tie; // ENDTURN_ORDER's independent re-roll (util:1209),

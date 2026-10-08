@@ -95,9 +95,9 @@ constexpr void observe(O& options, uint64_t num, uint64_t den) {
   }
 }
 
-// gRandomTurnNumber < 0xFFFF * param / 100 (main:4653, 4687).
-inline constexpr uint32_t QUICK_CLAW = 0xFFFF * 20 / 100;
-static_assert(get(Item::QuickClaw).param == 20 && QUICK_CLAW == 13107);
+// 1/5, as Showdown (one randomChance(1, 5) per turn, sim/battle.ts:1802).
+// The decomp's gRandomTurnNumber < 0xFFFF * 20 / 100 (main:4653) is
+// 13107/65536, just under.
 
 // The turn's Quick Claw draw: one u16 serves both holders and both orders of
 // the turn (main:4013). Drawn once, kept in the request.
@@ -110,11 +110,11 @@ template <typename O> constexpr bool quick_claw(Battle& battle, O& options) {
   assert(forced <= Optional::False);
   const bool proc = forced != Optional::None
                         ? forced == Optional::True
-                        : battle.rng.chance(QUICK_CLAW, 65536);
+                        : battle.rng.chance(1, 5);
 
   if constexpr (detail::CHANCE<O>) {
     record(options.chance.actions.turn.quick_claw, optional(proc));
-    observe(options, proc ? QUICK_CLAW : 65536 - QUICK_CLAW, 65536);
+    observe(options, proc ? 1 : 4, 5);
   }
   drawn = optional(proc);
   return proc;
