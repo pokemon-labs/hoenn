@@ -246,8 +246,8 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 - `headers`: every header compiles alone (so its `static_assert`s run), and
   all are linked into one binary (no duplicate definitions).
 - `check_data`: `static_assert`s on the generated tables.
-- `check_teams`: parses `PKMN_TEAMS_DIR` (default `../teams/adv`); passes
-  only if exactly the teams named with `--expect` fail.
+- `check_teams`: parses `PKMN_TEAMS_DIR` (default `../teams/adv`); every
+  team must parse (`--expect NAME` would allow a named team to fail).
 - `check_damage`: `damage.hpp` against Showdown 0.11.10, from the committed
   `tools/damage_cases.inc`. Regenerate it with `node
   tools/damage_oracle.cjs > tools/damage_cases.inc` (needs ADV-Simulator's
@@ -537,9 +537,8 @@ feels like progress; every later mechanic inherits the frame.
   including the turn-0 rule; `calc_stats`, `hidden_power`, `max_pp`.
 - `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (101 B) and
   `Durations` (22 B).
-- `gen3/helpers.hpp` and `gen3/showdown.hpp`: 326 of the 327 teams in
-  `teams/adv/` parse and build. The other, which Showdown's validator also
-  rejects, has a Hidden Power label its IVs don't produce.
+- `gen3/helpers.hpp` and `gen3/showdown.hpp`: all 327 teams in `teams/adv/`
+  parse and build.
 - Decided: header-only C++ library with no C API; Chance's probability is a
   `double`; the damage formula follows Showdown's arithmetic.
 - `gen3/damage.hpp`: crit stage, type matchup, damage before the roll, the

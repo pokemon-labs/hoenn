@@ -61,10 +61,7 @@ target_link_libraries(check_teams PRIVATE pkmn_gen3 pkmn_warnings)
 file(GLOB PKMN_TEAM_FILES ${PKMN_TEAMS_DIR}/*.txt)
 list(FILTER PKMN_TEAM_FILES EXCLUDE REGEX "/all\\.txt$")
 if(PKMN_TEAM_FILES)
-  # Known bad: HP [Fire] with IVs for HP Dark. Showdown's validator rejects it
-  # too (team-validator.ts, "its IVs are for Hidden Power").
-  add_test(NAME check_teams COMMAND check_teams
-           --expect "[gen3ou] Johnald Teamdump/Leer Mence" ${PKMN_TEAM_FILES})
+  add_test(NAME check_teams COMMAND check_teams ${PKMN_TEAM_FILES})
   add_test(NAME check_frame COMMAND check_frame ${PKMN_TEAM_FILES})
 else()
   add_test(NAME check_frame COMMAND check_frame)
