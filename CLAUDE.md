@@ -551,10 +551,36 @@ feels like progress; every later mechanic inherits the frame.
   and in what order); Baton Pass resumes at the foe's move and the toxic
   counter restarts.
 - **For now, testing is random battles in debug** (`soak`, decided
-  2026-10-07): run many games under ASan/UBSan after each change. The user
-  has a design for checking correctness against Showdown (its PRNG can't be
-  matched) once the mechanics are in; don't design one.
-- **Matching Showdown** is the target.
+  2026-10-07): run many games under ASan/UBSan after each change.
+- **Matching Showdown** is the target. Once the mechanics and the log are
+  in, a **realizability test** (the user's design, decided 2026-10-07):
+  - Play Showdown games from a fixed seed with random choice pairs. Check
+    at every state that the set of choices equals our `choices()`. Apply
+    the pair to Showdown and record the omniscient log. Some branch of
+    ours must produce the same log: some `Actions` plus hidden counters
+    sampled from `Durations` (`randomize_hidden`). **Never copy Showdown's
+    hidden counters:** correct `Durations` must make the true value
+    samplable, and the test checks exactly that. Cap the tries.
+  - It assumes the omniscient log identifies the resulting state.
+    Exceptions: draws with no effect (harmless) and Quick Claw, which
+    Showdown's gen3 doesn't log (`data/mods/gen3/items.ts:301`). It isn't
+    competitive, so the test bans it. Spite logs its amount
+    (`data/mods/gen3/moves.ts:585`).
+  - Take the harness from libpkmn's `src/test/integration.ts` and
+    `showdown.ts` wherever possible (local copy:
+    `~/oak/cpp/extern/engine`). It uses the `@pkmn/sim` package (pinned,
+    0.9.31 there) and `@pkmn/protocol`, steps both sides in lockstep with
+    `Battle.makeChoices`, compares parsed lines after a `FILTER` of
+    redundant messages, skips problematic sets up front (`validate`,
+    `problematic`), and dumps the history on failure. Unlike libpkmn, it
+    can't share Showdown's PRNG, so the comparison is "realizable", not
+    equal.
+  - Open: infer the `Actions` from the log and force them through Calc
+    (deterministic; rare branches such as a min roll and a crit and a 10%
+    secondary would exceed a retry cap) or search at random. The reverse
+    direction (our outcomes realizable in Showdown) and comparing branch
+    frequencies with Chance's `probability`. Which `@pkmn/sim` version to
+    pin, and whether `check_damage` moves to it.
 - **Differential runs against ADV-Simulator** from one C++ driver,
   comparing outcome distributions over the same team pairs.
 - **Soak runs** of millions of random self-play games under ASan/UBSan,
