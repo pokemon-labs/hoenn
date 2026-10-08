@@ -171,6 +171,19 @@ under `../cpp/include/`):
   The log is the source of public information for imperfect-information use.
   Keep the `Log` parameter so adding it changes no signatures. Open: what
   `update` does with a full buffer (libpkmn returns `Result::Error`).
+- **The log is Showdown's omniscient log, built in two layers, as libpkmn**
+  (decided):
+  - `update` writes compact binary opcodes (libpkmn's `protocol` ArgTypes)
+    into the `Log` buffer, for speed. It formats no text.
+  - A separate formatter turns that buffer into text that matches
+    Showdown's protocol line for line.
+  - The engine writes only the omniscient stream, including hidden
+    information as `|split|pN` triplets (Showdown's `Battle.addSplit`,
+    `sim/battle.ts:3081`: the marker, the full-information line, then the
+    public line). Each player's private view comes from Showdown's own
+    `splitRegex` and `extractChannelMessages` (`sim/battle.ts:33-59`), not
+    from the engine. So mirror the raw log with its `|split|` triplets, not
+    channel -1's output, which has already dropped the public lines.
 
 ### Chance
 
@@ -505,7 +518,8 @@ feels like progress; every later mechanic inherits the frame.
        Showdown the user's faint is queued first (gen3 `scripts.ts:201`) and
        `checkWin` runs once on the whole queue.
 4. Trace the hit backbone and the dispatchers, then add effects by group,
-   starting with what `teams/` uses. The log comes last.
+   starting with what `teams/` uses. The log comes last (see Interface:
+   opcodes, a text formatter, Showdown's omniscient log).
 
 **Testing.**
 
