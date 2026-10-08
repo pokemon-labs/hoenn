@@ -3077,6 +3077,36 @@ constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectLeechSeed (bs1:1157): after the canceler, attackstring
+// and ppreduce, a Substitute fails it (ButItFailed); then accuracy; then
+// Cmd_setseeded (bsc:6718) misses an already seeded or Grass target. Those
+// two outcomes don't depend on the accuracy draw, so they're checked before
+// it and nothing is drawn. Showdown checks Grass first (TryImmunity) and
+// the Substitute and the seed after its accuracy draw, so its log can show
+// a miss where this fails; the state is the same, and the status moves
+// share this (settle with the log). The drain is in battler_residuals.
+// Log: Start Leech Seed, or Fail, Immune or Miss.
+template <typename O>
+constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
+                          O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& t = battle.side(foe(player)).active;
+  if (t.volatiles.substitute) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const uint32_t calc =
+      t.volatiles.leech_seed || has_type(t, Type::Grass) ? 0 : accuracy(battle, player, m);
+  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+    m.result |= MoveResult::MISSED;
+    return moveend(battle, player, m, options);
+  }
+  t.volatiles.leech_seed = true;
+  moveend(battle, player, m, options);
+}
+
 // The healing moves' effects (heal_move).
 constexpr bool heals(Effect effect) {
   return effect == Effect::RestoreHp || effect == Effect::Softboiled ||
@@ -3096,7 +3126,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Roar || effect == Effect::Substitute ||
          effect == Effect::Protect || effect == Effect::Endure ||
          effect == Effect::Spikes || heals(effect) ||
-         effect == Effect::BatonPass || effect == Effect::Wish;
+         effect == Effect::BatonPass || effect == Effect::Wish ||
+         effect == Effect::LeechSeed;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -3136,6 +3167,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (heals(effect)) return heal_move(battle, player, m, options);
   if (effect == Effect::BatonPass) return baton_pass(battle, player, m, options);
   if (effect == Effect::Wish) return wish(battle, player, m, options);
+  if (effect == Effect::LeechSeed) return leech_seed(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then

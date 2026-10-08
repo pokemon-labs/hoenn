@@ -912,6 +912,60 @@ void check_wish() {
   }
 }
 
+// Leech Seed: it seeds (and the residual drains), it fails into a
+// Substitute, a Grass type or an existing seed with no draw, and it can
+// miss.
+void check_leech_seed() {
+  helpers::Pokemon seeder = JOLTEON;
+  seeder.moves[0] = Move::LeechSeed;
+  const auto after = [&](helpers::Pokemon foe, Optional hit, auto&& setup) {
+    Battle b = started({seeder}, {foe});
+    setup(b);
+    b.sides[0].get(1).hp = 1;
+    Observed o{};
+    o.calc.overrides.p1.hit = hit;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return std::pair{b, o};
+  };
+  const auto none = [](Battle&) {};
+  {
+    auto [b, o] = after(IDLE, Optional::True, none);
+    const Pokemon& foe = b.sides[1].get(1);
+    CHECK(b.sides[1].active.volatiles.leech_seed);
+    CHECK(foe.hp == foe.stats.hp - foe.stats.hp / 8);
+    CHECK(b.sides[0].get(1).hp == 1 + foe.stats.hp / 8);
+    CHECK(o.chance.actions.p1.hit == Optional::True);
+  }
+  {
+    auto [b, o] = after(IDLE, Optional::False, none);
+    CHECK(!b.sides[1].active.volatiles.leech_seed);
+    CHECK(o.chance.actions.p1.hit == Optional::False);
+  }
+  helpers::Pokemon grass = IDLE;
+  grass.species = Species::Venusaur;
+  grass.ability = Ability::Overgrow;
+  {
+    auto [b, o] = after(grass, Optional::None, none);
+    CHECK(!b.sides[1].active.volatiles.leech_seed);
+    CHECK(o.chance.actions.p1.hit == Optional::None);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::LeechSeed, 3) - 1);
+  }
+  {
+    auto [b, o] = after(IDLE, Optional::None, [](Battle& b) {
+      b.sides[1].active.volatiles.substitute = true;
+      b.sides[1].active.substitute_hp = 10;
+    });
+    CHECK(!b.sides[1].active.volatiles.leech_seed);
+    CHECK(o.chance.actions.p1.hit == Optional::None);
+  }
+  {
+    auto [b, o] = after(IDLE, Optional::None, [](Battle& b) {
+      b.sides[1].active.volatiles.leech_seed = true;
+    });
+    CHECK(o.chance.actions.p1.hit == Optional::None);
+  }
+}
+
 // Substitute: its cost and HP, the two failures, freeing from a binding,
 // and a hit that the Substitute takes.
 void check_substitute() {
@@ -1823,6 +1877,7 @@ int main(int argc, char** argv) {
   check_roar();
   check_baton_pass();
   check_wish();
+  check_leech_seed();
   check_substitute();
   check_protect();
   check_spikes_and_heals();
