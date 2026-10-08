@@ -709,10 +709,18 @@ adapted (see Interface).
 - Done (2026-10-07, following Showdown): sleep. Sleep moves, Rest, Yawn,
   Snore, Sleep Talk, Effect Spore's sleep, Sleep Clause, `sleep_skipped`
   (`Battle` is now 816 B). `tools/coverage`: 69% of move slots.
-- **Then:** Uproar and Thrash (with the `WasUnableToUseMove` question,
-  README decision 2); then the status moves by `tools/coverage`'s order
-  (Roar, Calm Mind, Substitute, Protect, Spikes, Focus Punch, Dragon Dance,
-  Soft-Boiled, Recover, Baton Pass...).
+- Done (2026-10-07, the decomp's scripts; Showdown agrees on the state):
+  the stat moves. The one-stat raises, Cosmic Power, Bulk Up, Calm Mind,
+  Dragon Dance, Minimize, Defense Curl, Belly Drum and both Curses
+  (`stat_up_move`, `stat_pair_move`, `belly_drum`, `curse`). A raise at +6
+  marks the move MISSED, as the decomp. Ghost Curse's Protect check waits
+  for Protect. `tools/coverage`: 75% of move slots. New mechanics mark
+  their log sites with `// Log: <ArgType>` comments.
+- **Then:** the status moves by `tools/coverage`'s order (Roar,
+  Substitute, Protect, Spikes, Focus Punch, Soft-Boiled, Recover, Baton
+  Pass, Wish, Leech Seed...). Uproar and Thrash (with the
+  `WasUnableToUseMove` question, README decision 2) wait: no team in
+  `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 

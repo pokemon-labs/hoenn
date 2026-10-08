@@ -1485,7 +1485,8 @@ constexpr bool plain_hit(Effect effect) {
   }
 }
 
-// The stage a stat change moves: 0 Atk, 1 Def, 2 Spe, 3 SpA, 4 SpD, 5 Acc.
+// The stage a stat change moves: 0 Atk, 1 Def, 2 Spe, 3 SpA, 4 SpD, 5 Acc,
+// 6 Eva (the decomp's STAT_* minus 1).
 constexpr int8_t& stage(Boosts& b, uint8_t stat) {
   switch (stat) {
   case 0: return b.atk;
@@ -1493,7 +1494,8 @@ constexpr int8_t& stage(Boosts& b, uint8_t stat) {
   case 2: return b.spe;
   case 3: return b.spa;
   case 4: return b.spd;
-  default: assert(stat == 5); return b.acc;
+  case 5: return b.acc;
+  default: assert(stat == 6); return b.eva;
   }
 }
 
@@ -2406,6 +2408,197 @@ constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   moveend(battle, player, m, options);
 }
 
+// ChangeStatBuffs (bsc:6937) raising the user's own stat by n, as the
+// self-targeting moves do (MOVE_EFFECT_AFFECTS_USER | STAT_CHANGE_ALLOW_PTR):
+// only the cap stops it, and a raise at +6 marks the move MISSED
+// (bsc:7097), which moveend reads. Returns the stages gained, which the
+// log's Boost carries: Showdown prints `-boost|...|0` for a primary raise
+// at the cap (sim/battle.ts:2083).
+constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
+  int8_t& b = stage(a.boosts, stat);
+  if (b >= 6) {
+    m.result |= MoveResult::MISSED;
+    return 0;
+  }
+  const int8_t gained = b + n > 6 ? int8_t(6 - b) : n;
+  b = int8_t(b + gained);
+  return gained;
+}
+
+// The stat and stages of a one-stat raise: setstatchanger in
+// BattleScript_EffectAttackUp and its siblings (bs1:475-489, 927-945).
+struct StatChange {
+  uint8_t stat;
+  int8_t n;
+};
+
+constexpr StatChange stat_up(Effect effect) {
+  switch (effect) {
+  case Effect::AttackUp: return {0, 1};
+  case Effect::AttackUp2: return {0, 2};
+  case Effect::DefenseUp: return {1, 1};
+  case Effect::DefenseUp2: return {1, 2};
+  case Effect::SpeedUp2: return {2, 2};
+  case Effect::SpecialAttackUp: return {3, 1};
+  case Effect::SpecialAttackUp2: return {3, 2};
+  case Effect::SpecialDefenseUp2: return {4, 2};
+  case Effect::EvasionUp: return {6, 1};
+  default: return {0, 0};
+  }
+}
+
+// The two stats of BattleScript_EffectCosmicPower, BulkUp, CalmMind and
+// DragonDance (bs1:2687-2800), raised by 1 each in this order; {0, 0} if
+// `effect` isn't one of them.
+struct StatPair {
+  uint8_t first;
+  uint8_t second;
+
+  constexpr bool any() const { return first != second; }
+};
+
+constexpr StatPair stat_pair(Effect effect) {
+  switch (effect) {
+  case Effect::CosmicPower: return {1, 4};
+  case Effect::BulkUp: return {0, 1};
+  case Effect::CalmMind: return {3, 4};
+  case Effect::DragonDance: return {0, 2};
+  default: return {0, 0};
+  }
+}
+
+// BattleScript_EffectStatUp (bs1:489) and the scripts that share its tail
+// after the canceler: Minimize sets its flag first (setminimize, bs1:1476),
+// Defense Curl after attackstring and ppreduce (setdefensecurlbit,
+// bs1:2014); neither undoes it when the raise fails. Showdown's boosts and
+// volatiles agree; it prints `-boost|...|0` at the cap where the cartridge
+// prints "won't go higher".
+template <typename O>
+constexpr void stat_up_move(Battle& battle, Player player, MoveState& m,
+                            O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  const Effect effect = get(m.move).effect;
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  if (effect == Effect::Minimize) a.volatiles.minimized = true;
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  if (effect == Effect::DefenseCurl) a.volatiles.defense_curl = true;
+  const StatChange c = effect == Effect::Minimize      ? StatChange{6, 1}
+                       : effect == Effect::DefenseCurl ? StatChange{1, 1}
+                                                       : stat_up(effect);
+  assert(c.n != 0);
+  raise(a, c.stat, c.n, m); // Log: Boost
+  moveend(battle, player, m, options);
+}
+
+// Cosmic Power, Bulk Up, Calm Mind and Dragon Dance (bs1:2687-2800): they
+// fail only when both stats are at +6 (BattleScript_CantRaiseMultipleStats,
+// FAILED); otherwise each stat is raised in turn, and one already at +6
+// marks the move MISSED as in raise(). Showdown raises the same stats in
+// the same order (the moves' `boosts`).
+template <typename O>
+constexpr void stat_pair_move(Battle& battle, Player player, MoveState& m,
+                              StatPair s, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  ActivePokemon& a = battle.side(player).active;
+  if (stage(a.boosts, s.first) >= 6 && stage(a.boosts, s.second) >= 6) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  raise(a, s.first, 1, m);  // Log: Boost
+  raise(a, s.second, 1, m); // Log: Boost
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectBellyDrum (bs1:1776), Cmd_maxattackhalvehp (bsc:8785):
+// it fails unless Attack is below +6 and HP is above half (at least 1);
+// then Attack goes to +6 and the user loses max HP / 2 (at least 1),
+// bypassing its Substitute. Showdown's Belly Drum is the same (data/moves.ts:
+// bellydrum; its directDamage floors the half). Log: SetBoost, then Damage.
+template <typename O>
+constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
+                          O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Side& side = battle.side(player);
+  const Pokemon& mon = side.get(1);
+  const uint32_t half = fraction(mon, 2);
+  if (side.active.boosts.atk >= 6 || mon.hp <= half) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  side.active.boosts.atk = 6;
+  // The user can't faint: its HP was above the half it loses.
+  passive_damage(battle, player, half, options);
+  moveend(battle, player, m, options);
+}
+
+// BattleScript_EffectCurse (bs1:1482).
+//
+// Not a Ghost type: the move targets the user. It fails only if Speed is at
+// -6 and Attack and Defense at +6; otherwise Speed falls by 1 (Mist and
+// Clear Body don't apply to Curse, bsc:6962) and Attack and Defense rise
+// by 1, each skipped at its cap (Attack or Defense at +6 marks it MISSED,
+// as in raise()). Showdown's gen4 Curse (data/mods/gen4/moves.ts:268) gives
+// the same boosts, spe -1, atk +1, def +1, in that order.
+//
+// A Ghost type (BattleScript_GhostCurse): it fails on the foe's
+// Substitute, a semi-invulnerable foe (accuracycheck with
+// NO_ACC_CALC_CHECK_LOCK_ON) or a foe already cursed (Cmd_cursetarget,
+// bsc:8468); otherwise the foe is cursed and the user loses max HP / 2 (at
+// least 1), bypassing its own Substitute, and may faint. Showdown agrees on
+// the Substitute (gen4 onModifyMove drops the effect), an existing curse
+// (onTryHit) and the half HP (directDamage). TODO(plan step 4): Protect
+// (Showdown's gen4 Curse has no protect flag; the decomp's accuracycheck
+// checks Protect, *(verify)*).
+template <typename O>
+constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  const bool ghost = has_type(a, Type::Ghost);
+  m.self = !ghost;
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+
+  if (!ghost) {
+    Boosts& b = a.boosts;
+    if (b.spe <= -6 && b.atk >= 6 && b.def >= 6) {
+      m.result |= MoveResult::FAILED;
+      return moveend(battle, player, m, options);
+    }
+    if (b.spe > -6) b.spe--; // Log: Boost (-1)
+    raise(a, 0, 1, m);       // Log: Boost
+    raise(a, 1, 1, m);       // Log: Boost
+    return moveend(battle, player, m, options);
+  }
+
+  ActivePokemon& t = battle.side(foe(player)).active;
+  if (t.volatiles.substitute) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  // NO_ACC_CALC_CHECK_LOCK_ON (Cmd_accuracycheck, bsc:1099): Lock-On, then
+  // only the semi-invulnerable check. Curse's accuracy is 0 in the data, so
+  // accuracy() doesn't apply.
+  // A miss goes to BattleScript_ButItFailed, so FAILED only.
+  if (t.volatiles.lock_on == 0 && t.volatiles.semi_invulnerable()) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (t.volatiles.cursed) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  t.volatiles.cursed = true; // Log: Start Curse, of the user
+  // Log: Damage (plain, as Showdown's directDamage from the move)
+  passive_damage(battle, player, fraction(battle.side(player).get(1), 2),
+                 options);
+  moveend(battle, player, m, options);
+}
+
 // Whether Sleep Talk can't call `move`, as Showdown's gen3 Sleep Talk: the
 // nosleeptalk and charge flags, which are the decomp's list
 // (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
@@ -2470,7 +2663,10 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
 constexpr bool handled(Effect effect) {
   return plain_hit(effect) || effect == Effect::Confuse ||
          primary_status(effect) != Secondary::None || effect == Effect::Rest ||
-         effect == Effect::Yawn || effect == Effect::SleepTalk;
+         effect == Effect::Yawn || effect == Effect::SleepTalk ||
+         stat_up(effect).n != 0 || stat_pair(effect).any() ||
+         effect == Effect::Minimize || effect == Effect::DefenseCurl ||
+         effect == Effect::BellyDrum || effect == Effect::Curse;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -2492,6 +2688,15 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Rest) return rest(battle, player, m, options);
   if (effect == Effect::Yawn) return yawn(battle, player, m, options);
   if (effect == Effect::SleepTalk) return sleep_talk(battle, player, m, options);
+  if (stat_up(effect).n != 0 || effect == Effect::Minimize ||
+      effect == Effect::DefenseCurl) {
+    return stat_up_move(battle, player, m, options);
+  }
+  if (const StatPair s = stat_pair(effect); s.any()) {
+    return stat_pair_move(battle, player, m, s, options);
+  }
+  if (effect == Effect::BellyDrum) return belly_drum(battle, player, m, options);
+  if (effect == Effect::Curse) return curse(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then

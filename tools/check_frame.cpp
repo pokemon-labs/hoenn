@@ -618,6 +618,101 @@ void check_status_moves() {
   }
 }
 
+// The stat moves: one-stat and two-stat raises at and below the cap,
+// Minimize, Belly Drum and both Curses. The foe only Splashes.
+void check_stat_moves() {
+  const auto after = [](helpers::Pokemon user, uint8_t slot, auto&& setup) {
+    Battle b = started({user}, {IDLE});
+    setup(b);
+    Null null{};
+    update(b, Choice::move(slot), Choice::move(1), null);
+    return b;
+  };
+  const auto none = [](Battle&) {};
+  const helpers::Pokemon dancer = {
+      .species = Species::Gyarados,
+      .moves = {Move::DragonDance, Move::SwordsDance, Move::CalmMind, Move::Minimize},
+      .ability = Ability::Intimidate,
+      .gender = Gender::Male,
+  };
+  // Calm Mind raises both stats and uses PP; Minimize sets its flag.
+  {
+    Battle b = after(dancer, 3, none);
+    CHECK(b.sides[0].active.boosts.spa == 1 && b.sides[0].active.boosts.spd == 1);
+    CHECK(b.sides[0].get(1).moves[2].pp == max_pp(Move::CalmMind, 3) - 1);
+    b = after(dancer, 4, none);
+    CHECK(b.sides[0].active.boosts.eva == 1 && b.sides[0].active.volatiles.minimized);
+  }
+  // Swords Dance from +5 gains one stage.
+  CHECK(after(dancer, 2, [](Battle& b) { b.sides[0].active.boosts.atk = 5; })
+            .sides[0].active.boosts.atk == 6);
+  // Dragon Dance at +6 Attack still raises Speed, but the move counts as
+  // missed (no landed move); at +6 in both it fails.
+  {
+    Battle b = after(dancer, 1, [](Battle& b) { b.sides[0].active.boosts.atk = 6; });
+    CHECK(b.sides[0].active.boosts.atk == 6 && b.sides[0].active.boosts.spe == 1);
+    CHECK(b.sides[0].active.last_landed_move == detail::UNAVAILABLE);
+    CHECK(after(dancer, 1, none).sides[0].active.last_landed_move == Move::DragonDance);
+    b = after(dancer, 1, [](Battle& b) {
+      b.sides[0].active.boosts.atk = 6;
+      b.sides[0].active.boosts.spe = 6;
+    });
+    CHECK(b.sides[0].active.boosts.atk == 6 && b.sides[0].active.boosts.spe == 6);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::DragonDance, 3) - 1);
+  }
+  helpers::Pokemon snorlax = SNORLAX;
+  snorlax.moves[0] = Move::Curse;
+  snorlax.moves[1] = Move::BellyDrum;
+  // Curse: Speed -1, Attack and Defense +1; at the caps it fails, and with
+  // Speed at -6 alone it still raises.
+  {
+    const Boosts& c = after(snorlax, 1, none).sides[0].active.boosts;
+    CHECK(c.spe == -1 && c.atk == 1 && c.def == 1);
+    Battle b = after(snorlax, 1, [](Battle& b) { b.sides[0].active.boosts.spe = -6; });
+    CHECK(b.sides[0].active.boosts.spe == -6 && b.sides[0].active.boosts.atk == 1);
+    b = after(snorlax, 1, [](Battle& b) {
+      b.sides[0].active.boosts.atk = 6;
+      b.sides[0].active.boosts.def = 6;
+      b.sides[0].active.boosts.spe = -6;
+    });
+    CHECK(b.sides[0].active.boosts.atk == 6 && b.sides[0].active.boosts.spe == -6);
+  }
+  // Belly Drum: +6 Attack for half the max HP; it fails at or below half.
+  {
+    Battle b = after(snorlax, 2, none);
+    const Pokemon& mon = b.sides[0].get(1);
+    CHECK(b.sides[0].active.boosts.atk == 6);
+    CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 2);
+    b = after(snorlax, 2, [](Battle& b) {
+      b.sides[0].get(1).hp = uint16_t(b.sides[0].get(1).stats.hp / 2);
+    });
+    CHECK(b.sides[0].active.boosts.atk == 0);
+  }
+  // Ghost Curse: the foe is cursed for half the user's max HP; a second
+  // Curse or a Substitute fails it at no cost.
+  {
+    const helpers::Pokemon gengar = {
+        .species = Species::Gengar,
+        .moves = {Move::Curse},
+        .ability = Ability::Levitate,
+        .gender = Gender::Male,
+    };
+    Battle b = after(gengar, 1, none);
+    const Pokemon& mon = b.sides[0].get(1);
+    CHECK(b.sides[1].active.volatiles.cursed);
+    CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 2);
+    CHECK(b.sides[0].active.boosts.atk == 0);
+    b = after(gengar, 1, [](Battle& b) { b.sides[1].active.volatiles.cursed = true; });
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
+    b = after(gengar, 1, [](Battle& b) {
+      b.sides[1].active.volatiles.substitute = true;
+      b.sides[1].active.substitute_hp = 10;
+    });
+    CHECK(!b.sides[1].active.volatiles.cursed);
+    CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
+  }
+}
+
 void check_residuals() {
   helpers::Pokemon plain = IDLE;
   plain.ability = Ability::ThickFat;
@@ -1307,6 +1402,7 @@ int main(int argc, char** argv) {
   check_confusion();
   check_confuse();
   check_status_moves();
+  check_stat_moves();
   check_residuals();
   check_items();
   check_move_abilities();
