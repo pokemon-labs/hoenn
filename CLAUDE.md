@@ -752,9 +752,12 @@ adapted (see Interface).
   fourth, as Showdown. Showdown's protect flag matches the decomp's except
   Counter and Mirror Coat (take Showdown's when written). Roar fixed:
   accuracy 100 and Protect, as Showdown's gen3. `tools/coverage`: 83%.
+- Done (2026-10-07): the Spikes move and the healing moves (Recover, Slack
+  Off, Soft-Boiled, Milk Drink, Morning Sun, Synthesis, Moonlight); the
+  decomp and Showdown agree. `tools/coverage`: 87%.
 - **Then:** the status moves by `tools/coverage`'s order
-  (Spikes, Focus Punch, Soft-Boiled, Recover, Baton
-  Pass, Wish, Leech Seed...). Uproar and Thrash (with the
+  (Focus Punch, Baton Pass, Wish, Leech Seed, Refresh,
+  Aromatherapy, Counter...). Uproar and Thrash (with the
   `WasUnableToUseMove` question, README decision 2) wait: no team in
   `teams/adv/` uses Thrash, Outrage, Petal Dance or Uproar.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its

@@ -948,6 +948,41 @@ void check_protect() {
   }
 }
 
+// The Spikes move (three layers, then failing) and the healing moves.
+void check_spikes_and_heals() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[0] = Move::Spikes;
+  user.moves[1] = Move::Recover;
+  user.moves[2] = Move::MorningSun;
+  {
+    Battle b = started({user}, {IDLE});
+    Null null{};
+    for (int i = 0; i < 4; i++) update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(b.sides[1].conditions.spikes == 3);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Spikes, 3) - 4);
+  }
+  const auto healed = [&](uint8_t slot, uint16_t hp, auto&& setup) {
+    Battle b = started({user}, {IDLE});
+    b.sides[0].get(1).hp = hp;
+    setup(b);
+    Null null{};
+    update(b, Choice::move(slot), Choice::move(1), null);
+    return b.sides[0].get(1).hp;
+  };
+  const auto none = [](Battle&) {};
+  const uint16_t max = started({user}, {IDLE}).sides[0].get(1).stats.hp;
+  CHECK(healed(2, 1, none) == 1 + max / 2);
+  CHECK(healed(2, max, none) == max);
+  CHECK(healed(3, 1, [](Battle& b) {
+          b.field.weather = Weather::Sun;
+          b.field.weather_turns = 5;
+        }) == 1 + 20 * max / 30);
+  CHECK(healed(3, 1, [](Battle& b) {
+          b.field.weather = Weather::Sandstorm;
+          b.field.weather_turns = 5;
+        }) == 1 + max / 4 - max / 16); // then sand's residual
+}
+
 void check_residuals() {
   helpers::Pokemon plain = IDLE;
   plain.ability = Ability::ThickFat;
@@ -1643,6 +1678,7 @@ int main(int argc, char** argv) {
   check_roar();
   check_substitute();
   check_protect();
+  check_spikes_and_heals();
   check_residuals();
   check_items();
   check_move_abilities();

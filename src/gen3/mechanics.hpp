@@ -2782,6 +2782,58 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// BattleScript_EffectSpikes (bs1:1544), Cmd_trysetspikes: a layer on the
+// foe's side, up to 3; at 3 it fails (BattleScript_FailedFromAtkString,
+// FAILED). Showdown's spikes condition agrees (onSideRestart fails at 3
+// layers). Pressure takes its extra PP (MOVE_TARGET_OPPONENTS_FIELD; Showdown's
+// mustpressure). Log: SideStart Spikes, or Fail.
+template <typename O>
+constexpr void spikes_move(Battle& battle, Player player, MoveState& m,
+                           O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  uint8_t& layers = battle.side(foe(player)).conditions.spikes;
+  if (layers >= 3) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  layers++;
+  moveend(battle, player, m, options);
+}
+
+// The healing moves: BattleScript_EffectRestoreHp (bs1:672; Recover, Slack
+// Off) and BattleScript_EffectSoftboiled (bs1:2027; Soft-Boiled, Milk
+// Drink), Cmd_tryhealhalfhealth: max HP / 2; BattleScript_EffectMorningSun
+// (bs1:1731; Morning Sun, Synthesis, Moonlight), Cmd_recoverbasedonsunlight:
+// 2/3 in sun, 1/4 in other weather, 1/2 without (the effective weather).
+// At least 1, bypassing the user's Substitute; at full HP it does nothing,
+// with no result flag (BattleScript_AlreadyAtFullHp). Showdown floors the
+// same fractions (gen < 5 in sim/battle-actions.ts:1199; the gen4 mod's
+// Morning Sun family, data/mods/gen4/moves.ts:940). Log: Heal, or Fail heal.
+template <typename O>
+constexpr void heal_move(Battle& battle, Player player, MoveState& m,
+                         O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Pokemon& mon = battle.side(player).get(1);
+  if (mon.hp == mon.stats.hp) return moveend(battle, player, m, options);
+  const Effect effect = get(m.move).effect;
+  uint32_t amount = mon.stats.hp / 2u;
+  if (effect == Effect::MorningSun || effect == Effect::Synthesis ||
+      effect == Effect::Moonlight) {
+    const Weather w = effective_weather(battle);
+    if (w == Weather::Sun) {
+      amount = 20u * mon.stats.hp / 30u;
+    } else if (w != Weather::None) {
+      amount = mon.stats.hp / 4u;
+    }
+  }
+  heal(mon, amount == 0 ? 1 : amount);
+  moveend(battle, player, m, options);
+}
+
 // The SLOTs p's bench can send in, as a mask (bit s - 1 for SLOT s): the
 // Pokémon present and not fainted.
 constexpr uint8_t bench(const Battle& battle, Player player) {
@@ -2909,6 +2961,13 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   m.drag = c.drag;
 }
 
+// The healing moves' effects (heal_move).
+constexpr bool heals(Effect effect) {
+  return effect == Effect::RestoreHp || effect == Effect::Softboiled ||
+         effect == Effect::MorningSun || effect == Effect::Synthesis ||
+         effect == Effect::Moonlight;
+}
+
 // Whether use_move runs the effect's script (tools/coverage counts these);
 // every other effect only uses PP for now.
 constexpr bool handled(Effect effect) {
@@ -2919,7 +2978,8 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Minimize || effect == Effect::DefenseCurl ||
          effect == Effect::BellyDrum || effect == Effect::Curse ||
          effect == Effect::Roar || effect == Effect::Substitute ||
-         effect == Effect::Protect || effect == Effect::Endure;
+         effect == Effect::Protect || effect == Effect::Endure ||
+         effect == Effect::Spikes || heals(effect);
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -2955,6 +3015,8 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Protect || effect == Effect::Endure) {
     return protect(battle, player, m, options);
   }
+  if (effect == Effect::Spikes) return spikes_move(battle, player, m, options);
+  if (heals(effect)) return heal_move(battle, player, m, options);
 
   // TODO(plan step 4): every other effect. Until then the move only uses
   // its PP (decided): the attack canceler, attackstring and ppreduce, then
