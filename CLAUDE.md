@@ -1073,7 +1073,7 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-3 and the guard), every failure a Beat Up or Rock Blast rare
   branch. Found by the comparison: Flash Fire's silent `-end` at
-  switch-out and faint. A mutation (two 3d strings) fails 43 of 200.
+  switch-out (not at a faint: fixed 2026-10-08, step 5 group 1). A mutation (two 3d strings) fails 43 of 200.
 - Done (2026-10-08): group 4 (`-sidestart`, `-sideend`, `-weather`;
   README "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of
   1000 (groups 1-4 and the guard), every failure a Beat Up or Rock Blast
@@ -1084,17 +1084,15 @@ adapted (see Interface).
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
 - **Resume here:** plan step 5, the remaining move groups, from group 1.
-  Group 1 is partly written (2026-10-08, WIP commit, builds, ctest
-  passes, not yet checked against Showdown): code paths for Twineedle,
-  Double Kick, Triple Kick, Facade, Revenge, Smelling Salt, Weather Ball,
-  Low Kick, Secret Power, Pay Day, Jump Kick and Hi Jump Kick, the
-  flinch hits and Ancient Power/Silver Wind. Review the diff, then write
-  synthetic teams carrying the group's moves (`tools/teams/group1.txt`,
-  gen3ou-legal) and check them with `check_showdown`. Target per group
-  (the user, 2026-10-08): 99% of 10k Showdown games match to the end;
-  follow Showdown wherever it differs from the cartridge, noting the
-  difference at the code. `scratch/run_group.sh N` (gitignored) runs the
-  whole check.
+  Group 1 (2026-10-08): written, plus Forecast (Weather Ball's only
+  gen3 user is Castform) and Minimize's always-hit for Stomp-likes.
+  Teams in `tools/teams/group1.txt` (5 teams; Needle Arm and Minimize
+  can't appear: Cacturne's Sand Veil and Minimize are banned in gen3ou).
+  200 games after fixes (Jump Kick crash HP wrap; Flash Fire's `-end` at a
+  faint; Jump Kick not crashing on a 0-HP hit): every one matched. The
+  full `scratch/run_group.sh 1` (10k games, soak, check_chance, the
+  teams/adv baseline) was started but not read: rerun it, check the 99%
+  target, then commit group 1 as done and start group 2.
   Deferred: the log buffer bound (`MAX_LOG_SIZE` is a placeholder 2048).
 - `check_showdown` doesn't build under clang (`json.hpp`'s incomplete
   `std::pair` and a `-Wbitwise-instead-of-logical` at the team setup);

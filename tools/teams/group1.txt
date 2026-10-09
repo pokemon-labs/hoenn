@@ -1,0 +1,279 @@
+=== [gen3ou] group1 weather ===
+
+Castform @ Leftovers
+Ability: Forecast
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Weather Ball
+- Sunny Day
+- Rain Dance
+- Thunderbolt
+
+Tyranitar @ Leftovers
+Ability: Sand Stream
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Rock Slide
+- Earthquake
+- Ancient Power
+- Fire Blast
+
+Glalie @ Leftovers
+Ability: Inner Focus
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Hail
+- Ice Beam
+- Explosion
+- Spikes
+
+Hitmontop @ Leftovers
+Ability: Intimidate
+EVs: 252 HP / 252 Atk / 4 Def
+Adamant Nature
+- Triple Kick
+- Revenge
+- Rapid Spin
+- Toxic
+
+Hitmonlee @ Choice Band
+Ability: Limber
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Hi Jump Kick
+- Jump Kick
+- Rock Slide
+- Double Kick
+
+Jolteon @ Leftovers
+Ability: Volt Absorb
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Thunderbolt
+- Thunder Wave
+- Baton Pass
+- Double Kick
+
+=== [gen3ou] group1 minimize ===
+
+Exeggutor @ Leftovers
+Ability: Chlorophyll
+EVs: 252 HP / 252 SpA / 4 SpD
+Modest Nature
+- Stomp
+- Ancient Power
+- Sleep Powder
+- Psychic
+
+Chansey @ Leftovers
+Ability: Natural Cure
+EVs: 252 HP / 252 Def / 4 SpD
+Bold Nature
+- Thunder Wave
+- Softboiled
+- Seismic Toss
+- Toxic
+
+Rhydon @ Choice Band
+Ability: Rock Head
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Stomp
+- Rock Slide
+- Earthquake
+- Megahorn
+
+Miltank @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 4 Atk / 252 Def
+Impish Nature
+- Stomp
+- Milk Drink
+- Body Slam
+- Curse
+
+Grumpig @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 252 SpA / 4 SpD
+Modest Nature
+- Extrasensory
+- Calm Mind
+- Rest
+- Sleep Talk
+
+Sableye @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 4 Def / 252 SpD
+Careful Nature
+- Astonish
+- Seismic Toss
+- Toxic
+- Knock Off
+
+=== [gen3ou] group1 fighting ===
+
+Hariyama @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Smelling Salts
+- Cross Chop
+- Rock Slide
+- Fake Out
+
+Machamp @ Leftovers
+Ability: Guts
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Low Kick
+- Revenge
+- Facade
+- Rock Slide
+
+Swellow @ Leftovers
+Ability: Guts
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Facade
+- Aerial Ace
+- Quick Attack
+- Endeavor
+
+Medicham @ Choice Band
+Ability: Pure Power
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Hi Jump Kick
+- Shadow Ball
+- Rock Slide
+- Brick Break
+
+Zangoose @ Leftovers
+Ability: Immunity
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Double Kick
+- Facade
+- Shadow Ball
+- Swords Dance
+
+Starmie @ Leftovers
+Ability: Natural Cure
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Surf
+- Thunderbolt
+- Thunder Wave
+- Recover
+
+=== [gen3ou] group1 bugs ===
+
+Beedrill @ Choice Band
+Ability: Swarm
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Twineedle
+- Swords Dance
+- Agility
+- Endeavor
+
+Ninjask @ Leftovers
+Ability: Speed Boost
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Silver Wind
+- Swords Dance
+- Substitute
+- Aerial Ace
+
+Persian @ Leftovers
+Ability: Limber
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Pay Day
+- Return
+- Shadow Ball
+- Hypnosis
+
+Marowak @ Thick Club
+Ability: Rock Head
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Bonemerang
+- Rock Slide
+- Swords Dance
+- Double-Edge
+
+Aerodactyl @ Choice Band
+Ability: Rock Head
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Ancient Power
+- Earthquake
+- Rock Slide
+- Double-Edge
+
+Celebi @ Leftovers
+Ability: Natural Cure
+EVs: 252 HP / 4 SpA / 252 SpD
+Calm Nature
+- Ancient Power
+- Leech Seed
+- Recover
+- Psychic
+
+=== [gen3ou] group1 secret ===
+
+Snorlax @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Secret Power
+- Curse
+- Earthquake
+- Rest
+
+Rapidash @ Leftovers
+Ability: Flash Fire
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Stomp
+- Double Kick
+- Fire Blast
+- Hidden Power [Grass]
+
+Sableye @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 4 Def / 252 SpD
+Careful Nature
+- Astonish
+- Night Shade
+- Toxic
+- Protect
+
+Raikou @ Leftovers
+Ability: Pressure
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Thunderbolt
+- Thunder Wave
+- Crunch
+- Calm Mind
+
+Sudowoodo @ Choice Band
+Ability: Rock Head
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Low Kick
+- Rock Slide
+- Earthquake
+- Explosion
+
+Ludicolo @ Leftovers
+Ability: Rain Dish
+EVs: 4 HP / 252 SpA / 252 Spe
+Modest Nature
+- Astonish
+- Surf
+- Ice Beam
+- Rain Dance

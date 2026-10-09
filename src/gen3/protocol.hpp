@@ -444,15 +444,14 @@ template <typename L> void cant(L& log, ID id, Cant reason, Move m = Move::None)
 // Queues the Faint of a Pokémon that just reached 0 HP (FaintQueue). After
 // its faint line, Showdown's faintMessages runs the Faint event, then the
 // ability's End: with `bond` its Destiny Bond takes the foe (-activate|P|
-// move: Destiny Bond), and with `flash_fire` the boost ends (-end|P|ability:
-// Flash Fire|[silent]).
+// move: Destiny Bond). Flash Fire's End prints nothing at 0 HP
+// (removeVolatile returns early, sim/pokemon.ts:2036).
 template <typename L>
-void faint(L& log, ID id, bool bond = false, bool flash_fire = false) {
+void faint(L& log, ID id, bool bond = false) {
   if constexpr (L::enabled) {
     auto& q = log.faints;
     if (q.written & (1u << id.bits)) return;
     if (bond) q.bond = uint16_t(q.bond | (1u << id.bits));
-    if (flash_fire) q.flash_fire = uint16_t(q.flash_fire | (1u << id.bits));
     for (uint8_t i = 0; i < q.n; i++) {
       if (q.ids[i] == id) return;
     }
@@ -475,15 +474,9 @@ template <typename L> void faints(L& log) {
         log.write_byte(q.ids[i].bits);
         log.write_byte(uint8_t(Activate::DestinyBond));
       }
-      if (q.flash_fire & (1u << q.ids[i].bits)) {
-        log.write(ArgType::End);
-        log.write_byte(q.ids[i].bits);
-        log.write_byte(uint8_t(End::FlashFire));
-      }
     }
     q.n = 0;
     q.bond = 0;
-    q.flash_fire = 0;
   }
 }
 
@@ -925,7 +918,7 @@ template <typename L> void tie(L& log) { log.write(ArgType::Tie); }
 // Ends the update's messages.
 template <typename L> void end(L& log) {
   if constexpr (L::enabled) {
-    assert(log.faints.n == 0 && log.faints.bond == 0 && log.faints.flash_fire == 0);
+    assert(log.faints.n == 0 && log.faints.bond == 0);
     log.faints.written = 0;
     log.write(ArgType::None);
   }

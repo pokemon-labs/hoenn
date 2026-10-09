@@ -707,6 +707,55 @@ constexpr void turn_cleanup(Battle& battle) {
   }
 }
 
+// Forecast, as Showdown's onWeatherChange (data/abilities.ts:1476): an
+// active Castform with Forecast takes the type of the effective weather
+// `w` (Fire in sun, Water in rain, Ice in hail, otherwise Normal). Showdown
+// runs it at Castform's own switch-in, after every weather change, and when
+// a Cloud Nine or Air Lock Pokémon leaves (its End); in gen3 one entering
+// doesn't (data/mods/gen4/abilities.ts:37), so Castform keeps its form
+// until the next change. The decomp's CastformDataTypeChange (util:2504)
+// also runs at the end of every move; this follows Showdown. The form is
+// kept as the type (no species change: Castform's forms share its stats).
+// Log: -formechange.
+template <typename O>
+constexpr void forecast(Battle& battle, Player p, Weather w, O& options) {
+  ActivePokemon& a = battle.side(p).active;
+  if (a.species != Species::Castform || a.ability != Ability::Forecast ||
+      battle.side(p).get(1).fainted()) {
+    return;
+  }
+  const Type t = w == Weather::Sun    ? Type::Fire
+                 : w == Weather::Rain ? Type::Water
+                 : w == Weather::Hail ? Type::Ice
+                                      : Type::Normal;
+  if (a.types[0] == t && a.types[1] == t) return;
+  a.types[0] = t;
+  a.types[1] = t;
+  protocol::forme_change(options.log, protocol::ident(battle, p), t);
+}
+
+// Showdown's eachEvent('WeatherChange'): Forecast on both sides, in Speed
+// order (a tie's coin only orders the log). `leaving`, if set, is a Pokémon
+// whose Cloud Nine or Air Lock is ending, so it no longer suppresses.
+template <typename O>
+constexpr void weather_change(Battle& battle, O& options,
+                              std::optional<Player> leaving = std::nullopt) {
+  const bool p1 = battle.sides[0].active.species == Species::Castform;
+  const bool p2 = battle.sides[1].active.species == Species::Castform;
+  if (!p1 && !p2) return;
+  Weather w = effective_weather(battle);
+  if (leaving) {
+    const Side& other = battle.side(foe(*leaving));
+    const Ability ab = other.active.ability;
+    const bool suppressed =
+        (ab == Ability::CloudNine || ab == Ability::AirLock) && !other.get(1).fainted();
+    w = suppressed ? Weather::None : battle.field.weather;
+  }
+  const Player first = p1 && p2 ? log_order(battle) : p1 ? Player::P1 : Player::P2;
+  forecast(battle, first, w, options);
+  forecast(battle, foe(first), w, options);
+}
+
 // p's active Pokémon has just reached 0 HP: cleareffectsonfaint (bsc), which
 // clears its status, then FaintClearSetData (main:3264). The Pokémon stays
 // in the active slot until its replacement switches in, so it keeps its
@@ -719,8 +768,7 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
   Pokemon& mon = side.get(1);
   assert(mon.fainted());
-  protocol::faint(options.log, protocol::ident(battle, player), false,
-                  side.active.volatiles.flash_fire);
+  protocol::faint(options.log, protocol::ident(battle, player));
   mon.status = Status::none();
 
   ActivePokemon& a = side.active;
@@ -735,6 +783,10 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   a.types[1] = get(a.species).types[1];
   a.ability = kept.ability;
   a.first_turn = 2;
+  // Showdown's faintMessages runs the ability's End.
+  if (a.ability == Ability::CloudNine || a.ability == Ability::AirLock) {
+    weather_change(battle, options);
+  }
 
   ActivePokemon& f = battle.side(foe(player)).active;
   f.volatiles.escape_prevention = false;
@@ -1109,8 +1161,12 @@ constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
       field.weather_turns = 0;
       field.permanent = true;
       protocol::weather_ability(options.log, w, a.ability, protocol::ident(battle, player));
+      weather_change(battle, options);
     }
     return;
+  }
+  if (a.ability == Ability::Forecast) {
+    return forecast(battle, player, effective_weather(battle), options);
   }
   if (a.ability == Ability::Intimidate) return intimidate(battle, player, options);
   if (a.ability == Ability::Trace) {
@@ -1230,6 +1286,10 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   // ends with a silent -end.
   if (side.active.volatiles.flash_fire) {
     protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::FlashFire);
+  }
+  // Cloud Nine and Air Lock's End lets the foe's Castform see the weather.
+  if (side.active.ability == Ability::CloudNine || side.active.ability == Ability::AirLock) {
+    weather_change(battle, options, player);
   }
   // Showdown's gen3 skippedTime (README, field map): the Sleep Talk and
   // Snore turns go back on the sleep counter, and off the public count.
@@ -1912,6 +1972,10 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   if (m.pursuing) return 100;
   // Lock-On and Mind Reader.
   if (f.volatiles.lock_on != 0) return 100;
+  // Stomp, Astonish, Needle Arm and Extrasensory into a minimized target, as
+  // Showdown's minimize condition (onAccuracy, its gen3 minimize flags); the
+  // decomp only doubles their damage.
+  if (f.volatiles.minimized && data.effect == Effect::FlinchMinimizeHit) return 100;
   if ((weather == Weather::Rain && data.effect == Effect::Thunder) ||
       data.effect == Effect::AlwaysHit || data.effect == Effect::VitalThrow) {
     return 100;
@@ -2064,7 +2128,7 @@ constexpr void log_hit(const Battle& battle, Player player, const MoveState& m,
   // Bond applies.
   if (mon.fainted()) {
     const Volatiles& v = battle.side(target).active.volatiles;
-    protocol::faint(options.log, protocol::ident(battle, target), v.destiny_bond, v.flash_fire);
+    protocol::faint(options.log, protocol::ident(battle, target), v.destiny_bond);
   }
 }
 
@@ -3042,6 +3106,7 @@ constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
                        protocol::Activate::FocusBand);
     d = user.hp - 1u;
   }
+  if (d > user.hp) d = user.hp;
   user.hp = uint16_t(user.hp - d);
   protocol::damage(options.log, protocol::ident(battle, player), user);
   if (user.fainted()) faint(battle, player, options);
@@ -3177,8 +3242,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // Showdown faints the user here (selfdestruct 'always'), so its Faint
     // comes before the target's.
     user.hp = 0;
-    protocol::faint(options.log, protocol::ident(battle, player), false,
-                    battle.side(player).active.volatiles.flash_fire);
+    protocol::faint(options.log, protocol::ident(battle, player));
   }
 
   Side& side = battle.side(player);
@@ -3547,14 +3611,6 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     protocol::damage(options.log, protocol::ident(battle, player), user,
                      protocol::Damage::Recoil);
     if (user.fainted()) faint(battle, player, options);
-  }
-
-  // A Jump Kick that took no HP (the target at 1 HP kept there by Focus
-  // Band or Endure) returns 0 from Showdown's moveHit, which counts as a
-  // failure: it crashes too (after the target's contact ability there,
-  // before it here).
-  if (effect == Effect::RecoilIfMiss && m.damaged && m.hp_dealt == 0) {
-    crash(battle, player, m, h, options);
   }
 
   // tryfaintmon
@@ -4630,6 +4686,7 @@ constexpr void weather_move(Battle& battle, Player player, MoveState& m,
   field.weather_turns = 5;
   field.permanent = false;
   protocol::weather(options.log, w);
+  weather_change(battle, options);
   moveend(battle, player, m, options);
 }
 
@@ -5449,6 +5506,7 @@ constexpr Flow field_residuals(Battle& battle, O& options) {
   if (!field.permanent && --field.weather_turns == 0) {
     field.weather = Weather::None;
     protocol::weather(options.log, Weather::None);
+    weather_change(battle, options);
     return std::nullopt;
   }
   const Weather weather = field.weather;

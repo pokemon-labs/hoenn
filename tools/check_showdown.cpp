@@ -447,7 +447,22 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
                ": item " + std::string(item_id(p.item)) + ", Showdown " +
                m[5].string + ";";
       }
-      if (id != m[0].string || p.hp != m[1].integer() ||
+      // Castform's forme is our active type (Forecast, mechanics.hpp).
+      std::string sd_id = m[0].string;
+      if (sd_id.starts_with("castform")) {
+        if (slot == 1 && !p.fainted()) {
+          const Type t = battle.sides[s].active.types[0];
+          const char* forme = t == Type::Fire    ? "castformsunny"
+                              : t == Type::Water ? "castformrainy"
+                              : t == Type::Ice   ? "castformsnowy"
+                                                 : "castform";
+          if (sd_id != forme) {
+            why += std::string(" ") + side + ": forme " + forme + ", Showdown " + sd_id + ";";
+          }
+        }
+        sd_id = "castform";
+      }
+      if (id != sd_id || p.hp != m[1].integer() ||
           p.stats.hp != m[2].integer() || status_id(p) != m[3].string) {
         char buf[200];
         std::snprintf(buf, sizeof(buf),
