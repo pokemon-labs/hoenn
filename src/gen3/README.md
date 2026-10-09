@@ -510,8 +510,7 @@ Decided (2026-10-08):
   faint), `-prepare` and `-anim` (Solar Beam). 3b (done 2026-10-08): a
   sleep names its move and the other statuses their ability (Showdown's
   gen3 `slp` and conditions); every cure is `[msg]` but Heal Bell's
-  `[silent]` (benched Pokémon print `p1: NAME`) and Natural Cure's. Planned: 3b, major status
-  (`-status`, `-curestatus`, `-cureteam`); 3c, boosts; 3d, volatiles
+  `[silent]` (benched Pokémon print `p1: NAME`) and Natural Cure's. Then 3c, boosts; 3d, volatiles
   (`-start`, `-end`, the other `-activate`s, `-singleturn`, `-singlemove`,
   `-sethp`, `-fieldactivate`). Each subgroup writes every form of its
   types, those from items and abilities too (Synchronize's `-status`,
