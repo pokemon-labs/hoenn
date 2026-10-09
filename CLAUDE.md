@@ -575,6 +575,33 @@ feels like progress; every later mechanic inherits the frame.
 4. Trace the hit backbone and the dispatchers, then add effects by group,
    starting with what `teams/` uses. The log comes last (see Interface:
    opcodes, a text formatter, Showdown's omniscient log).
+5. The rest of the moves (decided 2026-10-08), after the log: 97 left
+   (99 unwritten, less Follow Me and Helping Hand). `tools/coverage` is
+   100% on `teams/adv/`, so each group needs synthetic teams carrying its
+   moves for `check_showdown`. Groups, in order:
+   1. Hits with a simple extra: Stomp, Astonish, Needle Arm, Extrasensory,
+      Ancient Power, Silver Wind, Twineedle, Double Kick, Bonemerang,
+      Triple Kick, Facade, Revenge, Smelling Salt, Weather Ball, Low Kick,
+      Secret Power, Pay Day, Jump Kick, Hi Jump Kick.
+   2. Fixed and variable damage, OHKOs: Sonic Boom, Dragon Rage, Super
+      Fang, Psywave, Present, Magnitude, Fissure, Horn Drill, Guillotine,
+      Sheer Cold.
+   3. Charge, semi-invulnerable, recharge: Fly, Dig, Dive, Bounce, Razor
+      Wind, Skull Bash, Sky Attack, Hyper Beam.
+   4. Locked moves (needs the `WasUnableToUseMove` decision, README
+      decision 2): Thrash, Petal Dance, Outrage, Uproar, Rollout, Ice Ball,
+      Fury Cutter, Rage, Bide.
+   5. Trapping and delayed damage: Bind, Wrap, Clamp, Fire Spin,
+      Whirlpool, Sand Tomb, Future Sight, Doom Desire, Stockpile, Spit Up,
+      Swallow.
+   6. Volatiles: Swagger, Flatter, Teeter Dance, Attract, Disable, Torment,
+      Spite, Foresight, Odor Sleuth, Lock-On, Mind Reader, Focus Energy,
+      Charge, Ingrain, Grudge.
+   7. Side and field: Safeguard, Mist, Mud Sport, Water Sport, Magic Coat,
+      Snatch.
+   8. Copying, calling, swapping: Metronome, Mirror Move, Assist, Nature
+      Power, Sketch, Transform, Trick, Role Play, Skill Swap, Recycle,
+      Conversion, Conversion 2, Camouflage, Dream Eater, Teleport, Splash.
 
 **Testing.**
 
@@ -1056,9 +1083,8 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-  Uncommitted.
-- **Resume here:** derive the log buffer bound (`MAX_LOG_SIZE` is a
-  placeholder 2048).
+- **Resume here:** plan step 5, the remaining move groups, from group 1.
+  Deferred: the log buffer bound (`MAX_LOG_SIZE` is a placeholder 2048).
 - `check_showdown` doesn't build under clang (`json.hpp`'s incomplete
   `std::pair` and a `-Wbitwise-instead-of-logical` at the team setup);
   g++ builds it. Predates group 3d.
