@@ -519,9 +519,23 @@ Decided (2026-10-08):
   self and secondary boosts print nothing at the cap; a 0 never has
   `[from] item`. Curse's order is spe, atk, def (the base `onTryHit`
   overwrites gen4's `self`). Belly Drum's `-damage` comes before its
-  `-setboost`. Then 3d, volatiles
-  (`-start`, `-end`, the other `-activate`s, `-singleturn`, `-singlemove`,
-  `-sethp`, `-fieldactivate`). Each subgroup writes every form of its
+  `-setboost`. 3d (done 2026-10-08), volatiles (`-start`, `-end`, the
+  other `-activate`s, `-singleturn`, `-singlemove`, `-sethp`,
+  `-fieldactivate`), every `-activate` now compared: a Substitute logs
+  `-activate|[damage]` or `-end` at the hit (the volatile stays until
+  moveend); Endure, then False Swipe (silent), then Focus Band, as
+  Showdown's onDamage priorities; Destiny Bond's `-activate` and Flash
+  Fire's silent `-end` (the ability's End event) follow the fainted
+  Pokémon's `faint` line, so they ride in the `FaintQueue`, and Flash
+  Fire's `-end` also comes at every switch-out; a cured sleep ends a
+  Nightmare with `-end|[silent]` after the `-curestatus` (`wake()`);
+  Perish Song prints `perish3|[silent]` per Pokémon, then
+  `-fieldactivate`, and each count prints the timer before its step;
+  Psych Up's copied Focus Energy is `[silent]`; Oblivious and Mental Herb
+  print Attract's silent `-end`, then their own; Beat Up prints no
+  `-activate` (Beat Up Nicknames Mod is on). Forms whose moves aren't
+  written (binding, Lock-On, Spite, Snatch, Uproar...) have reasons but
+  no site; Spite and Skill Swap have neither yet. Each subgroup writes every form of its
   types, those from items and abilities too (Synchronize's `-status`,
   Salac's `-boost`); the `-ability` and `-enditem` lines beside them wait
   for group 5. Their reason enums cover the whole gen3 inventory above.

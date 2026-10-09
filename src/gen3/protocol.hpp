@@ -12,7 +12,16 @@
 //   Miss         source, target
 //   Fail         ident, Fail [, ability for Unboost and Ability]
 //   Immune       ident, Immune [, ability for Ability and Confusion]
-//   Activate     ident, Activate
+//   Activate     ident, Activate, then: Ability: ability; Magnitude: n;
+//                activate_move: move u16; activate_of: of (move first)
+//   Start        ident, Start, then: Curse..AttractCuteCharm: of;
+//                Disable: move u16; TypeChange, ColorChange: type;
+//                Stockpile, Perish: n
+//   End          ident, End [, move u16 for end_move]
+//   SingleTurn   ident, SingleTurn
+//   SingleMove   ident, SingleMove
+//   FieldActivate FieldActivate
+//   SetHP        ident, HP, silent ([from] move: Pain Split)
 //   Switch, Drag ident, species u16, gender, level, HP, SwitchFrom
 //   Cant         ident, Cant [, move u16 for the reasons that name one]
 //   Faint        ident
@@ -179,15 +188,135 @@ enum class Cure : uint8_t {
   Move,        // |[from] move: M, + move: a thawing move
 };
 
-// -activate's effect. Only the ones that stop a move so far (README,
-// "Protocol": the hit results), and Heal Bell's.
+// -activate's effect: the gen3 inventory (README, "Protocol"). Those marked
+// + carry more bytes after the effect.
 enum class Activate : uint8_t {
-  Protect,     // |Protect
-  Safeguard,   // |move: Safeguard
-  Mist,        // |move: Mist
-  SuctionCups, // |ability: Suction Cups
-  Ingrain,     // |move: Ingrain
-  HealBell,    // |move: Heal Bell
+  Protect,         // |Protect
+  Safeguard,       // |move: Safeguard
+  Mist,            // |move: Mist
+  SuctionCups,     // |ability: Suction Cups
+  Ingrain,         // |move: Ingrain
+  HealBell,        // |move: Heal Bell
+  SubstituteDamage,// |Substitute|[damage]
+  Confusion,       // |confusion
+  Trapped,         // |trapped
+  FocusBand,       // |item: Focus Band
+  DestinyBond,     // |move: Destiny Bond
+  Endure,          // |move: Endure
+  Pursuit,         // |move: Pursuit
+  Bide,            // |move: Bide
+  // + an ability: |ability: A (Sticky Hold, Shed Skin, the status cures)
+  Ability,
+  // + a move.
+  Mimic,  // |move: Mimic|M
+  Grudge, // |move: Grudge|M
+  Leppa,  // |item: Leppa Berry|M|[consumed]
+  // + of.
+  Attract,    // |move: Attract|[of] P
+  LockOn,     // |move: Lock-On|[of] P
+  MindReader, // |move: Mind Reader|[of] P
+  Snatch,     // |move: Snatch|[of] P
+  Trick,      // |move: Trick|[of] P
+  // + a move, then of: |move: M|[of] P (a binding move's start)
+  Bound,
+  // + a number: |move: Magnitude|N
+  Magnitude,
+};
+
+constexpr bool activate_move(Activate a) {
+  return a == Activate::Mimic || a == Activate::Grudge || a == Activate::Leppa ||
+         a == Activate::Bound;
+}
+constexpr bool activate_of(Activate a) {
+  return (a >= Activate::Attract && a <= Activate::Trick) || a == Activate::Bound;
+}
+
+// -start's effect. Those marked + carry more bytes after the effect.
+enum class Start : uint8_t {
+  Confusion,        // |confusion
+  ConfusionFatigue, // |confusion|[fatigue]
+  Substitute,       // |Substitute
+  LeechSeed,        // |move: Leech Seed
+  Nightmare,        // |Nightmare
+  Encore,           // |Encore
+  Taunt,            // |move: Taunt
+  Torment,          // |Torment
+  Foresight,        // |Foresight
+  Imprison,         // |move: Imprison
+  Ingrain,          // |move: Ingrain
+  MudSport,         // |Mud Sport
+  WaterSport,       // |move: Water Sport
+  Charge,           // |Charge
+  Uproar,           // |Uproar
+  UproarUpkeep,     // |Uproar|[upkeep]
+  Bide,             // |move: Bide
+  FlashFire,        // |ability: Flash Fire
+  FocusEnergy,      // |move: Focus Energy
+  FocusEnergySilent,// |move: Focus Energy|[silent] (Psych Up)
+  FutureSight,      // |Future Sight
+  DoomDesire,       // |Doom Desire
+  PerishSilent,     // |perish3|[silent] (Perish Song itself)
+  // + of.
+  Curse,            // |Curse|[of] P
+  Yawn,             // |move: Yawn|[of] P
+  AttractCuteCharm, // |Attract|[from] ability: Cute Charm|[of] P
+  // + a move.
+  Disable, // |Disable|M
+  // + a type.
+  TypeChange,  // |typechange|T
+  ColorChange, // |typechange|T|[from] ability: Color Change
+  // + a number.
+  Stockpile, // |stockpileN
+  Perish,    // |perishN
+};
+
+// -end's effect. Those marked + carry more bytes after the effect.
+enum class End : uint8_t {
+  Confusion,          // |confusion
+  Substitute,         // |Substitute
+  LeechSeedRapidSpin, // |Leech Seed|[from] move: Rapid Spin|[of] P (itself)
+  Nightmare,          // |Nightmare|[silent]
+  Encore,             // |Encore
+  Disable,            // |Disable
+  Taunt,              // |move: Taunt|[silent] (gen3's)
+  Torment,            // |Torment
+  Yawn,               // |move: Yawn|[silent]
+  Attract,            // |Attract|[silent]
+  AttractOblivious,   // |move: Attract|[from] ability: Oblivious
+  AttractMentalHerb,  // |move: Attract|[from] item: Mental Herb
+  Uproar,             // |Uproar
+  Bide,               // |move: Bide
+  Stockpile,          // |Stockpile
+  Charge,             // |Charge|[silent]
+  FlashFire,          // |ability: Flash Fire|[silent] (the ability's End)
+  // + a move.
+  Bound,       // |M|[partiallytrapped]
+  BoundSilent, // |M|[partiallytrapped]|[silent] (Substitute frees it)
+  FutureMove,  // |move: M (Future Sight or Doom Desire hits)
+};
+
+constexpr bool end_move(End e) { return e >= End::Bound; }
+
+// -singleturn's effect.
+enum class SingleTurn : uint8_t {
+  Protect,    // |Protect (Protect and Detect)
+  Endure,     // |move: Endure
+  FocusPunch, // |move: Focus Punch
+  Snatch,     // |Snatch
+  MagicCoat,  // |move: Magic Coat
+};
+
+// -singlemove's effect.
+enum class SingleMove : uint8_t {
+  DestinyBond, // |Destiny Bond
+  Grudge,      // |Grudge
+  Rage,        // |Rage
+};
+
+// -fieldactivate's effect.
+enum class FieldActivate : uint8_t {
+  PerishSong, // |move: Perish Song
+  PayDay,     // |move: Pay Day
 };
 
 // The ID of p's active Pokémon: its party position, which never changes.
@@ -261,11 +390,18 @@ template <typename L> void cant(L& log, ID id, Cant reason, Move m = Move::None)
   }
 }
 
-// Queues the Faint of a Pokémon that just reached 0 HP (FaintQueue).
-template <typename L> void faint(L& log, ID id) {
+// Queues the Faint of a Pokémon that just reached 0 HP (FaintQueue). After
+// its faint line, Showdown's faintMessages runs the Faint event, then the
+// ability's End: with `bond` its Destiny Bond takes the foe (-activate|P|
+// move: Destiny Bond), and with `flash_fire` the boost ends (-end|P|ability:
+// Flash Fire|[silent]).
+template <typename L>
+void faint(L& log, ID id, bool bond = false, bool flash_fire = false) {
   if constexpr (L::enabled) {
     auto& q = log.faints;
     if (q.written & (1u << id.bits)) return;
+    if (bond) q.bond = uint16_t(q.bond | (1u << id.bits));
+    if (flash_fire) q.flash_fire = uint16_t(q.flash_fire | (1u << id.bits));
     for (uint8_t i = 0; i < q.n; i++) {
       if (q.ids[i] == id) return;
     }
@@ -283,8 +419,20 @@ template <typename L> void faints(L& log) {
       log.write(ArgType::Faint);
       log.write_byte(q.ids[i].bits);
       q.written = uint16_t(q.written | (1u << q.ids[i].bits));
+      if (q.bond & (1u << q.ids[i].bits)) {
+        log.write(ArgType::Activate);
+        log.write_byte(q.ids[i].bits);
+        log.write_byte(uint8_t(Activate::DestinyBond));
+      }
+      if (q.flash_fire & (1u << q.ids[i].bits)) {
+        log.write(ArgType::End);
+        log.write_byte(q.ids[i].bits);
+        log.write_byte(uint8_t(End::FlashFire));
+      }
     }
     q.n = 0;
+    q.bond = 0;
+    q.flash_fire = 0;
   }
 }
 
@@ -337,9 +485,122 @@ void immune(L& log, ID id, Immune reason = Immune::None, Ability a = Ability::No
 
 template <typename L> void activate(L& log, ID id, Activate effect) {
   if constexpr (L::enabled) {
+    assert(effect < Activate::Ability);
     log.write(ArgType::Activate);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(effect));
+  }
+}
+
+// -activate|P|ability: A.
+template <typename L> void activate_ability(L& log, ID id, Ability a) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Activate);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(Activate::Ability));
+    log.write_byte(uint8_t(a));
+  }
+}
+
+// -activate with a move, an of, or both (activate_move, activate_of).
+template <typename L>
+void activate_with(L& log, ID id, Activate effect, Move m, ID of = NO_ID) {
+  if constexpr (L::enabled) {
+    assert(activate_move(effect) || activate_of(effect));
+    log.write(ArgType::Activate);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(effect));
+    if (activate_move(effect)) detail::move_id(log, m);
+    if (activate_of(effect)) log.write_byte(of.bits);
+  }
+}
+
+// -start: the plain effects, or with `of` for Curse, Yawn and Cute Charm's
+// Attract.
+template <typename L> void start(L& log, ID id, Start effect, ID of = NO_ID) {
+  if constexpr (L::enabled) {
+    assert(effect < Start::Disable);
+    assert((effect >= Start::Curse) == (of != NO_ID));
+    log.write(ArgType::Start);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(effect));
+    if (effect >= Start::Curse) log.write_byte(of.bits);
+  }
+}
+
+// -start|P|Disable|M.
+template <typename L> void start_disable(L& log, ID id, Move m) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Start);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(Start::Disable));
+    detail::move_id(log, m);
+  }
+}
+
+// -start|P|typechange|T, plain or from Color Change.
+template <typename L> void start_type(L& log, ID id, gen3::Type t, bool color_change) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Start);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(color_change ? Start::ColorChange : Start::TypeChange));
+    log.write_byte(uint8_t(t));
+  }
+}
+
+// -start|P|perishN (n 0-3) or -start|P|stockpileN (n 1-3).
+template <typename L> void start_count(L& log, ID id, Start effect, uint8_t n) {
+  if constexpr (L::enabled) {
+    assert(effect == Start::Perish || effect == Start::Stockpile);
+    assert(n <= 3);
+    log.write(ArgType::Start);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(effect));
+    log.write_byte(n);
+  }
+}
+
+// -end, with the move for the binding ends and a future move's hit.
+template <typename L>
+void end_effect(L& log, ID id, End effect, Move m = Move::None) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::End);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(effect));
+    if (end_move(effect)) detail::move_id(log, m);
+  }
+}
+
+template <typename L> void single_turn(L& log, ID id, SingleTurn effect) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::SingleTurn);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(effect));
+  }
+}
+
+template <typename L> void single_move(L& log, ID id, SingleMove effect) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::SingleMove);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(effect));
+  }
+}
+
+template <typename L> void field_activate(L& log, FieldActivate effect) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::FieldActivate);
+    log.write_byte(uint8_t(effect));
+  }
+}
+
+// -sethp|P|HP|[from] move: Pain Split, with [silent] for the target's.
+template <typename L> void set_hp(L& log, ID id, const Pokemon& mon, bool silent) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::SetHP);
+    log.write_byte(id.bits);
+    detail::hp(log, mon);
+    log.write_byte(silent);
   }
 }
 
@@ -504,7 +765,7 @@ template <typename L> void tie(L& log) { log.write(ArgType::Tie); }
 // Ends the update's messages.
 template <typename L> void end(L& log) {
   if constexpr (L::enabled) {
-    assert(log.faints.n == 0);
+    assert(log.faints.n == 0 && log.faints.bond == 0 && log.faints.flash_fire == 0);
     log.faints.written = 0;
     log.write(ArgType::None);
   }

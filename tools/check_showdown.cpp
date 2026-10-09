@@ -78,8 +78,7 @@ std::string kind(const std::string& line) {
 }
 
 // The message types written so far, compared on both sides: group 1, the
-// frame, group 2, the hit results, and group 3a, the rest of them (CLAUDE.md,
-// "Next session").
+// frame, group 2, the hit results, and group 3 (CLAUDE.md, "Next session").
 const std::set<std::string> LOGGED = {
     "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",
@@ -89,27 +88,12 @@ const std::set<std::string> LOGGED = {
     "-status", "-curestatus", "-cureteam",
     // Group 3c: boosts.
     "-boost", "-unboost", "-setboost", "-copyboost", "-clearallboost", "-clearnegativeboost",
-};
-
-// The -activate effects written so far: those that stop a move (group 2),
-// and Heal Bell's (3b).
-const std::set<std::string> ACTIVATED = {
-    "Protect", "move: Safeguard", "move: Mist", "ability: Suction Cups", "move: Ingrain",
-    "move: Heal Bell",
+    // Group 3d: volatiles.
+    "-start", "-end", "-singleturn", "-singlemove", "-sethp", "-fieldactivate",
 };
 
 // Whether a line of a LOGGED type is compared.
-bool logged(const std::string& line) {
-  const std::string k = kind(line);
-  if (!LOGGED.count(k)) return false;
-  if (k != "-activate") return true;
-  // |-activate|POKEMON|EFFECT...
-  const size_t a = line.find('|', 1), b = line.find('|', a + 1);
-  if (b == std::string::npos) return false;
-  const size_t c = line.find('|', b + 1);
-  return ACTIVATED.count(line.substr(b + 1, c == std::string::npos ? std::string::npos : c - b - 1));
-}
-
+bool logged(const std::string& line) { return LOGGED.count(kind(line)) != 0; }
 
 // The units of `lines` whose type is in LOGGED.
 std::vector<Unit> units(const std::vector<std::string>& lines) {

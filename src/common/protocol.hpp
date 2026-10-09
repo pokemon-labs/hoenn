@@ -173,11 +173,15 @@ struct NullWriter {
 // (a recoil after a KO). At most the two active Pokémon wait. `written`
 // has bit ID::bits set for each Faint written this update, so a Pokémon
 // queued again (the engine's faint() after an early queue) isn't written
-// twice.
+// twice. `bond` and `flash_fire` have the bit set for each queued Pokémon
+// whose Destiny Bond takes the foe or whose Flash Fire boost ends, which the
+// gen3 log writes after its Faint.
 struct FaintQueue {
   ID ids[2];
   uint8_t n;
   uint16_t written;
+  uint16_t bond;
+  uint16_t flash_fire;
 };
 
 struct NoFaintQueue {};

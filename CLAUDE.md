@@ -1041,11 +1041,19 @@ adapted (see Interface).
   Following Showdown (the user, 2026-10-08): the stat berries are eaten
   at +6, Lansat under Focus Energy, Starf with every stat at +6
   (`data/items.ts:3392`, 3267, 6003; the decomp keeps them).
-- **Resume here: group 3d** (volatiles). Markers left: Psych Up's and
-  Lansat's Focus Energy `-start`. Then side conditions and weather, items and abilities
-  (White Herb's and the berries' `-enditem` come before their boost
-  lines), then derive the buffer bound (`MAX_LOG_SIZE` is a placeholder
-  2048).
+- Done (2026-10-08): group 3d (`-start`, `-end`, every `-activate`,
+  `-singleturn`, `-singlemove`, `-sethp`, `-fieldactivate`; README
+  "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
+  (groups 1-3 and the guard), every failure a Beat Up or Rock Blast rare
+  branch. Found by the comparison: Flash Fire's silent `-end` at
+  switch-out and faint. A mutation (two 3d strings) fails 43 of 200.
+- **Resume here: group 4** (side conditions and weather), then 5 (items
+  and abilities: White Herb's and the berries' `-enditem` come before
+  their boost lines), then derive the buffer bound (`MAX_LOG_SIZE` is a
+  placeholder 2048).
+- `check_showdown` doesn't build under clang (`json.hpp`'s incomplete
+  `std::pair` and a `-Wbitwise-instead-of-logical` at the team setup);
+  g++ builds it. Predates group 3d.
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.

@@ -145,6 +145,15 @@ class Formatter {
   }
 
   static std::string move_name(Move m) { return std::string(display::MOVE_NAMES[uint16_t(m)]); }
+  // Showdown's type names; the decomp's Mystery is ???.
+  static std::string type_name(uint8_t t) {
+    static constexpr const char* NAMES[TYPES] = {
+        "Normal", "Fighting", "Flying",   "Poison",  "Ground", "Rock",
+        "Bug",    "Ghost",    "Steel",    "???",     "Fire",   "Water",
+        "Grass",  "Electric", "Psychic",  "Ice",     "Dragon", "Dark"};
+    assert(t < TYPES);
+    return NAMES[t];
+  }
   static std::string ability_name(Ability a) {
     return std::string(display::ABILITY_NAMES[uint8_t(a)]);
   }
@@ -347,15 +356,152 @@ class Formatter {
     case ArgType::Activate: {
       std::string s = "|-activate|" + ident(ID{r.byte()}) + "|";
       using A = protocol::Activate;
-      switch (A(r.byte())) {
+      const A effect = A(r.byte());
+      switch (effect) {
       case A::Protect: s += "Protect"; break;
       case A::Safeguard: s += "move: Safeguard"; break;
       case A::Mist: s += "move: Mist"; break;
       case A::SuctionCups: s += "ability: Suction Cups"; break;
       case A::Ingrain: s += "move: Ingrain"; break;
       case A::HealBell: s += "move: Heal Bell"; break;
+      case A::SubstituteDamage: s += "Substitute|[damage]"; break;
+      case A::Confusion: s += "confusion"; break;
+      case A::Trapped: s += "trapped"; break;
+      case A::FocusBand: s += "item: Focus Band"; break;
+      case A::DestinyBond: s += "move: Destiny Bond"; break;
+      case A::Endure: s += "move: Endure"; break;
+      case A::Pursuit: s += "move: Pursuit"; break;
+      case A::Bide: s += "move: Bide"; break;
+      case A::Ability: s += "ability: " + ability_name(Ability(r.byte())); break;
+      case A::Mimic: s += "move: Mimic|" + move_name(Move(r.u16())); break;
+      case A::Grudge: s += "move: Grudge|" + move_name(Move(r.u16())); break;
+      case A::Leppa: s += "item: Leppa Berry|" + move_name(Move(r.u16())) + "|[consumed]"; break;
+      case A::Attract: s += "move: Attract"; break;
+      case A::LockOn: s += "move: Lock-On"; break;
+      case A::MindReader: s += "move: Mind Reader"; break;
+      case A::Snatch: s += "move: Snatch"; break;
+      case A::Trick: s += "move: Trick"; break;
+      case A::Bound: s += "move: " + move_name(Move(r.u16())); break;
+      case A::Magnitude: s += "move: Magnitude|" + std::to_string(r.byte()); break;
+      }
+      if (protocol::activate_of(effect)) s += "|[of] " + ident(ID{r.byte()});
+      out.push_back(s);
+      return;
+    }
+    case ArgType::Start: {
+      std::string s = "|-start|" + ident(ID{r.byte()}) + "|";
+      using S = protocol::Start;
+      const S effect = S(r.byte());
+      switch (effect) {
+      case S::Confusion: s += "confusion"; break;
+      case S::ConfusionFatigue: s += "confusion|[fatigue]"; break;
+      case S::Substitute: s += "Substitute"; break;
+      case S::LeechSeed: s += "move: Leech Seed"; break;
+      case S::Nightmare: s += "Nightmare"; break;
+      case S::Encore: s += "Encore"; break;
+      case S::Taunt: s += "move: Taunt"; break;
+      case S::Torment: s += "Torment"; break;
+      case S::Foresight: s += "Foresight"; break;
+      case S::Imprison: s += "move: Imprison"; break;
+      case S::Ingrain: s += "move: Ingrain"; break;
+      case S::MudSport: s += "Mud Sport"; break;
+      case S::WaterSport: s += "move: Water Sport"; break;
+      case S::Charge: s += "Charge"; break;
+      case S::Uproar: s += "Uproar"; break;
+      case S::UproarUpkeep: s += "Uproar|[upkeep]"; break;
+      case S::Bide: s += "move: Bide"; break;
+      case S::FlashFire: s += "ability: Flash Fire"; break;
+      case S::FocusEnergy: s += "move: Focus Energy"; break;
+      case S::FocusEnergySilent: s += "move: Focus Energy|[silent]"; break;
+      case S::FutureSight: s += "Future Sight"; break;
+      case S::DoomDesire: s += "Doom Desire"; break;
+      case S::PerishSilent: s += "perish3|[silent]"; break;
+      case S::Curse: s += "Curse"; break;
+      case S::Yawn: s += "move: Yawn"; break;
+      case S::AttractCuteCharm: s += "Attract|[from] ability: Cute Charm"; break;
+      case S::Disable: s += "Disable|" + move_name(Move(r.u16())); break;
+      case S::TypeChange: s += "typechange|" + type_name(r.byte()); break;
+      case S::ColorChange:
+        s += "typechange|" + type_name(r.byte()) + "|[from] ability: Color Change";
+        break;
+      case S::Stockpile: s += "stockpile" + std::to_string(r.byte()); break;
+      case S::Perish: s += "perish" + std::to_string(r.byte()); break;
+      }
+      if (effect >= S::Curse && effect <= S::AttractCuteCharm) {
+        s += "|[of] " + ident(ID{r.byte()});
       }
       out.push_back(s);
+      return;
+    }
+    case ArgType::End: {
+      const ID id{r.byte()};
+      std::string s = "|-end|" + ident(id) + "|";
+      using E = protocol::End;
+      switch (E(r.byte())) {
+      case E::Confusion: s += "confusion"; break;
+      case E::Substitute: s += "Substitute"; break;
+      case E::LeechSeedRapidSpin:
+        s += "Leech Seed|[from] move: Rapid Spin|[of] " + ident(id);
+        break;
+      case E::Nightmare: s += "Nightmare|[silent]"; break;
+      case E::Encore: s += "Encore"; break;
+      case E::Disable: s += "Disable"; break;
+      case E::Taunt: s += "move: Taunt|[silent]"; break;
+      case E::Torment: s += "Torment"; break;
+      case E::Yawn: s += "move: Yawn|[silent]"; break;
+      case E::Attract: s += "Attract|[silent]"; break;
+      case E::AttractOblivious: s += "move: Attract|[from] ability: Oblivious"; break;
+      case E::AttractMentalHerb: s += "move: Attract|[from] item: Mental Herb"; break;
+      case E::Uproar: s += "Uproar"; break;
+      case E::Bide: s += "move: Bide"; break;
+      case E::Stockpile: s += "Stockpile"; break;
+      case E::Charge: s += "Charge|[silent]"; break;
+      case E::FlashFire: s += "ability: Flash Fire|[silent]"; break;
+      case E::Bound: s += move_name(Move(r.u16())) + "|[partiallytrapped]"; break;
+      case E::BoundSilent:
+        s += move_name(Move(r.u16())) + "|[partiallytrapped]|[silent]";
+        break;
+      case E::FutureMove: s += "move: " + move_name(Move(r.u16())); break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::SingleTurn: {
+      std::string s = "|-singleturn|" + ident(ID{r.byte()}) + "|";
+      using T = protocol::SingleTurn;
+      switch (T(r.byte())) {
+      case T::Protect: s += "Protect"; break;
+      case T::Endure: s += "move: Endure"; break;
+      case T::FocusPunch: s += "move: Focus Punch"; break;
+      case T::Snatch: s += "Snatch"; break;
+      case T::MagicCoat: s += "move: Magic Coat"; break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::SingleMove: {
+      std::string s = "|-singlemove|" + ident(ID{r.byte()}) + "|";
+      using M = protocol::SingleMove;
+      switch (M(r.byte())) {
+      case M::DestinyBond: s += "Destiny Bond"; break;
+      case M::Grudge: s += "Grudge"; break;
+      case M::Rage: s += "Rage"; break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::FieldActivate:
+      out.push_back(protocol::FieldActivate(r.byte()) == protocol::FieldActivate::PerishSong
+                        ? "|-fieldactivate|move: Perish Song"
+                        : "|-fieldactivate|move: Pay Day");
+      return;
+    case ArgType::SetHP: {
+      const ID id{r.byte()};
+      const uint16_t hp = r.u16(), max = r.u16();
+      const uint8_t status = r.byte();
+      const bool silent = r.byte() != 0;
+      split(out, id.player(), "|-sethp|" + ident(id) + "|", hp, max, status,
+            std::string("|[from] move: Pain Split") + (silent ? "|[silent]" : ""));
       return;
     }
     case ArgType::Switch:
