@@ -381,6 +381,18 @@ std::string field_mismatch(const Battle& battle, const json::Value& state) {
       why += " " + side + " Spikes " + std::to_string(c.spikes) + ", Showdown " +
              std::to_string(sc["spikes"].integer()) + ";";
     }
+    // The future attack's turns left and stored damage (absent from old
+    // traces).
+    if (const json::Value& f = sc["future"]; !f.array.empty()) {
+      const Side& side_ = battle.sides[s];
+      const int64_t turns = c.future_sight, damage = side_.future_sight_damage;
+      if (turns != f.array[0].integer() || damage != f.array[1].integer()) {
+        why += " " + side + " future attack " + std::to_string(turns) + "/" +
+               std::to_string(damage) + ", Showdown " +
+               std::to_string(f.array[0].integer()) + "/" +
+               std::to_string(f.array[1].integer()) + ";";
+      }
+    }
     const std::pair<const char*, bool> screens[] = {
         {"reflect", c.reflect != 0}, {"lightscreen", c.light_screen != 0},
         {"safeguard", c.safeguard != 0}, {"mist", c.mist != 0}};
@@ -438,8 +450,7 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
       battle.request.phase != Phase::BatonPass) {
     bool upkeep = false;
     for (const json::Value& l : step["log"].array) upkeep |= l.string == "|upkeep";
-    const bool residuals = battle.request.phase == Phase::FaintAfterResiduals ||
-                           battle.request.phase == Phase::FaintAfterFutureSight;
+    const bool residuals = battle.request.phase == Phase::FaintAfterResiduals;
     if (upkeep != residuals) {
       why += residuals ? " the request comes after the residuals, Showdown's before;"
                        : " the request comes before the residuals, Showdown's after;";

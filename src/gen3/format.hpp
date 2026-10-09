@@ -311,7 +311,9 @@ class Formatter {
       return;
     case ArgType::Miss: {
       const ID source{r.byte()};
-      out.push_back("|-miss|" + ident(source) + "|" + ident(ID{r.byte()}));
+      const std::string user =
+          source.bits & protocol::BENCH ? bench_ident(source) : ident(source);
+      out.push_back("|-miss|" + user + "|" + ident(ID{r.byte()}));
       return;
     }
     case ArgType::Fail: {

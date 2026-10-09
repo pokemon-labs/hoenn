@@ -128,6 +128,10 @@ function state(battle) {
       spikes: sc.spikes ? sc.spikes.layers : 0, reflect: !!sc.reflect,
       lightscreen: !!sc.lightscreen, safeguard: !!sc.safeguard, mist: !!sc.mist,
     };
+    // A future attack on this side: its turns left and its stored damage,
+    // which the log shows only when it lands.
+    const fm = side.slotConditions[0] && side.slotConditions[0].futuremove;
+    out[side.id + 'side'].future = fm ? [fm.duration, fm.moveData.damage] : [0, 0];
     const a = side.active[0];
     out[side.id + 'active'] = a ? {
       boosts: a.boosts, volatiles: Object.keys(a.volatiles),

@@ -365,9 +365,10 @@ A turn runs:
 4. `BattleTurnPassed` (main:3956): `DoFieldEndTurnEffects`, then
    `DoBattlerEndTurnEffects`, then `HandleFaintedMonActions`, then
    `HandleWishPerishSongOnTurnEnd` (Future Sight, then Perish Song), with
-   faint replacement after each Future Sight or Perish Song event. Perish
-   Song follows Showdown instead (decided 2026-10-07): its count runs at
-   the end of the residual pass, before the residual faints are replaced.
+   faint replacement after each Future Sight or Perish Song event. Both
+   follow Showdown instead (Perish Song decided 2026-10-07; Future Sight
+   2026-10-09): they run at the end of the residual pass (future attacks,
+   then Perish Song), before the residual faints are replaced.
 
 `update` suspends wherever a Pokémon can faint, plus Baton Pass (`Phase` in
 `data.hpp`):
@@ -376,8 +377,7 @@ A turn runs:
 |---|---|---|
 | `BatonPass` | user's side `Switch`, other `Pass` | finish Baton Pass's switch-in, then the remaining action |
 | `FaintAfterAction` | either side or both | end of turn (the remaining action was cancelled) |
-| `FaintAfterResiduals` | either side or both | Future Sight |
-| `FaintAfterFutureSight` | either side or both | the next turn |
+| `FaintAfterResiduals` | either side or both | the next turn |
 
 `Request` holds the phase, the next action (Baton Pass only), who moves first
 (decided once at selection, after the Quick Claw and speed-tie draws, which
@@ -390,7 +390,7 @@ passes. Per-turn state isn't in `Battle` (README decision 2).
 through in turn order, so the order is written once: `None` (select, order,
 Focus Punch, actions from 0), `BatonPass` (finish the switch-in, actions from
 `request.next`), `FaintAfterAction` (end of turn), `FaintAfterResiduals`
-(Future Sight), `FaintAfterFutureSight` (next turn). A resumed case first does its replacement. This relies on
+(next turn). A resumed case first does its replacement. This relies on
 `Phase` being declared in that order: `static_assert` it. Internal steps
 return `std::optional<Result>`: empty continues, a value (a request or the
 end of the battle) is returned.
@@ -450,8 +450,8 @@ unchecked claims.
     action, does the replacement use the fainted Pokémon's queued move?
     `HandleAction_UseMove` checks only absent flags copied at turn start.
 - **Residual faints** are replaced after both residual passes, so the
-  replacement skips that turn's residuals. Future Sight and Perish Song still
-  follow.
+  replacement skips that turn's residuals (Future Sight and Perish Song
+  included: they are in the pass).
 - **The battle ends mid-residuals.** `checkteamslost` sets `gBattleOutcome`
   as soon as a side is out (bsc:3564–3577); the weather loop exits on it
   (bs1:3219) and `BattleTurnPassed` runs residuals only while it's 0
@@ -751,7 +751,7 @@ frequency over many seeds from one state, not path by path.
   (`tools/generate.py`), hand-written natures and misc tables.
 - `common/`: `Player`, `Choice`, `Result`, the RNG, `Rational`, `Options`,
   the log plumbing.
-- `gen3/data.hpp`: the full `Battle` draft (816 B, unpacked) with `valid()`,
+- `gen3/data.hpp`: the full `Battle` draft (824 B, unpacked) with `valid()`,
   including the turn-0 rule; `calc_stats`, `hidden_power`, `max_pp`.
 - `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (121 B) and
   `Durations` (22 B).
@@ -1084,7 +1084,28 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-- **Resume here:** plan step 5, group 5 (trapping and delayed damage).
+- **Resume here:** plan step 5, group 5 committed
+  (2026-10-09). Next: group 6.
+  - Group 5, as Showdown: binding (`Effect::Trap` in `hit()`, 3-6 turns;
+    a binder leaving sets `Volatiles::wrapper_gone`: the victim is no
+    longer trapped and the binding ends at its next residual, silently
+    unless the counter runs out then); Future Sight and Doom Desire
+    (`future_sight_move`: typeless, damage rolled at the use;
+    `future_attack` lands in the residual pass after the battler stages,
+    accuracy drawn then, `-miss` from a benched user via
+    `protocol::benched`); Stockpile, Spit Up, Swallow (silent failures,
+    Spit Up's layers go at AfterMove). `Phase::FaintAfterFutureSight` is
+    gone. `Battle` is 824 B. `check_showdown` now compares each side's
+    pending future attack (turns, damage) from the traces.
+  - Also fixed: a failed Baton Pass is the last move (Encore can lock it).
+  - Results (`tools/teams/group5.txt`): seed 751 200/200 (3 games need a
+    2M-try cap), seed 752 999/1000; teams/adv seed 8 992/1000 (unchanged);
+    soak 5000 debug games clean; check_chance 0 collisions. The one failure
+    is older and log-only: Pursuit KOing a switching Natural Cure holder
+    (Showdown prints its silent -curestatus before the faint). Not done:
+    the 10k run, `check_frame` scenarios.
+  - Known gap: Endure doesn't save a Pokémon from a future attack landing
+    the same turn (no `Turn` at the residuals; Showdown would).
   Groups 1-4 done:
   - Group 4 (2026-10-09, the user's bar 95%): Showdown's lockedmove,
     uproar, rollout/iceball, furycutter, rage and gen3 bide. Locks renew

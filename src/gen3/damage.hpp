@@ -159,11 +159,14 @@ constexpr uint32_t apply_stage(uint32_t stat, int8_t stage) {
   return stat * r.num / r.den;
 }
 
-// The move counts as typeless: Struggle and Beat Up are "???" in Showdown,
-// so they get no STAB, no type matchup and no type-keyed modifier. Struggle
-// is physical, Beat Up special.
+// The move counts as typeless: Struggle, Beat Up, Future Sight and Doom
+// Desire are "???" in Showdown (gen3 moves.ts gives the future attacks
+// type '???' and a category), so they get no STAB, no type matchup and no
+// type-keyed modifier. Struggle and Doom Desire are physical, Beat Up and
+// Future Sight special.
 constexpr bool typeless(const Hit& hit) {
-  return hit.move == Move::Struggle || hit.ally != Species::None;
+  return hit.move == Move::Struggle || hit.ally != Species::None ||
+         hit.move == Move::FutureSight || hit.move == Move::DoomDesire;
 }
 
 } // namespace detail
@@ -275,7 +278,8 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   const bool beat_up = hit.ally != Species::None;
   // Mystery matches no type-keyed modifier below.
   const Type type = typeless ? Type::Mystery : hit.type;
-  const bool physical = !beat_up && (typeless || type < Type::Mystery);
+  const bool physical = typeless ? !beat_up && hit.move != Move::FutureSight
+                                 : type < Type::Mystery;
   const HoldEffect attacker_effect = item_data(attacker_mon.item).effect;
   const HoldEffect defender_effect = item_data(defender_mon.item).effect;
   const Weather weather = effective_weather(battle);

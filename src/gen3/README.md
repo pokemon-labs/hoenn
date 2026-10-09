@@ -189,6 +189,9 @@ is the same and only the messages differ.
 | Confusion self-hit | Reflect and type items apply; no Focus Band behind a Substitute | typeless 40 power; Focus Band always |
 | Knock Off | link battles: a stolen item can come back | the item is gone for good (decision 8) |
 | Perish Song | own pass after Future Sight | counts in the residual pass |
+| Future Sight, Doom Desire | typed damage, no roll; lands after the residual faints are replaced, with its own request | typeless, rolled at the use; lands in the residual pass (order 11), its accuracy drawn then |
+| Binder leaving | frees the victim at once | the victim stays bound, untrapped, until its residual, which ends it |
+| Stockpile family | Stockpile raises nothing; failures print | the same; failures are silent; Spit Up rolls |
 | Leech Seed KO of the last Pokémon | no `checkteamslost` | the battle ends there |
 | Sleep Talk's pick | skips disabled, taunted... moves; calls 0-PP moves | uniform over allowed slots; fails on 0 PP |
 | Statuses from contact abilities | ignore Safeguard | Safeguard blocks them |
@@ -713,7 +716,7 @@ main = `src/battle_main.c`.
     `activeMoveActions` instead (`move_actions`): an action a faint
     cancelled doesn't use up the first turn.
 
-Packing comes last: natural alignment for now (`Battle` is 816 B against a
+Packing comes last: natural alignment for now (`Battle` is 824 B against a
 ~700 B target). Revisit padding and `has_unique_object_representations_v`
 once the layout is settled.
 
@@ -754,6 +757,7 @@ the changes.
 | `LOCK_CONFUSE` (2 bits) | `thrash` | u8 0–3 | | yes | Showdown's lockedmove `trueDuration`: set 2–3; steps at a residual that renews the lock |
 | `MULTIPLETURNS` | `multiple_turns` | bool | | | the lock, with `locked_move` (decision 11) |
 | `WRAPPED` (3 bits) | `wrapped` | u8 0–6 | | yes | set 3–6 (bsc:2618); steps at end of turn (util:1591). Wrapper is the foe |
+| | `wrapper_gone` | bool | | | Showdown's partiallytrapped whose source has left: no longer traps, ends at the victim's next residual (`Stage::Bind`) |
 | `INFATUATION` (4 bits) | `infatuated` | bool | | | cleared on any foe switch-out |
 | `FOCUS_ENERGY` | `focus_energy` | bool | **BP** | | |
 | `TRANSFORMED` | `transformed` | bool | | | blocks the PP write-back and Sketch |

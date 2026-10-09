@@ -143,16 +143,15 @@ static_assert(!Status{6}.valid() && Status{Status::PSN}.valid());
 //                          Request::next
 //   FaintAfterAction       replace; resume at end of turn. The replacement's
 //                          cancelallactions (bsc:5850) cancelled the rest.
-//   FaintAfterResiduals    replace; resume at Future Sight. Perish Song's
-//                          faints are among these, as Showdown (decided
-//                          2026-10-07; the decomp has a request after it).
-//   FaintAfterFutureSight  replace; resume at the next turn
+//   FaintAfterResiduals    replace; resume at the next turn. Future Sight's
+//                          and Perish Song's faints are among these, as
+//                          Showdown (decided 2026-10-07; the decomp has a
+//                          request after each).
 enum class Phase : uint8_t {
   None,
   BatonPass,
   FaintAfterAction,
   FaintAfterResiduals,
-  FaintAfterFutureSight,
 };
 
 // What survives a mid-turn request: only what update can't recompute when it
@@ -188,7 +187,7 @@ struct Request {
 
   // A well-formed request. Asserted in debug builds.
   constexpr bool valid() const {
-    if (phase > Phase::FaintAfterFutureSight) return false;
+    if (phase > Phase::FaintAfterResiduals) return false;
     if (first != Player::P1 && first != Player::P2) return false;
     if (!choice[0].valid() || !choice[1].valid()) return false;
     if (quick_claw > Optional::False) return false;
@@ -205,13 +204,12 @@ static_assert(Request{}.valid());
 static_assert(!Request{{}, {}, Phase::BatonPass, Player::P1, 0, Optional::None}.valid());
 static_assert(Request{{}, {}, Phase::BatonPass, Player::P2, 2, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1, Optional::None}.valid());
-static_assert(!Request{{}, {}, Phase(5), Player::P1, 0, Optional::None}.valid());
+static_assert(!Request{{}, {}, Phase(4), Player::P1, 0, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase::None, Player::P1, 0, Optional(3)}.valid());
 // The frame (mechanics.hpp) falls through the phases in this order.
 static_assert(Phase::None < Phase::BatonPass &&
               Phase::BatonPass < Phase::FaintAfterAction &&
-              Phase::FaintAfterAction < Phase::FaintAfterResiduals &&
-              Phase::FaintAfterResiduals < Phase::FaintAfterFutureSight);
+              Phase::FaintAfterAction < Phase::FaintAfterResiduals);
 
 // ---------------------------------------------------------------------------
 // The battle. Draft (2026-10-07): the numbered decisions cited below and the
@@ -413,6 +411,10 @@ struct Volatiles {
   uint8_t thrash;         // STATUS2_LOCK_CONFUSE: Showdown's lockedmove
                           // trueDuration, 0-3. Hidden.
   uint8_t wrapped;        // STATUS2_WRAPPED, 0-6. Hidden. The wrapper is the foe.
+  // The binder has left (switched out or fainted) since: Showdown's
+  // partiallytrapped stays until the victim's next residual, where it ends,
+  // but no longer traps (its source isn't active). See Stage::Bind.
+  bool wrapper_gone;
   bool flinched;          // STATUS2_FLINCHED
   bool multiple_turns;    // STATUS2_MULTIPLETURNS, with locked_move
   bool infatuated;        // STATUS2_INFATUATION, with the foe
@@ -447,7 +449,9 @@ struct Volatiles {
   bool flash_fire;
 
   // STATUS2_WRAPPED | STATUS2_ESCAPE_PREVENTION
-  constexpr bool trapped() const { return wrapped != 0 || escape_prevention; }
+  constexpr bool trapped() const {
+    return (wrapped != 0 && !wrapper_gone) || escape_prevention;
+  }
   // STATUS3_SEMI_INVULNERABLE
   constexpr bool semi_invulnerable() const {
     return on_air || underground || underwater;
@@ -455,7 +459,7 @@ struct Volatiles {
 
   constexpr bool valid() const {
     return confusion <= 5 && uproar <= 5 && bide <= 3 && thrash <= 3 &&
-           wrapped <= 6 && lock_on <= 2 && yawn <= 2 &&
+           wrapped <= 6 && (!wrapper_gone || wrapped != 0) && lock_on <= 2 && yawn <= 2 &&
            (on_air + underground + underwater) <= 1;
   }
 
@@ -582,12 +586,16 @@ struct SideConditions {
   uint8_t wish;         // 0-2. Heals the recipient's max HP / 2 on landing.
   uint8_t wisher;       // wishMonId: the wisher's party position (1-6), for
                         // the log. 0 when no Wish is pending.
-  uint8_t future_sight; // 0-3
+  uint8_t future_sight; // 0-3: a future attack on this side lands at 0
+                        // (Showdown's futuremove duration, 3 at the use)
+  uint8_t future_user;  // the attacker's party position on the foe's side
+                        // (1-6), for the log and its accuracy. 0 when none.
 
   constexpr bool valid() const {
     return spikes <= 3 && reflect <= 5 && light_screen <= 5 &&
            safeguard <= 5 && mist <= 5 && wish <= 2 && wisher <= 6 &&
-           (wish == 0) == (wisher == 0) && future_sight <= 3;
+           (wish == 0) == (wisher == 0) && future_sight <= 3 &&
+           future_user <= 6 && (future_sight == 0) == (future_user == 0);
   }
 
   friend constexpr bool operator==(const SideConditions&, const SideConditions&) = default;
@@ -596,9 +604,12 @@ struct SideConditions {
 struct Side {
   Pokemon pokemon[6];
   ActivePokemon active;
-  uint32_t future_sight_damage; // futureSightDmg, computed at use; s32 in
-                                // the decomp, bound unverified
-  Move future_sight_move;       // Future Sight or Doom Desire, for the log
+  // The future attack on this side's Pokémon (futureSightDmg, by target):
+  // its damage, rolled at the use (Showdown's getDamage); s32 in the
+  // decomp, bound unverified. The move is Future Sight or Doom Desire, None
+  // when no attack is pending.
+  uint32_t future_sight_damage;
+  Move future_sight_move;
   uint8_t order[6];             // by SLOT; 1-based indexes into pokemon
   SideConditions conditions;
   Item recycle_item;            // usedHeldItems (per position, for Recycle)
@@ -620,7 +631,8 @@ struct Side {
     }
     if (get(1).species == Species::None) return false;
     return active.valid() && conditions.valid() &&
-           detail::valid(future_sight_move) && detail::valid(recycle_item);
+           detail::valid(future_sight_move) && detail::valid(recycle_item) &&
+           (conditions.future_sight == 0) == (future_sight_move == Move::None);
   }
 
   friend constexpr bool operator==(const Side&, const Side&) = default;
@@ -677,13 +689,13 @@ struct Battle {
 static_assert(sizeof(Stats) == 12);
 static_assert(sizeof(MoveSlot) == 4);
 static_assert(sizeof(Pokemon) == 42);
-static_assert(sizeof(Volatiles) == 35);
+static_assert(sizeof(Volatiles) == 36);
 static_assert(sizeof(Boosts) == 7);
-static_assert(sizeof(ActivePokemon) == 120);
-static_assert(sizeof(SideConditions) == 8);
-static_assert(sizeof(Side) == 396);
+static_assert(sizeof(ActivePokemon) == 124);
+static_assert(sizeof(SideConditions) == 9);
+static_assert(sizeof(Side) == 400);
 static_assert(sizeof(Field) == 3);
-static_assert(sizeof(Battle) == 816);
+static_assert(sizeof(Battle) == 824);
 
 static_assert(std::is_trivially_copyable_v<Battle>);
 static_assert(std::is_trivial_v<Battle> && std::is_standard_layout_v<Battle>);

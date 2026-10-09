@@ -415,6 +415,12 @@ template <typename L> void last_still(L& log) { log.write(ArgType::LastStill); }
 // A missed move: [miss] on the move line, then -miss (the order of
 // Showdown's tryMoveHit, data/mods/gen3/scripts.ts:383). Perish Song's
 // misses have no [miss] (`attr` false).
+// An ID marking a Pokémon that isn't active, which the formatter prints as
+// Pokemon.toString does then ("p1: Name"): only -miss's source carries it,
+// for a future attack whose user has left.
+inline constexpr uint8_t BENCH = 1 << 4;
+constexpr ID benched(ID id) { return ID{uint8_t(id.bits | BENCH)}; }
+
 template <typename L> void miss(L& log, ID source, ID target, bool attr = true) {
   if constexpr (L::enabled) {
     if (attr) log.write(ArgType::LastMiss);

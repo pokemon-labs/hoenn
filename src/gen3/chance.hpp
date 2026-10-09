@@ -434,7 +434,9 @@ struct Durations {
     d.disable = 0;
     d.encore = 0;
     d.attacking = 0;
-    get(foe(p)).binding = 0;
+    // The foe's binding, if p was its binder, keeps its count: the binding
+    // stays until the foe's residual (Volatiles::wrapper_gone), and its
+    // hidden counter decides only how that end is logged.
   }
 
   friend constexpr bool operator==(const Durations&, const Durations&) = default;
@@ -575,7 +577,7 @@ static_assert([] {
   d.p2.binding = 4;
   d.switched(Player::P1, 4);
   return d.p1.sleep[0] == 1 && d.p1.sleep[3] == 3 && d.p1.confusion == 0 &&
-         d.p2.binding == 0;
+         d.p2.binding == 4;
 }());
 
 } // namespace pkmn::gen3
