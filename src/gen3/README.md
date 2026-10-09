@@ -636,9 +636,10 @@ main = `src/battle_main.c`.
      and the lock is gone. `targetNotAffected` does (Thrash or Uproar into a
      Ghost type, then the Ghost faints itself, e.g. by Explosion). The
      smallest fix is one "unable to use its move" bit per player in
-     `Request`, but Showdown ends these locks differently (`lockedmove`,
-     `data/conditions.ts:253`), so settle it when Thrash and Uproar are
-     written. *(open)* Every other field is set and read within one actions
+     `Request`. **Settled** (step 5 group 4, 2026-10-09): Thrash and Uproar
+     follow Showdown (`lockedmove`, `data/conditions.ts:253`; `uproar`),
+     whose locks run out by their own durations and never read it, so no
+     bit is kept. Every other field is set and read within one actions
      phase, or cleared before the residuals (`protected` and `endured`,
      `TurnValuesCleanUp(TRUE)`, main:3959). `noValidMoves` is
      `Request::move` = Struggle.
@@ -685,10 +686,16 @@ main = `src/battle_main.c`.
 10. **Write-only fields are dropped:** every `*StartValue` in `DisableStruct`
     and `tauntTimer2` (only written: bsc:8008, 8040, 8524, 8550, 9104, 9161,
     main:3215). `Durations` does that bookkeeping.
-11. **Multi-turn state mirrors the decomp, unmerged:** `multiple_turns`,
-    `locked_move`, separate Thrash, Uproar, Bide, Rollout and Fury Cutter
-    counters, and the semi-invulnerable flags, all cleared together by
-    `cancel_multi_turn_moves()` (`CancelMultiTurnMoves`). Recharge stays
+11. **Multi-turn state keeps the decomp's fields, with Showdown's
+    meanings:** `multiple_turns` (the lock) with `locked_move`, and
+    separate Thrash, Uproar, Bide, Rollout and Fury Cutter counters
+    holding Showdown's `trueDuration`, durations, `hitCount` and multiplier
+    (field map). `ActivePokemon::renewed` stands for Showdown's duration 2
+    of the volatiles a turn's move renews (lockedmove, rollout,
+    furycutter). A move the canceler stops loses only a two-turn charge
+    and Bide (`abort_move`, Showdown's MoveAborted); the other locks run
+    out at the residuals (`lock_residuals`, the Uproar stage). The decomp's
+    `CancelMultiTurnMoves` ends them all; it is gone. Recharge stays
     separate, but its timer also ends a two-turn move's charge.
 12. **Hidden counters** are the ones in `Durations`: confusion, Disable,
     Encore, binding, and Uproar or Thrash (`Durations::attacking`; the locked
@@ -741,17 +748,17 @@ the changes.
 |---|---|---|---|---|---|
 | `CONFUSION` (3 bits) | `confusion` | u8 0–5 | **BP** | yes | set 2–5 (bsc:2541); steps at the canceler (util:2145) |
 | `FLINCHED` | `flinched` | bool | | | cleared at turn start |
-| `UPROAR` (3 bits) | `uproar` | u8 0–5 | | yes | set 2–5 (bsc:2573); steps at end of turn (util:1647) |
+| `UPROAR` (3 bits) | `uproar` | u8 0–5 | | yes | Showdown's duration: set 2–5 (gen3 mod; bsc:2573 agrees); steps at end of turn |
 | `UNUSED` | — | | | | dropped |
-| `BIDE` (2 bits) | `bide` | u8 0–2 | | | set 2 (bsc:7126) |
-| `LOCK_CONFUSE` (2 bits) | `thrash` | u8 0–3 | | yes | set 2–3 (bsc:2860); steps at end of turn (util:1673) |
-| `MULTIPLETURNS` | `multiple_turns` | bool | | | with `locked_move`; `cancel_multi_turn_moves()` |
+| `BIDE` (2 bits) | `bide` | u8 0–3 | | | Showdown's duration: set 3, −1 per residual; releases at 1 (bsc:7126 sets 2) |
+| `LOCK_CONFUSE` (2 bits) | `thrash` | u8 0–3 | | yes | Showdown's lockedmove `trueDuration`: set 2–3; steps at a residual that renews the lock |
+| `MULTIPLETURNS` | `multiple_turns` | bool | | | the lock, with `locked_move` (decision 11) |
 | `WRAPPED` (3 bits) | `wrapped` | u8 0–6 | | yes | set 3–6 (bsc:2618); steps at end of turn (util:1591). Wrapper is the foe |
 | `INFATUATION` (4 bits) | `infatuated` | bool | | | cleared on any foe switch-out |
 | `FOCUS_ENERGY` | `focus_energy` | bool | **BP** | | |
 | `TRANSFORMED` | `transformed` | bool | | | blocks the PP write-back and Sketch |
 | `RECHARGE` | `recharge` | bool | | | with `recharge_timer` |
-| `RAGE` | `rage` | bool | | | cleared at turn start unless Rage was chosen (main, `TryClearRageStatuses`) |
+| `RAGE` | `rage` | bool | | | cleared at the user's next move attempt, as Showdown (the decomp: turn start unless Rage was chosen) |
 | `SUBSTITUTE` | `substitute` | bool | **BP** | | with `substitute_hp` |
 | `DESTINY_BOND` | `destiny_bond` | bool | | | |
 | `ESCAPE_PREVENTION` | `escape_prevention` | bool | **BP** | | cleared when the foe switches out normally, not on its Baton Pass |
@@ -792,8 +799,8 @@ the changes.
 | `stockpileCounter` | `stockpile` | u8 0–3 | | | |
 | `substituteHP` | `substitute_hp` | u8 | **BP** | | max HP / 4 ≤ 178, fits |
 | `perishSongTimer` | `perish_song_timer` | u8 0–3 | **BP** | | |
-| `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | capped at 5 (bsc:8591) |
-| `rolloutTimer` | `rollout` | u8 0–5 | | | set 5 (bsc:8549) |
+| `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | Showdown's multiplier as log2 + 1; renewed by `renewed` |
+| `rolloutTimer` | `rollout` | u8 0–5 | | | Showdown's `hitCount`, counting up (bsc:8549 counts down from 5) |
 | `chargeTimer` | `charge_timer` | u8 0–2 | | | set 2 (bsc:9103) |
 | `tauntTimer` | `taunt` | u8 0–2 | | | set 2 (bsc:9160) |
 | `battlerPreventingEscape`, `battlerWithSureHit` | — | | | | dropped (decision 9) |

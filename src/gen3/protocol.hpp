@@ -156,6 +156,8 @@ enum class Fail : uint8_t {
   // name their stat (|unboost|atk|...): the formatter adds it.
   Unboost,
   Ability, // |[from] ability: A|[of] P, + ability (Rest and Insomnia)
+  Uproar,    // |slp|[from] Uproar: a sleep an Uproar stops
+  UproarMsg, // |slp|[from] Uproar|[msg]: on the Uproar's user itself
 };
 
 // -immune's reason.
@@ -297,6 +299,7 @@ enum class End : uint8_t {
   AttractMentalHerb,  // |move: Attract|[from] item: Mental Herb
   Uproar,             // |Uproar
   Bide,               // |move: Bide
+  BideSilent,         // |move: Bide|[silent] (its onEnd)
   Stockpile,          // |Stockpile
   Charge,             // |Charge|[silent]
   FlashFire,          // |ability: Flash Fire|[silent] (the ability's End)

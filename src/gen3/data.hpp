@@ -408,9 +408,10 @@ struct Pokemon {
 struct Volatiles {
   // status2
   uint8_t confusion;      // STATUS2_CONFUSION, 0-5. Hidden. Baton Pass keeps.
-  uint8_t uproar;         // STATUS2_UPROAR, 0-5. Hidden.
-  uint8_t bide;           // STATUS2_BIDE, 0-2.
-  uint8_t thrash;         // STATUS2_LOCK_CONFUSE, 0-3. Hidden.
+  uint8_t uproar;         // STATUS2_UPROAR: Showdown's duration left, 0-5. Hidden.
+  uint8_t bide;           // STATUS2_BIDE: Showdown's duration left, 0-3.
+  uint8_t thrash;         // STATUS2_LOCK_CONFUSE: Showdown's lockedmove
+                          // trueDuration, 0-3. Hidden.
   uint8_t wrapped;        // STATUS2_WRAPPED, 0-6. Hidden. The wrapper is the foe.
   bool flinched;          // STATUS2_FLINCHED
   bool multiple_turns;    // STATUS2_MULTIPLETURNS, with locked_move
@@ -453,7 +454,7 @@ struct Volatiles {
   }
 
   constexpr bool valid() const {
-    return confusion <= 5 && uproar <= 5 && bide <= 2 && thrash <= 3 &&
+    return confusion <= 5 && uproar <= 5 && bide <= 3 && thrash <= 3 &&
            wrapped <= 6 && lock_on <= 2 && yawn <= 2 &&
            (on_air + underground + underwater) <= 1;
   }
@@ -517,8 +518,9 @@ struct ActivePokemon {
   uint8_t stall;            // Showdown's stall duration, 0-2 (protect())
   uint8_t stockpile;        // 0-3
   uint8_t perish_song_timer;// 0-3. Baton Pass keeps.
-  uint8_t fury_cutter;      // 0-5
-  uint8_t rollout;          // 0-5
+  uint8_t fury_cutter;      // Showdown's furycutter: 0 off, else the power
+                            // multiplier's log2 + 1, 1-5
+  uint8_t rollout;          // Showdown's rollout hitCount, 0-5
   uint8_t charge_timer;     // 0-2
   uint8_t taunt;            // 0-2
   uint8_t first_turn;       // isFirstTurn, 0-2 (decision 14)
@@ -534,23 +536,14 @@ struct ActivePokemon {
   // switch-in, counted as each starts (runMove), so an action a faint
   // cancelled doesn't count. Fake Out fails above 1.
   uint8_t move_actions;
+  // Showdown's duration 2, for the volatiles that a turn's move renews and
+  // whose duration otherwise runs out at that turn's residuals: bit 0 for the
+  // lock (lockedmove or rollout), bit 1 for furycutter (RENEWED_*).
+  uint8_t renewed;
 
+  static constexpr uint8_t RENEWED_LOCK = 1;
+  static constexpr uint8_t RENEWED_FURY_CUTTER = 2;
   static constexpr uint8_t MAX_TOXIC = 15;
-
-  // CancelMultiTurnMoves (util:877), decision 11. locked_move stays: the
-  // decomp leaves gLockedMoves, and nothing reads it without
-  // multiple_turns or recharge.
-  constexpr void cancel_multi_turn_moves() {
-    volatiles.multiple_turns = false;
-    volatiles.thrash = 0;
-    volatiles.uproar = 0;
-    volatiles.bide = 0;
-    volatiles.on_air = false;
-    volatiles.underground = false;
-    volatiles.underwater = false;
-    rollout = 0;
-    fury_cutter = 0;
-  }
 
   constexpr bool valid() const {
     if (!detail::valid(species) || !detail::valid(types[0]) ||
@@ -572,7 +565,7 @@ struct ActivePokemon {
            stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
            first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
-           move_actions <= 2 &&
+           move_actions <= 2 && renewed <= 3 &&
            stall <= 2;
   }
 

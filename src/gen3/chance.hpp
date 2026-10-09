@@ -57,8 +57,8 @@ namespace pkmn::gen3 {
 //   Status::EXT is never resampled.
 // - No tick on turns the Pokémon doesn't attempt a move: it switches, faints
 //   first, or was dragged in or brought in mid-turn.
-// - Uproar wakes sleepers outright (UproarWakeUpCheck and ENDTURN_UPROAR);
-//   that's public.
+// - Uproar wakes the Pokémon it hits outright (Showdown's onTryHit; the
+//   decomp's UproarWakeUpCheck wakes any); that's public.
 //
 // Confusion (util:2143, CANCELER_CONFUSED).
 // - It snaps out when the counter hits 0 and acts that turn, so 1-4 turns of
@@ -85,14 +85,15 @@ namespace pkmn::gen3 {
 //   Rapid Spin (bsc:8826). The decomp's Baton Pass doesn't pass it;
 //   Showdown's does (partiallytrapped has no noCopy), and this follows it.
 //
-// Uproar (util:1647). 2-5 turns in total. It ends early if the user is unable
-// to move (WasUnableToUseMove).
+// Uproar (util:1647), as Showdown's gen3: 2-5 turns in total, ticking at
+// every residual (the Uproar stage) whether or not the user moved. The
+// decomp also ends it if the user is unable to move (WasUnableToUseMove).
 //
-// Thrash, Petal Dance and Outrage (util:1673).
-// - 2-3 turns in total, then confusion.
-// - The lock is only set if the first use passes the accuracy check
-//   (BattleScript_EffectRampage). A miss on the first turn starts no lock.
-// - It ends early if the user is unable to move.
+// Thrash, Petal Dance and Outrage (util:1673), as Showdown's lockedmove:
+// - trueDuration 2-3, then confusion. The lock starts only on a hit; a
+//   turn whose move doesn't hit (or isn't stopped by Protect) ends it.
+// - trueDuration shows at the second residual (Durations count 2) and is
+//   recorded there once (lock_residuals); the count is then 0.
 // - Uproar and the Thrash family both lock the user into its move, so they
 //   can't overlap. They can share one "attacking" slot; the public locked
 //   move says which one it is.
@@ -400,8 +401,9 @@ struct Durations {
     uint8_t disable;   // 1-5 (roll 2-5), steps every end of turn
     uint8_t encore;    // 1-6 (roll 3-6), steps every end of turn
     uint8_t binding;   // 1-6 (roll 3-6), on the victim's side
-    uint8_t attacking; // Uproar 1-5 (roll 2-5) or Thrash 1-3 (roll 2-3). They
-                       // can't overlap, and the public locked move says which.
+    uint8_t attacking; // Uproar 1-5 (roll 2-5) or Thrash 1-2 (roll 2-3; 0 once
+                       // revealed at count 2). They can't overlap, and the
+                       // public locked move says which.
 
     friend constexpr bool operator==(const Side&, const Side&) = default;
   };

@@ -589,9 +589,9 @@ feels like progress; every later mechanic inherits the frame.
       Sheer Cold.
    3. Charge, semi-invulnerable, recharge: Fly, Dig, Dive, Bounce, Razor
       Wind, Skull Bash, Sky Attack, Hyper Beam.
-   4. Locked moves (needs the `WasUnableToUseMove` decision, README
-      decision 2): Thrash, Petal Dance, Outrage, Uproar, Rollout, Ice Ball,
-      Fury Cutter, Rage, Bide.
+   4. Locked moves (done; no `WasUnableToUseMove` bit, README decision
+      2): Thrash, Petal Dance, Outrage, Uproar, Rollout, Ice Ball, Fury
+      Cutter, Rage, Bide.
    5. Trapping and delayed damage: Bind, Wrap, Clamp, Fire Spin,
       Whirlpool, Sand Tomb, Future Sight, Doom Desire, Stockpile, Spit Up,
       Swallow.
@@ -812,8 +812,8 @@ adapted (see Interface).
     stack (README decision 2), conditional on the field check. The check
     found one exception: `WasUnableToUseMove`, read by the Uproar and
     Thrash residuals after a `FaintAfterAction` request (README decision 2).
-    Open: how to keep it (probably one bit per player in `Request`), to
-    settle when Thrash and Uproar are written. Protect, Endure, Counter,
+    Settled in step 5 group 4: Showdown's locks don't read it, so it isn't
+    kept. Protect, Endure, Counter,
     Mirror Coat, Magic Coat and Snatch are unblocked.
   - Skipping the damage roll when every roll KOs (fewer chance nodes, but
     it changes the `Actions` key). Can wait for the birch adaptation.
@@ -1084,8 +1084,23 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-- **Resume here:** plan step 5, group 4 (locked moves; follow Showdown's
-  lockedmove/uproar counters, no Request bit). Groups 1-3 done:
+- **Resume here:** plan step 5, group 5 (trapping and delayed damage).
+  Groups 1-4 done:
+  - Group 4 (2026-10-09, the user's bar 95%): Showdown's lockedmove,
+    uproar, rollout/iceball, furycutter, rage and gen3 bide. Locks renew
+    through `ActivePokemon::renewed` and run out in `lock_residuals` (after
+    Perish Song) or the Uproar stage; the canceler's stops call
+    `abort_move` (Showdown's MoveAborted: only a two-turn charge and Bide
+    end); locked turns use no PP; Thrash's trueDuration is read and
+    recorded at the second residual, where it shows (reading it at the
+    restart broke the search after a mid-turn KO). Also, as Showdown:
+    Uproar wakes only the Pokémon it hits (onTryHit), its sleep `-fail`
+    comes before Sleep Clause, Rage's boost is at onHit per hit (`rage()`),
+    Rapid Spin's self effect comes before the contact ability. Results
+    (`tools/teams/group4.txt`): seed 701 200/200, seed 702 1000/1000;
+    soak clean; check_chance one winner-HP false positive. teams/adv seed
+    8: 992/1000, the same 8 Beat Up and Rock Blast rare-branch games as
+    before. Not done: the 10k `run_group.sh 4`, `check_frame` scenarios.
   - Group 1: 10k games 9936 matched. Group 2 (2026-10-09): 9956; OHKO
     moves only in `tools/teams/group2_ohko.txt` (soak, check_chance).
   - Group 3 (2026-10-09): Fly, Dig, Dive, Bounce, Razor Wind, Skull Bash,
@@ -1094,9 +1109,8 @@ adapted (see Interface).
     the next turn if its move never ran (`recharge_timer` doubles as its
     timer), Razor Wind's high crit, Whirlpool hits Dive. 10k games:
     9998 matched (the 2 failures match at a 30M-try cap:
-    rare branches); soak and check_chance clean. The teams/adv baseline
-    was 992/1000 before the Fake Out and double-replacement fixes; not
-    rerun after them (run stopped). `check_frame` covers Dig, Skull Bash, the charge expiry
+    rare branches); soak and check_chance clean. The teams/adv baseline,
+    rerun after group 4: 992/1000. `check_frame` covers Dig, Skull Bash, the charge expiry
     and Hyper Beam.
   - Fixed during group 3, as Showdown: the Morning Sun family at full HP
     prints no -fail; Fake Out counts move actions (`move_actions`,
@@ -1120,8 +1134,6 @@ adapted (see Interface).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.
-- Uproar and Thrash (with the `WasUnableToUseMove` question, README
-  decision 2) wait: no team uses them.
 - The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 

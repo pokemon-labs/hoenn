@@ -1621,6 +1621,8 @@ struct MoveState {
   // Pursuit on a target switching out (pursue()): double power, and it
   // can't miss.
   bool pursuing;
+  // Bide's release on its third turn (bide()): no move line, no PP.
+  bool release;
   // The forced turn of a locked move (Solar Beam's second turn), which
   // Showdown logs [from] lockedmove.
   bool locked;
@@ -1702,6 +1704,42 @@ constexpr void log_move(const Battle& battle, Player player, const MoveState& m,
                  protocol::ident(battle, target), from, by);
 }
 
+// lockedmove's onRestart, for a hit (hit()) or a Protect that stops the
+// locked move (try_hit(), the gen4 mod's protect onTryHit): the lock is
+// renewed for the turn while trueDuration is at least 2. trueDuration
+// changes only at the residuals, so the bit records the restart and
+// lock_residuals reads trueDuration there, where the outcome shows.
+constexpr void lock_renew(Battle& battle, Player player) {
+  battle.side(player).active.renewed |= ActivePokemon::RENEWED_LOCK;
+}
+
+// Ends p's Bide: its onEnd's silent -end, and the lock.
+template <typename O>
+constexpr void end_bide(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  a.volatiles.bide = 0;
+  a.volatiles.multiple_turns = false;
+  protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::BideSilent);
+}
+
+// Showdown's MoveAborted, for a move the canceler stops: a two-turn move's
+// charge is lost (twoturnmove's onMoveAborted) and Bide ends (its
+// onMoveAborted). The other locks (lockedmove, uproar, rollout, furycutter)
+// stay, and run out by their durations at the residuals (lock_residuals).
+// The decomp's CancelMultiTurnMoves (util:877) ends them all.
+template <typename O>
+constexpr void abort_move(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  Volatiles& v = a.volatiles;
+  if (v.multiple_turns && two_turn(get(a.locked_move).effect)) {
+    v.multiple_turns = false;
+    v.on_air = false;
+    v.underground = false;
+    v.underwater = false;
+  }
+  if (v.bide != 0) end_bide(battle, player, options);
+}
+
 // AtkCanceler_UnableToUseMove (util:1987), then the rest of
 // Cmd_attackcanceler (bsc:915). Returns whether the move goes ahead; if not,
 // the caller goes to moveend, as every canceling script does. The first case
@@ -1722,12 +1760,19 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   Volatiles& v = a.volatiles;
   // A faint ends the actions, so the attacker is never fainted here.
   assert(!mon.fainted());
-  // A move Sleep Talk calls: Sleep Talk's canceler already ran.
-  if (m.called) {
+  // A move Sleep Talk calls: Sleep Talk's canceler already ran. Bide's
+  // release: its own canceler ran (CANCELER_BIDE below), and it has no move
+  // line.
+  if (m.called || m.release) {
     m.obeys = true;
-    log_move(battle, player, m, options);
+    if (m.called) log_move(battle, player, m, options);
     return true;
   }
+  // Showdown's rage onBeforeMove (priority 100, before every other
+  // handler): Rage ends at the user's next move attempt, whatever stops
+  // it. The decomp's TryClearRageStatuses clears it at the start of a turn
+  // whose chosen move isn't Rage.
+  v.rage = false;
   const auto cant = [&](protocol::Cant reason) {
     protocol::cant(options.log, protocol::ident(battle, player), reason, m.move);
   };
@@ -1741,56 +1786,47 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     cant(protocol::Cant::Recharge);
     v.recharge = false;
     a.recharge_timer = 0;
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     return false;
   }
 
-  // CANCELER_ASLEEP. Uproar wakes it outright (UproarWakeUpCheck, bsc:6801),
-  // unless it has Soundproof; that's public, so Durations just resets.
-  // Otherwise the counter ticks, and it still can't move unless it woke up
-  // or uses Snore or Sleep Talk.
+  // CANCELER_ASLEEP. The counter ticks, and it still can't move unless it
+  // woke up or uses Snore or Sleep Talk. The decomp's Uproar wakes it
+  // outright (UproarWakeUpCheck, bsc:6801); Showdown's wakes only the
+  // Pokémon an Uproar hits (its onTryHit, hit()), and this follows it.
   if (mon.status.asleep()) {
-    const bool uproar = (battle.sides[0].active.volatiles.uproar != 0 ||
-                         battle.sides[1].active.volatiles.uproar != 0) &&
-                        a.ability != Ability::Soundproof;
-    if (uproar) {
-      protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
-      mon.status = Status::none();
-      wake(battle, player, options);
+    const uint8_t by = a.ability == Ability::EarlyBird ? 2 : 1;
+    const bool rest = mon.status.self_inflicted();
+    const Status before = mon.status;
+    const bool woke = !mon.status.tick_sleep(by);
+    // Showdown's slp onBeforeMove: Snore and Sleep Talk go on after it.
+    if (woke) {
+      protocol::cure_status(options.log, protocol::ident(battle, player), before);
     } else {
-      const uint8_t by = a.ability == Ability::EarlyBird ? 2 : 1;
-      const bool rest = mon.status.self_inflicted();
-      const Status before = mon.status;
-      const bool woke = !mon.status.tick_sleep(by);
-      // Showdown's slp onBeforeMove: Snore and Sleep Talk go on after it.
-      if (woke) {
-        protocol::cure_status(options.log, protocol::ident(battle, player), before);
-      } else {
-        cant(protocol::Cant::Sleep);
-      }
-      if constexpr (CHANCE<O>) {
-        // Rest's counter is always 3 (Status::REST_SLEEP).
-        rolls::tick(options.chance.actions.get(player).sleep,
-                    options.chance.durations.get(player).sleep[0], woke,
-                    rest ? Status::REST_SLEEP : Status::MIN_SLEEP,
-                    rest ? Status::REST_SLEEP : Status::MAX_SLEEP, by,
-                    options);
-      }
-      // Showdown's gen3 skippedTime: Sleep Talk and Snore attempts since
-      // the last asleep turn that did nothing (README, field map).
-      if (woke) {
-        wake(battle, player, options);
-      } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
-        a.sleep_skipped = 0;
-        // As Showdown's onMoveAborted: a charged move is lost. The decomp
-        // keeps it until the end of the turn (main:3944).
-        a.cancel_multi_turn_moves();
-        m.unable = true;
-        return false;
-      } else {
-        a.sleep_skipped++;
-      }
+      cant(protocol::Cant::Sleep);
+    }
+    if constexpr (CHANCE<O>) {
+      // Rest's counter is always 3 (Status::REST_SLEEP).
+      rolls::tick(options.chance.actions.get(player).sleep,
+                  options.chance.durations.get(player).sleep[0], woke,
+                  rest ? Status::REST_SLEEP : Status::MIN_SLEEP,
+                  rest ? Status::REST_SLEEP : Status::MAX_SLEEP, by,
+                  options);
+    }
+    // Showdown's gen3 skippedTime: Sleep Talk and Snore attempts since
+    // the last asleep turn that did nothing (README, field map).
+    if (woke) {
+      wake(battle, player, options);
+    } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
+      a.sleep_skipped = 0;
+      // As Showdown's onMoveAborted: a charged move is lost. The decomp
+      // keeps it until the end of the turn (main:3944).
+      abort_move(battle, player, options);
+      m.unable = true;
+      return false;
+    } else {
+      a.sleep_skipped++;
     }
   }
 
@@ -1806,7 +1842,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     } else if (!thaw_hit) {
       // As Showdown's onMoveAborted; the decomp keeps a charged move.
       cant(protocol::Cant::Freeze);
-      a.cancel_multi_turn_moves();
+      abort_move(battle, player, options);
       return false;
     }
   }
@@ -1815,7 +1851,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // (ABILITYEFFECT_ENDTURN, util:2640). TODO(plan step 4): that toggle.
   if (a.ability == Ability::Truant && a.truant) {
     cant(protocol::Cant::Truant);
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     m.result |= MoveResult::MISSED;
     return false;
@@ -1825,7 +1861,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   if (v.flinched) {
     cant(protocol::Cant::Flinch);
     v.flinched = false;
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     return false;
   }
@@ -1833,7 +1869,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // CANCELER_DISABLED
   if (a.disabled_move != Move::None && a.disabled_move == m.move) {
     cant(protocol::Cant::Disable);
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     return false;
   }
@@ -1845,7 +1881,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     for (const MoveSlot& fm : f.moves) imprisoned |= fm.id == m.move;
     if (imprisoned) {
       cant(protocol::Cant::Imprison);
-      a.cancel_multi_turn_moves();
+      abort_move(battle, player, options);
       m.unable = true;
       return false;
     }
@@ -1880,7 +1916,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     if (!ended && rolls::confusion(battle, player, options)) {
       m.self = true;
       m.unable = true;
-      a.cancel_multi_turn_moves();
+      abort_move(battle, player, options);
       uint32_t d = apply_roll(damage(battle, player, player, Hit::confusion()),
                               rolls::damage(battle, player, 0, options));
       const ItemData item = item_data(mon.item);
@@ -1909,7 +1945,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   }
   if (v.infatuated && rolls::infatuation(battle, player, options)) {
     cant(protocol::Cant::Attract);
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     return false;
   }
@@ -1918,7 +1954,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // out, but the script it jumps to runs cancelmultiturnmoves (bs1:3773).
   if (mon.status.paralyzed() && rolls::paralysis(battle, player, options)) {
     cant(protocol::Cant::Paralysis);
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     return false;
   }
@@ -1926,13 +1962,37 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // CANCELER_TAUNTED
   if (a.taunt != 0 && get(m.move).bp == 0) {
     cant(protocol::Cant::Taunt);
-    a.cancel_multi_turn_moves();
+    abort_move(battle, player, options);
     m.unable = true;
     return false;
   }
 
-  // CANCELER_BIDE. TODO(plan step 4). Nothing in step 3 starts Bide.
-  assert(v.bide == 0 && "Bide isn't implemented");
+  // CANCELER_BIDE, as Showdown's gen3 bide onBeforeMove (priority 0, after
+  // the others). With its duration at 2 (bide(): 3 at the start, one less
+  // per residual) it prints -activate and the action ends there
+  // (beforeMoveCallback: no move line, no PP). At 1 it ends: -end, then
+  // -fail if no move took HP from it (abort: the silent -end), else the
+  // release, twice the damage taken, with no move line (bide()). The
+  // decomp's is the same two turns (Cmd_setbide, bs1:1149).
+  if (v.bide != 0) {
+    assert(m.move == Move::Bide && v.bide <= 2);
+    const ID id = protocol::ident(battle, player);
+    if (v.bide == 2) {
+      protocol::activate(options.log, id, protocol::Activate::Bide);
+      m.unable = true;
+      return false;
+    }
+    protocol::end_effect(options.log, id, protocol::End::Bide);
+    if (a.bide_damage == 0) {
+      protocol::fail(options.log, id);
+      abort_move(battle, player, options);
+      m.unable = true;
+      return false;
+    }
+    m.release = true;
+    m.obeys = true;
+    return true;
+  }
 
   // CANCELER_THAW
   // Showdown's frz onModifyMove, before the move line.
@@ -2430,6 +2490,12 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Ohko:
   case Effect::Present:
   case Effect::Magnitude:
+  // Step 5 group 4: the locked moves and Rage (hit(); Bide is bide()).
+  case Effect::Rampage:
+  case Effect::Uproar:
+  case Effect::Rollout:
+  case Effect::FuryCutter:
+  case Effect::Rage:
     return true;
   default:
     return false;
@@ -2485,6 +2551,15 @@ constexpr Secondary secondary_of(Effect effect) {
 constexpr bool uproar(const Battle& battle) {
   return battle.sides[0].active.volatiles.uproar != 0 ||
          battle.sides[1].active.volatiles.uproar != 0;
+}
+
+// The uproar's onAnySetStatus message for a sleep it stops on p's active
+// Pokémon: -fail|P|slp|[from] Uproar, with [msg] if P is causing it.
+template <typename O>
+constexpr void uproar_stops(const Battle& battle, Player p, O& options) {
+  const bool own = battle.side(p).active.volatiles.uproar != 0;
+  protocol::fail(options.log, protocol::ident(battle, p),
+                 own ? protocol::Fail::UproarMsg : protocol::Fail::Uproar);
 }
 
 // Sleep Clause Mod (Smogon, always on: Showdown's sleepclausemod,
@@ -2582,10 +2657,11 @@ constexpr void inflict(Battle& battle, Player target, Secondary s,
 // Random() % 4 + 2, hidden, so it's drawn without Chance (CLAUDE.md,
 // "Chance"), and the public count starts at 1. Log: Start confusion.
 template <typename O>
-constexpr void confuse(Battle& battle, Player target, O& options) {
+constexpr void confuse(Battle& battle, Player target, O& options,
+                       protocol::Start how = protocol::Start::Confusion) {
   ActivePokemon& t = battle.side(target).active;
   assert(t.volatiles.confusion == 0);
-  protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Confusion);
+  protocol::start(options.log, protocol::ident(battle, target), how);
   t.volatiles.confusion = uint8_t(2 + battle.rng.range(4));
   if constexpr (CHANCE<O>) options.chance.durations.get(target).confusion = 1;
 }
@@ -2915,6 +2991,9 @@ constexpr bool try_hit(Battle& battle, Player player, MoveState& m, Aim aim,
   if (protect) {
     protocol::activate(options.log, target, protocol::Activate::Protect);
     m.result |= MoveResult::MISSED;
+    if (get(m.move).effect == Effect::Rampage && m.locked) {
+      lock_renew(battle, player);
+    }
     return false;
   }
   // BattleScript_SoundproofProtected (bs1:4158) sets no result flag.
@@ -3123,14 +3202,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // thaw.
   const Type type = m.type;
 
-  // MOVEEND_RAGE. Showdown's rage condition boosts as a plain effect
-  // (data/moves.ts:14570), so it prints its 0 at +6.
-  if (!m.self && t.volatiles.rage && !target.fainted() && !no_effect &&
-      m.damaged && data.bp != 0) {
-    const int8_t n = t.boosts.atk < 6 ? 1 : 0;
-    t.boosts.atk = int8_t(t.boosts.atk + n);
-    protocol::boost(options.log, protocol::ident(battle, foe(player)), 0, n, false);
-  }
+  // MOVEEND_RAGE is rage(), at Showdown's onHit.
 
   // MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
   // Power's damage is recorded under its base type, Normal, so Hidden Power
@@ -3295,6 +3367,25 @@ constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
   if (user.fainted()) faint(battle, player, options);
 }
 
+// The target's rage onHit (Showdown's base rage condition,
+// data/moves.ts:14570): each hit of a non-Status move from the foe on the
+// Pokémon itself (not its Substitute) raises its Attack, a plain boost, so
+// -boost 0 at +6. It comes with the move's own onHit, before the self
+// effects, secondaries and contact abilities. The decomp's MOVEEND_RAGE
+// runs once, in moveend.
+template <typename O>
+constexpr void rage(Battle& battle, Player player, const MoveState& m, O& options) {
+  const Player defender = foe(player);
+  ActivePokemon& t = battle.side(defender).active;
+  if (m.self || !m.damaged || !t.volatiles.rage || get(m.move).bp == 0 ||
+      battle.side(defender).get(1).fainted()) {
+    return;
+  }
+  const int8_t n = t.boosts.atk < 6 ? 1 : 0;
+  t.boosts.atk = int8_t(t.boosts.atk + n);
+  protocol::boost(options.log, protocol::ident(battle, defender), 0, n, false);
+}
+
 // BattleScript_EffectHit (bs1:236), from the attack canceler on.
 template <typename O>
 constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
@@ -3417,6 +3508,11 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   //
   // `fixed` is the damage of these, 0 for any other move.
   uint32_t fixed = 0;
+  if (m.release) {
+    const uint32_t taken = battle.side(player).active.bide_damage;
+    fixed = taken > UINT32_MAX / 2 ? UINT32_MAX : 2 * taken;
+    assert(fixed != 0);
+  }
   if (effect == Effect::Counter || effect == Effect::MirrorCoat ||
       effect == Effect::Endeavor) {
     const uint16_t foe_hp = battle.side(foe(player)).get(1).hp;
@@ -3600,6 +3696,49 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     return;
   }
 
+  // Uproar's onTryHit, after the immunity and before the Substitute: the
+  // target, then the user, wakes. The decomp wakes them at the canceler
+  // instead (cancel()). Log: CureStatus [msg].
+  if (effect == Effect::Uproar) {
+    for (const Player p : {defender, player}) {
+      Pokemon& mon = battle.side(p).get(1);
+      if (!mon.status.asleep()) continue;
+      protocol::cure_status(options.log, protocol::ident(battle, p), mon.status);
+      mon.status = Status::none();
+      wake(battle, p, options);
+    }
+  }
+  // The power callbacks, once the damage is computed (Showdown's
+  // basePowerCallback, so not on a miss, into Protect or an immunity):
+  // - Rollout and Ice Ball (base data/moves.ts; the decomp's
+  //   rolloutdamagecalculation, bsc:7896, agrees on the power): 30 times
+  //   2 to the hits so far, doubled after Defense Curl. Unless the user is
+  //   asleep (Sleep Talk called it), the hit counts, and below 5 it locks
+  //   the user and renews the lock for the turn (RENEWED_LOCK; it runs out
+  //   at the residuals otherwise, lock_residuals).
+  // - Fury Cutter (gen3 mod: power 10, up to 160): the volatile starts at
+  //   1, renewed; a hit on the target itself doubles it below.
+  if (effect == Effect::Rollout) {
+    ActivePokemon& a = side.active;
+    h.power = uint16_t(data.bp << a.rollout);
+    if (!user.status.asleep()) {
+      a.rollout++;
+      if (a.rollout < 5) {
+        a.renewed |= ActivePokemon::RENEWED_LOCK;
+        a.volatiles.multiple_turns = true;
+        a.locked_move = m.move;
+      }
+    }
+    if (a.volatiles.defense_curl) h.power = uint16_t(h.power * 2);
+  } else if (effect == Effect::FuryCutter) {
+    ActivePokemon& a = side.active;
+    if (a.fury_cutter == 0) {
+      a.fury_cutter = 1;
+      a.renewed |= ActivePokemon::RENEWED_FURY_CUTTER;
+    }
+    h.power = uint16_t(std::min(data.bp << (a.fury_cutter - 1), 160));
+  }
+
   if (effect == Effect::Magnitude) rolls::variable_matters(player, effect, variable, options);
   if (effect == Effect::Psywave) {
     variable = rolls::variable(battle, player, effect, options);
@@ -3682,6 +3821,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       m.damaged = false;
       m.hp_dealt = hp_update(battle, defender, d, m, options);
       log_hit(battle, player, m, options);
+      rage(battle, player, m, options);
       if (effect == Effect::Twineedle) {
         secondary(battle, player, m, options, i);
         synchronize(battle, defender, m, options);
@@ -3738,6 +3878,17 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (effect == Effect::PayDay && m.damaged) {
     protocol::field_activate(options.log, protocol::FieldActivate::PayDay);
   }
+  // - Fury Cutter (gen3 mod onHit): the volatile restarts, doubling the
+  //   power up to 16 times and renewing it for the turn.
+  if (effect == Effect::FuryCutter && m.damaged) {
+    ActivePokemon& a = side.active;
+    if (a.fury_cutter < 5) a.fury_cutter++;
+    a.renewed |= ActivePokemon::RENEWED_FURY_CUTTER;
+  }
+  if (effect != Effect::MultiHit && effect != Effect::DoubleHit &&
+      effect != Effect::Twineedle && effect != Effect::TripleKick) {
+    rage(battle, player, m, options);
+  }
   if (effect == Effect::Smellingsalt && m.damaged && !target.fainted() &&
       target.status.paralyzed()) {
     protocol::cure_status(options.log, protocol::ident(battle, defender), target.status);
@@ -3784,15 +3935,79 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     protocol::must_recharge(options.log, protocol::ident(battle, player));
   }
 
+  // The self volatiles of Thrash, Petal Dance and Outrage (lockedmove),
+  // Uproar and Rage, from the same selfDrops after a hit, Substitute or
+  // not, fainted or not:
+  // - lockedmove (data/conditions.ts:253; the gen4 mod drops its
+  //   onAfterMove): the lock starts with a hidden length of 2-3 turns
+  //   (trueDuration, Volatiles::thrash), or restarts (lock_renew). The
+  //   decomp's BattleScript_EffectRampage (bs1:1101) rolls 2-3 too.
+  // - Uproar (gen3 mod: 2-5 turns, hidden in Volatiles::uproar; the
+  //   decomp's is the same, bsc:2759): it starts once, locking the user.
+  //   Log: Start Uproar.
+  // - Rage: until the user's next move attempt (cancel()). Log:
+  //   SingleMove Rage, only as it starts.
+  if (effect == Effect::Rampage) {
+    ActivePokemon& a = side.active;
+    if (a.volatiles.multiple_turns) {
+      assert(a.locked_move == m.move);
+      lock_renew(battle, player);
+    } else {
+      a.volatiles.multiple_turns = true;
+      a.locked_move = m.move;
+      a.volatiles.thrash = uint8_t(2 + battle.rng.range(2));
+      a.renewed |= ActivePokemon::RENEWED_LOCK;
+      if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 1;
+    }
+  } else if (effect == Effect::Uproar && side.active.volatiles.uproar == 0) {
+    ActivePokemon& a = side.active;
+    a.volatiles.uproar = uint8_t(2 + battle.rng.range(4));
+    a.volatiles.multiple_turns = true;
+    a.locked_move = m.move;
+    protocol::start(options.log, protocol::ident(battle, player), protocol::Start::Uproar);
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 1;
+  } else if (effect == Effect::Rage && !side.active.volatiles.rage) {
+    side.active.volatiles.rage = true;
+    protocol::single_move(options.log, protocol::ident(battle, player),
+                          protocol::SingleMove::Rage);
+  }
+
+  // Rapid Spin's certain MOVE_EFFECT_RAPIDSPIN on the user, if the move
+  // affected the target: Cmd_rapidspinfree (bsc:8821) runs once per release, so
+  // it frees the user from binding and Leech Seed and clears its side's
+  // Spikes, all three.
+  // Log, as Showdown's gen4 self onHit: End Leech Seed [from] Rapid Spin,
+  // then Spikes' SideEnd, then the binding's End. It is a selfDrops
+  // effect, so it comes with the self volatiles above, before the target's
+  // contact ability.
+  if (effect == Effect::RapidSpin && affects && !user.fainted()) {
+    ActivePokemon& a = side.active;
+    const ID id = protocol::ident(battle, player);
+    if (a.volatiles.leech_seed) {
+      protocol::end_effect(options.log, id, protocol::End::LeechSeedRapidSpin);
+    }
+    if (side.conditions.spikes != 0) {
+      protocol::side_end(options.log, player, protocol::SideCondition::SpikesRapidSpin, id);
+    }
+    if (a.volatiles.wrapped != 0) {
+      protocol::end_effect(options.log, id, protocol::End::Bound, a.wrapped_move);
+    }
+    a.volatiles.wrapped = 0;
+    a.wrapped_move = Move::None;
+    a.volatiles.leech_seed = false;
+    side.conditions.spikes = 0;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).binding = 0;
+  }
+
   if (effect != Effect::Twineedle) secondary(battle, player, m, options);
 
   // The target's contact ability, as Showdown's DamagingHit (spreadMoveHit,
   // sim/battle-actions.ts:1112): after the secondaries, before the
   // AfterHit handlers (Knock Off, Thief) and the recoil (applyRecoilDamage
   // in tryMoveHit). The decomp runs it in moveend
-  // (MOVEEND_ON_DAMAGE_ABILITIES), after all of them. Rage and the
-  // defrost, also onHit and DamagingHit there, stay in moveend: no move on
-  // the teams reaches that order.
+  // (MOVEEND_ON_DAMAGE_ABILITIES), after all of them. Rage's boost is
+  // rage(), at onHit. The defrost, a DamagingHit there too, stays in
+  // moveend: no move on the teams reaches that order.
   if (!m.contact_done) {
     ability_on_damage(battle, player, m, 0, options);
     m.contact_done = true;
@@ -3866,31 +4081,6 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     } else {
       drop(3, 2);
     }
-  }
-
-  // Rapid Spin's certain MOVE_EFFECT_RAPIDSPIN on the user, if the move
-  // affected the target: Cmd_rapidspinfree (bsc:8821) runs once per release, so
-  // it frees the user from binding and Leech Seed and clears its side's
-  // Spikes, all three.
-  // Log, as Showdown's gen4 self onHit: End Leech Seed [from] Rapid Spin,
-  // then Spikes' SideEnd, then the binding's End.
-  if (effect == Effect::RapidSpin && affects && !user.fainted()) {
-    ActivePokemon& a = side.active;
-    const ID id = protocol::ident(battle, player);
-    if (a.volatiles.leech_seed) {
-      protocol::end_effect(options.log, id, protocol::End::LeechSeedRapidSpin);
-    }
-    if (side.conditions.spikes != 0) {
-      protocol::side_end(options.log, player, protocol::SideCondition::SpikesRapidSpin, id);
-    }
-    if (a.volatiles.wrapped != 0) {
-      protocol::end_effect(options.log, id, protocol::End::Bound, a.wrapped_move);
-    }
-    a.volatiles.wrapped = 0;
-    a.wrapped_move = Move::None;
-    a.volatiles.leech_seed = false;
-    side.conditions.spikes = 0;
-    if constexpr (CHANCE<O>) options.chance.durations.get(player).binding = 0;
   }
 
   // seteffectwithchance: the certain recoil of Effect::Recoil
@@ -4027,9 +4217,10 @@ constexpr StatusStop status_stop(const Battle& battle, Player player, Secondary 
     assert(false && "not a primary status");
   }
   if (side.conditions.safeguard != 0) return StatusStop::Safeguard;
-  if (s == Secondary::Sleep && sleep_clause(battle, foe(player))) return StatusStop::Clause;
-  // TODO(plan step 4): Uproar's -fail, with the move.
+  // Showdown's uproar onAnySetStatus comes before Sleep Clause Mod's
+  // onSetStatus.
   if (s == Secondary::Sleep && uproar(battle)) return StatusStop::Uproar;
+  if (s == Secondary::Sleep && sleep_clause(battle, foe(player))) return StatusStop::Clause;
   return StatusStop::None;
 }
 
@@ -4097,8 +4288,8 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
   case StatusStop::Safeguard:
     protocol::activate(options.log, target, protocol::Activate::Safeguard);
     break;
-  case StatusStop::Clause:
-  case StatusStop::Uproar: break;
+  case StatusStop::Clause: break;
+  case StatusStop::Uproar: uproar_stops(battle, foe(player), options); break;
   }
   m.result |= MoveResult::FAILED;
   moveend(battle, player, m, options);
@@ -4127,8 +4318,10 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
     } else if (!mon.status.asleep() &&
                (a.ability == Ability::VitalSpirit || a.ability == Ability::Insomnia)) {
       protocol::fail_ability(options.log, id, a.ability);
+    } else if (!mon.status.asleep()) {
+      // Rest's onHit: setStatus meets the uproar.
+      uproar_stops(battle, player, options);
     }
-    // TODO(plan step 4): Uproar's -fail, with the move.
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -5023,8 +5216,12 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
     uint32_t d = apply_roll(damage(battle, player, h), rolls::damage(battle, player, i, options));
     log_modifiers(battle, player, m, h.crit, options);
     d = survive(battle, player, m, d, i, options);
+    const bool damaged = m.damaged;
+    m.damaged = false;
     m.hp_dealt = hp_update(battle, defender, d, m, options);
     log_hit(battle, player, m, options);
+    rage(battle, player, m, options);
+    m.damaged |= damaged;
   }
   protocol::hit_count(options.log, protocol::ident(battle, defender), i);
   faint_target(battle, player, options);
@@ -5378,6 +5575,38 @@ constexpr bool heals(Effect effect) {
          effect == Effect::Moonlight;
 }
 
+// Bide (BattleScript_EffectBide, bs1:1149), as Showdown's gen3: the first
+// turn starts it (duration 3, the damage count reset, the user locked),
+// the second only prints its -activate and the third releases twice the
+// damage taken since (both in cancel()). The release is hit() with that
+// fixed damage, aimed at the foe, with no move line and no PP: Showdown's
+// gen3 tryMoveHit on its moveData (accuracy 100, so the stages count;
+// Protect; Normal, so a Ghost is immune; contact; Physical for Counter).
+// The damage counted is the foe's moves' on the user itself, before the cap
+// at the HP left and after Endure and Focus Band (Showdown's onDamage,
+// priority -101; hp_update). The decomp's is the same two turns, with the
+// release's typecalc ignoring immunities. Log: Start Bide; Activate Bide;
+// End Bide, then the hit or a Fail, then End Bide [silent].
+template <typename O>
+constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  ActivePokemon& a = battle.side(player).active;
+  if (m.release) {
+    m.self = false;
+    hit(battle, player, m, options);
+    if (a.volatiles.bide != 0) end_bide(battle, player, options);
+    return;
+  }
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  a.volatiles.bide = 3;
+  a.bide_damage = 0;
+  a.volatiles.multiple_turns = true;
+  a.locked_move = m.move;
+  protocol::start(options.log, protocol::ident(battle, player), protocol::Start::Bide);
+  moveend(battle, player, m, options);
+}
+
 // Whether use_move runs the effect's script (tools/coverage counts these);
 // every other effect only uses PP for now.
 constexpr bool handled(Effect effect) {
@@ -5401,7 +5630,7 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Encore || effect == Effect::DestinyBond ||
          effect == Effect::Mimic || effect == Effect::PainSplit ||
          effect == Effect::Memento || effect == Effect::Imprison ||
-         effect == Effect::Nightmare;
+         effect == Effect::Nightmare || effect == Effect::Bide;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -5468,6 +5697,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Memento) return memento(battle, player, m, options);
   if (effect == Effect::Imprison) return imprison(battle, player, m, options);
   if (effect == Effect::Nightmare) return nightmare(battle, player, m, options);
+  if (effect == Effect::Bide) return bide(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
@@ -5511,8 +5741,11 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
     m.no_pp = true;
   } else if (forced(a)) {
     // gCurrMovePos keeps the slot chosen when the lock began *(verify)*.
+    // A locked move uses no PP (Showdown's runMove skips deductPP while
+    // getLockedMove names one).
     m.move = a.locked_move;
     m.locked = true;
+    m.no_pp = true;
     for (uint8_t s = 0; s < 4; s++) {
       if (a.moves[s].id == m.move) {
         m.slot = s;
@@ -5847,20 +6080,23 @@ enum class Stage : uint8_t {
   Nightmare,
   Curse,
   Bind,
+  Uproar,
   Timers,
 };
 inline constexpr Stage STAGES[] = {
     Stage::Ingrain,   Stage::Ability, Stage::Item, Stage::LeechSeed,
     Stage::Status,    Stage::Nightmare, Stage::Curse, Stage::Bind,
-    Stage::Timers,
+    Stage::Uproar,    Stage::Timers,
 };
 
 // One stage of DoBattlerEndTurnEffects for p's active Pokémon. A Pokémon
 // that has fainted skips it, as each case checks its HP. Returns the end of
 // the battle if a residual KO ends it.
 //
-// TODO(plan step 4): ENDTURN_UPROAR and ENDTURN_THRASH
-// (they read WasUnableToUseMove, README decision 2).
+// ENDTURN_UPROAR and ENDTURN_THRASH follow Showdown: they don't read
+// WasUnableToUseMove (README decision 2). Uproar is its own stage, so that
+// on a Speed tie it ends before either Pokémon's Yawn; the Thrash family's
+// lock runs out after Perish Song (lock_residuals).
 template <typename O>
 constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
                              O& options) {
@@ -6007,6 +6243,26 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     return outcome(battle);
   }
 
+  case Stage::Uproar: {
+    // Showdown's gen4 uproar condition (order 10, subOrder 11): the hidden
+    // duration ticks first; at 0 it ends, else the upkeep. The decomp's
+    // ENDTURN_UPROAR also ends it if the user couldn't move (util:1647).
+    if (v.uproar == 0 || !alive()) return std::nullopt;
+    const bool ended = --v.uproar == 0;
+    if constexpr (CHANCE<O>) {
+      rolls::tick(options.chance.actions.get(player).uproar,
+                  options.chance.durations.get(player).attacking, ended, 2, 5, 1,
+                  options);
+    }
+    if (ended) {
+      v.multiple_turns = false;
+      protocol::end_effect(options.log, id, protocol::End::Uproar);
+    } else {
+      protocol::start(options.log, id, protocol::Start::UproarUpkeep);
+    }
+    return std::nullopt;
+  }
+
   case Stage::Timers:
     break;
   }
@@ -6066,7 +6322,8 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
   }
 
   // ENDTURN_YAWN (util:1752): the Pokémon falls asleep the turn after,
-  // unless it has a status, Vital Spirit or Insomnia, or an Uproar is on.
+  // unless it has a status, Vital Spirit or Insomnia, or an Uproar is on
+  // (whose -fail Showdown prints).
   // Safeguard doesn't stop it, but Sleep Clause does (Showdown's yawn ends
   // with trySetStatus from the user, which the clause checks).
   // Log: End Yawn [silent] (its onEnd), then the sleep.
@@ -6075,6 +6332,9 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     if (can_status(battle, player, Secondary::Sleep) && !sleep_clause(battle, player)) {
       MoveState none{};
       inflict(battle, player, Secondary::Sleep, none, options);
+    } else if (uproar(battle) && !mon.status.any() &&
+               a.ability != Ability::VitalSpirit && a.ability != Ability::Insomnia) {
+      uproar_stops(battle, player, options);
     }
   }
 
@@ -6193,6 +6453,72 @@ constexpr void perish_count(Battle& battle, Player player, O& options) {
   passive_damage(battle, player, mon.hp, options);
 }
 
+// The durations with no residual order, which Showdown runs after every
+// other residual (Perish Song's included), for p's active Pokémon. Each
+// lasts while its move renews it (ActivePokemon::renewed: Showdown's
+// duration 2, which this pass brings to 1).
+// - lockedmove (data/conditions.ts:253): at its end the lock goes, and with
+//   trueDuration at 1 the user is confused (onEnd: -start confusion
+//   [fatigue], a fresh 2-5; not over a confusion or Own Tempo, and
+//   Safeguard doesn't stop a confusion from the user itself). Otherwise
+//   onResidual: a sleeping user loses the lock silently, else trueDuration
+//   counts down. The decomp's ENDTURN_THRASH (util:1673) counts the lock
+//   down only on turns the move ran, and ends it if the user couldn't move.
+// - rollout and iceball, furycutter: end silently.
+// - Bide (gen3 mod; its duration 3 at the start): ends silently at 0, if its
+//   third turn's action never came (a faint ended the actions).
+template <typename O>
+constexpr void lock_residuals(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  ActivePokemon& a = side.active;
+  Volatiles& v = a.volatiles;
+  if (side.get(1).fainted()) return;
+  if (v.thrash != 0) {
+    // trueDuration becomes public at the second residual (Durations count
+    // 2): the lock goes on only at 2, and ends in confusion only at 1. At
+    // the first it is 2 or 3, and the lock goes on. Recorded once, with
+    // 1/2 (True: the 2-turn length); the count is then 0, untracked.
+    if constexpr (CHANCE<O>) {
+      uint8_t& c = options.chance.durations.get(player).attacking;
+      if (c == 2) {
+        rolls::tick(options.chance.actions.get(player).thrash, c, v.thrash <= 1, 2, 3,
+                    1, options);
+        c = 0;
+      }
+    }
+    if ((a.renewed & ActivePokemon::RENEWED_LOCK) && v.thrash >= 2) {
+      if (side.get(1).status.asleep()) {
+        v.multiple_turns = false;
+        v.thrash = 0;
+        if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 0;
+      } else {
+        v.thrash--;
+        if constexpr (CHANCE<O>) {
+          uint8_t& c = options.chance.durations.get(player).attacking;
+          if (c != 0) c++;
+        }
+      }
+    } else {
+      const bool fatigue = v.thrash <= 1;
+      v.multiple_turns = false;
+      v.thrash = 0;
+      if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 0;
+      if (fatigue && v.confusion == 0 && a.ability != Ability::OwnTempo) {
+        confuse(battle, player, options, protocol::Start::ConfusionFatigue);
+      }
+    }
+  }
+  if (a.rollout != 0 && !(a.renewed & ActivePokemon::RENEWED_LOCK)) {
+    a.rollout = 0;
+    v.multiple_turns = false;
+  }
+  if (a.fury_cutter != 0 && !(a.renewed & ActivePokemon::RENEWED_FURY_CUTTER)) {
+    a.fury_cutter = 0;
+  }
+  a.renewed = 0;
+  if (v.bide != 0 && --v.bide == 0) end_bide(battle, player, options);
+}
+
 // HandleEndTurn_ContinueBattle (main:3932), then BattleTurnPassed's residuals
 // (main:3956), Perish Song's count and HandleFaintedMonActions.
 template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
@@ -6201,8 +6527,8 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     a.volatiles.flinched = false;
     // The decomp also cancels a sleeping Pokémon's multi-turn move here
     // (main:3944); Showdown keeps it until the move is aborted (see
-    // inflict()). TODO(plan step 4): check Showdown's lockedmove for
-    // Thrash and Uproar when they are written.
+    // inflict()), or for the Thrash family until the residuals
+    // (lock_residuals).
   }
   // The order (see the section comment): ENDTURN_ORDER (util:1209) runs
   // GetWhoStrikesFirst with the chosen moves' priority; Showdown's residual
@@ -6233,6 +6559,7 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   }
   const Player last = s1 != s2 ? faster : log_order(battle);
   for (const Player p : {last, foe(last)}) perish_count(battle, p, options);
+  for (const Player p : {last, foe(last)}) lock_residuals(battle, p, options);
   protocol::faints(options.log);
   // Showdown's stall expires with the residuals, before a residual faint's
   // replacement: a turn without a successful Protect, Detect or Endure ends
@@ -6383,17 +6710,13 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
       // setup is only a message (bs1:3709), which the decomp skips for a
       // sleeping user (main:4915) and Showdown doesn't (its focuspunch
       // condition's onStart: SingleTurn Focus Punch, in the move order).
-      // Then TryClearRageStatuses.
+      // TryClearRageStatuses follows Showdown instead (cancel()).
       for (const Player p : {battle.request.first, foe(battle.request.first)}) {
         if (battle.request.choice[index(p)].type() == Choice::Move &&
             battle.request.move[index(p)] == Move::FocusPunch) {
           protocol::single_turn(options.log, protocol::ident(battle, p),
                                 protocol::SingleTurn::FocusPunch);
         }
-      }
-      for (Side& side : battle.sides) {
-        const Move chosen = battle.request.move[&side - battle.sides];
-        if (chosen != Move::Rage) side.active.volatiles.rage = false;
       }
     } else {
       // Finish Baton Pass's switch-in. A recipient that faints to Spikes

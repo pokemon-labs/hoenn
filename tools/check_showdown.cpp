@@ -300,6 +300,16 @@ constexpr VolatileName VOLATILES[] = {
     {"torment", [](const ActivePokemon& a) { return a.volatiles.torment; }},
     {"charge", [](const ActivePokemon& a) { return a.volatiles.charged_up; }},
     {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.recharge; }},
+    // Step 5 group 4: the locked moves and Rage.
+    {"lockedmove", [](const ActivePokemon& a) {
+       return a.volatiles.multiple_turns && get(a.locked_move).effect == Effect::Rampage;
+     }},
+    {"uproar", [](const ActivePokemon& a) { return a.volatiles.uproar != 0; }},
+    {"bide", [](const ActivePokemon& a) { return a.volatiles.bide != 0; }},
+    {"rollout", [](const ActivePokemon& a) { return a.rollout != 0 && a.locked_move == Move::Rollout; }},
+    {"iceball", [](const ActivePokemon& a) { return a.rollout != 0 && a.locked_move == Move::IceBall; }},
+    {"furycutter", [](const ActivePokemon& a) { return a.fury_cutter != 0; }},
+    {"rage", [](const ActivePokemon& a) { return a.volatiles.rage; }},
     // The semi-invulnerable turn, by the move's own volatile. Not
     // twoturnmove: Showdown keeps it until the residuals after the second
     // turn, so a request in between would differ.

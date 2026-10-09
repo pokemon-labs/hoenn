@@ -329,6 +329,8 @@ class Formatter {
       case F::Toxic: s += "|tox"; break;
       case F::Substitute: s += "|move: Substitute"; break;
       case F::SubstituteWeak: s += "|move: Substitute|[weak]"; break;
+      case F::Uproar: s += "|slp|[from] Uproar"; break;
+      case F::UproarMsg: s += "|slp|[from] Uproar|[msg]"; break;
       case F::Unboost: {
         // Showdown names the holder as both the target and the source.
         // Hyper Cutter and Keen Eye guard one stat, which they name.
@@ -472,6 +474,7 @@ class Formatter {
       case E::AttractMentalHerb: s += "move: Attract|[from] item: Mental Herb"; break;
       case E::Uproar: s += "Uproar"; break;
       case E::Bide: s += "move: Bide"; break;
+      case E::BideSilent: s += "move: Bide|[silent]"; break;
       case E::Stockpile: s += "Stockpile"; break;
       case E::Charge: s += "Charge|[silent]"; break;
       case E::FlashFire: s += "ability: Flash Fire|[silent]"; break;
