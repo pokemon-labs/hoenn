@@ -98,6 +98,8 @@ const std::set<std::string> LOGGED = {
     "-formechange",
     // Step 5 group 2: OHKO moves.
     "-ohko",
+    // Step 5 group 3: recharge.
+    "-mustrecharge",
 };
 
 // Whether a line of a LOGGED type is compared.
@@ -297,11 +299,19 @@ constexpr VolatileName VOLATILES[] = {
     {"foresight", [](const ActivePokemon& a) { return a.volatiles.foresight; }},
     {"torment", [](const ActivePokemon& a) { return a.volatiles.torment; }},
     {"charge", [](const ActivePokemon& a) { return a.volatiles.charged_up; }},
+    {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.recharge; }},
+    // The semi-invulnerable turn, by the move's own volatile. Not
+    // twoturnmove: Showdown keeps it until the residuals after the second
+    // turn, so a request in between would differ.
+    {"fly", [](const ActivePokemon& a) { return a.volatiles.on_air && a.locked_move == Move::Fly; }},
+    {"bounce", [](const ActivePokemon& a) { return a.volatiles.on_air && a.locked_move == Move::Bounce; }},
+    {"dig", [](const ActivePokemon& a) { return a.volatiles.underground; }},
+    {"dive", [](const ActivePokemon& a) { return a.volatiles.underwater; }},
 };
 
 // The active Pokémon's boosts and guarded volatiles against Showdown's.
 std::string active_mismatch(const Battle& battle, Player p,
-                            const json::Value& sa) {
+                            const json::Value& sa, bool over) {
   const ActivePokemon& a = battle.side(p).active;
   const Pokemon& mon = battle.side(p).get(1);
   if (sa.is_null() || mon.hp == 0) return "";
@@ -320,8 +330,11 @@ std::string active_mismatch(const Battle& battle, Player p,
   }
   // Showdown's stall duration, which our `stall` mirrors (protect()): a
   // Protect whose outcome changes nothing visible (the foe's move fails
-  // anyway) can otherwise match either branch and drift the count.
-  if (a.stall != sa["stall"].integer()) {
+  // anyway) can otherwise match either branch and drift the count. Not
+  // once the battle is over: Showdown's residual loop flushes a faint that
+  // ends it only at the next handler, so its count can stop part way
+  // (decided with the user, 2026-10-09).
+  if (!over && a.stall != sa["stall"].integer()) {
     why += std::string(" ") + side + " stall " + std::to_string(a.stall) +
            ", Showdown " + std::to_string(sa["stall"].integer()) + ";";
   }
@@ -422,8 +435,8 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
                        : " the request comes before the residuals, Showdown's after;";
     }
   }
-  why += active_mismatch(battle, Player::P1, step["state"]["p1active"]);
-  why += active_mismatch(battle, Player::P2, step["state"]["p2active"]);
+  why += active_mismatch(battle, Player::P1, step["state"]["p1active"], result.over());
+  why += active_mismatch(battle, Player::P2, step["state"]["p2active"], result.over());
   why += field_mismatch(battle, step["state"]);
   for (int s = 0; s < 2; s++) {
     const char* side = s == 0 ? "p1" : "p2";

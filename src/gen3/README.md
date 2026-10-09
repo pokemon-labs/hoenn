@@ -689,7 +689,7 @@ main = `src/battle_main.c`.
     `locked_move`, separate Thrash, Uproar, Bide, Rollout and Fury Cutter
     counters, and the semi-invulnerable flags, all cleared together by
     `cancel_multi_turn_moves()` (`CancelMultiTurnMoves`). Recharge stays
-    separate.
+    separate, but its timer also ends a two-turn move's charge.
 12. **Hidden counters** are the ones in `Durations`: confusion, Disable,
     Encore, binding, and Uproar or Thrash (`Durations::attacking`; the locked
     move says which). Everything else is fixed-length and public.
@@ -701,8 +701,10 @@ main = `src/battle_main.c`.
     after Baton Pass or a Roar drag-in, and whether Trace can stay pending
     across turns with no valid target.
 14. **`first_turn` (`isFirstTurn`) is a `uint8_t`, 0–2.** Switch-in sets 2
-    (main:3220) and end of turn decrements it (main:4875). Fake Out needs it
-    nonzero (bsc:6790); Speed Boost needs it not 2 (util:2629).
+    (main:3220) and end of turn decrements it (main:4875). Speed Boost needs
+    it not 2 (util:2629). Fake Out (bsc:6790 reads it) follows Showdown's
+    `activeMoveActions` instead (`move_actions`): an action a faint
+    cancelled doesn't use up the first turn.
 
 Packing comes last: natural alignment for now (`Battle` is 816 B against a
 ~700 B target). Revisit padding and `has_unique_object_representations_v`
@@ -796,11 +798,12 @@ the changes.
 | `tauntTimer` | `taunt` | u8 0–2 | | | set 2 (bsc:9160) |
 | `battlerPreventingEscape`, `battlerWithSureHit` | — | | | | dropped (decision 9) |
 | `isFirstTurn` | `first_turn` | u8 0–2 | | | decision 14 |
+| (Showdown's `activeMoveActions`) | `move_actions` | u8 0–2 | | | saturating; Fake Out (decision 14) |
 | `truantCounter` | `truant` | bool | | | switch-in sets 1; flips at end of turn |
 | `truantSwitchInHack` | — | | | | dropped (Battle Arena only) |
 | — | `sleep_skipped` | u8 0–4 | | | Showdown's gen3 `skippedTime`: Sleep Talk/Snore attempts since the last asleep turn that did nothing; given back to the sleep counter on switch-out (the cartridge writes status1 to the party only at util:2259) |
 | `mimickedMoves` | `mimicked` | u4 mask | | | slots Mimic replaced; blocks the PP write-back |
-| `rechargeTimer` | `recharge_timer` | u8 0–2 | | | set 2 (bsc:2730) |
+| `rechargeTimer` | `recharge_timer` | u8 0–2 | | | set 2 (bsc:2730); also set 2 by a two-turn move's charge, which ends with it (Showdown's twoturnmove duration; the decomp has no timer) |
 | every `*StartValue`, `tauntTimer2`, fillers | — | | | | dropped (write-only) |
 
 ### Other per-battler globals cleared on switch-in

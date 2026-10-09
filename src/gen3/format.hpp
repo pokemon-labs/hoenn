@@ -306,6 +306,9 @@ class Formatter {
       out.push_back("|-prepare|" + ident(id) + "|" + move_name(Move(r.u16())));
       return;
     }
+    case ArgType::MustRecharge:
+      out.push_back("|-mustrecharge|" + ident(ID{r.byte()}));
+      return;
     case ArgType::Miss: {
       const ID source{r.byte()};
       out.push_back("|-miss|" + ident(source) + "|" + ident(ID{r.byte()}));

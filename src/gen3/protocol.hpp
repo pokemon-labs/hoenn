@@ -46,6 +46,7 @@
 //   Crit, SuperEffective, Resisted       ident
 //   HitCount     ident, hits
 //   Prepare      ident, move u16
+//   MustRecharge ident
 //   Anim         source, move u16, target
 //   SideStart    player, SideCondition
 //   SideEnd      player, SideCondition [, of for SpikesRapidSpin]
@@ -714,6 +715,14 @@ template <typename L> void prepare(L& log, ID id, Move m) {
     log.write(ArgType::Prepare);
     log.write_byte(id.bits);
     detail::move_id(log, m);
+  }
+}
+
+// -mustrecharge|P: Hyper Beam and its kin hit (mustrecharge's onStart).
+template <typename L> void must_recharge(L& log, ID id) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::MustRecharge);
+    log.write_byte(id.bits);
   }
 }
 

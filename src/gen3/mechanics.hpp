@@ -67,6 +67,14 @@ constexpr bool has_type(const ActivePokemon& active, Type type) {
   return active.types[0] == type || active.types[1] == type;
 }
 
+// The two-turn moves (charge()): Solar Beam, Razor Wind, Skull Bash, Sky
+// Attack, and Fly, Dig, Dive and Bounce.
+constexpr bool two_turn(Effect effect) {
+  return effect == Effect::SolarBeam || effect == Effect::RazorWind ||
+         effect == Effect::SkullBash || effect == Effect::SkyAttack ||
+         effect == Effect::SemiInvulnerable;
+}
+
 // Charging, rampage, Bide, Rollout, Uproar and recharge: the only choice is
 // Move(0), and the action is the locked move (main:4160, util:107).
 constexpr bool forced(const ActivePokemon& active) {
@@ -755,6 +763,16 @@ constexpr void turn_cleanup(Battle& battle) {
     if (a.first_turn != 0) a.first_turn--;
     if (a.recharge_timer != 0 && --a.recharge_timer == 0) {
       a.volatiles.recharge = false;
+      // A two-turn move's charge lasts as long (charge()): Showdown's
+      // twoturnmove and the move's own volatile have duration 2, so a
+      // second turn that never came (a faint ended the actions first) ends
+      // with the turn. The decomp keeps the lock.
+      if (two_turn(get(a.locked_move).effect)) {
+        a.volatiles.multiple_turns = false;
+        a.volatiles.on_air = false;
+        a.volatiles.underground = false;
+        a.volatiles.underwater = false;
+      }
     }
     if (a.substitute_hp == 0) a.volatiles.substitute = false;
   }
@@ -1306,6 +1324,13 @@ constexpr void arrive_both(Battle& battle, bool start, O& options) {
           : log_order(battle);
   arrive(battle, first, options);
   if (outcome(battle)) return;
+  // A first arrival that faints to Spikes cancels the second's: Showdown's
+  // gen3 faint handling cancels every queued action (sim/battle.ts:2596),
+  // and in its traces the other replacement's SwitchIn handlers don't run
+  // (no Pressure line, no toxic reset; seen in 3 games, the queue order
+  // behind it unread). Its toxic counter still resets here (enter()),
+  // where Showdown's carries on from before it left.
+  if (battle.side(first).get(1).fainted()) return;
   arrive(battle, foe(first), options);
 }
 
@@ -1980,7 +2005,8 @@ constexpr bool protected_from(const MoveState& m, Player player) {
 // Showdown's Invulnerability event (gen3 tryMoveHit, before the accuracy
 // roll): a semi-invulnerable target the move can't reach. Lock-On and Mind
 // Reader reach it (the only possible locker in singles is the attacker);
-// Surf hits Dive (HITMARKER_IGNORE_UNDERWATER, bs1:239), and the moves that
+// Surf and Whirlpool hit Dive (HITMARKER_IGNORE_UNDERWATER, bs1:239,
+// and BattleScript_EffectTrap), and the moves that
 // set ignore_on_air or ignore_underground reach Fly and Dig (Earthquake
 // and Magnitude, as Showdown's dig condition).
 constexpr bool invulnerable(const Battle& battle, Player player,
@@ -1989,7 +2015,7 @@ constexpr bool invulnerable(const Battle& battle, Player player,
   if (m.pursuing || v.lock_on != 0) return false;
   return (v.on_air && !m.ignore_on_air) ||
          (v.underground && !m.ignore_underground) ||
-         (v.underwater && m.move != Move::Surf);
+         (v.underwater && m.move != Move::Surf && m.move != Move::Whirlpool);
 }
 
 // The accuracy check without its draw, for a target that isn't protected
@@ -2287,6 +2313,25 @@ constexpr uint32_t fixed_damage(const Battle& battle, Player player, Effect effe
   }
 }
 
+// ChangeStatBuffs (bsc:6937) raising the user's own stat by n, as the
+// self-targeting moves do (MOVE_EFFECT_AFFECTS_USER | STAT_CHANGE_ALLOW_PTR):
+// only the cap stops it, and a raise at +6 marks the move MISSED
+// (bsc:7097), which moveend reads (only Conversion 2's last-landed fields,
+// which Showdown doesn't keep). Returns the stages gained, which the log's
+// Boost carries: Showdown prints `-boost|...|0` for a primary raise at the
+// cap (sim/battle.ts:2083) and no -fail (Battle.boost returns null, a
+// silent failure).
+constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
+  int8_t& b = stage(a.boosts, stat);
+  if (b >= 6) {
+    m.result |= MoveResult::MISSED;
+    return 0;
+  }
+  const int8_t gained = b + n > 6 ? int8_t(6 - b) : n;
+  b = int8_t(b + gained);
+  return gained;
+}
+
 // The effects whose script is BattleScript_EffectHit, maybe after setting a
 // move effect or a hit marker: the plain hits (Quick Attack and Vital Throw
 // differ only in the table; Pursuit only when the target switches,
@@ -2348,6 +2393,11 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::KnockOff:
   case Effect::Thief:
   case Effect::SolarBeam:
+  case Effect::RazorWind:
+  case Effect::SkullBash:
+  case Effect::SkyAttack:
+  case Effect::SemiInvulnerable:
+  case Effect::Recharge:
   case Effect::MultiHit:
   case Effect::Superpower:
   case Effect::Overheat:
@@ -2405,12 +2455,14 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::FreezeHit: return Secondary::Freeze;
   case Effect::ParalyzeHit:
   case Effect::Thunder:
+  case Effect::SemiInvulnerable: // Bounce; Fly, Dig and Dive have chance 0
   case Effect::SecretPower: return Secondary::Paralysis;
   case Effect::ConfuseHit: return Secondary::Confusion;
   case Effect::FlinchHit:
   case Effect::FlinchMinimizeHit:
   case Effect::Twister:
   case Effect::FakeOut:
+  case Effect::SkyAttack:
   case Effect::Snore: return Secondary::Flinch;
   case Effect::TriAttack: return Secondary::TriAttack;
   case Effect::AttackDownHit: return Secondary::AtkDown;
@@ -3274,33 +3326,51 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // BattleScript_EffectFakeOut (bs1:2048): only on the user's first turn
   // out (jumpifnotfirstturn, bsc:6786; README decision 14), else
   // FailedFromAtkString; then the plain hit with a certain flinch
-  // (secondary()). Showdown's activeMoveActions > 1 check fails it on the
-  // same turns in singles, with no message (onTry returns false).
-  if (effect == Effect::FakeOut && battle.side(player).active.first_turn == 0) {
+  // (secondary()). Showdown counts move actions instead (activeMoveActions
+  // > 1, ActivePokemon::move_actions), so a first action that a faint
+  // cancelled leaves Fake Out working the turn after; this follows it. No
+  // message (onTry returns false).
+  if (effect == Effect::FakeOut && battle.side(player).active.move_actions > 1) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  // BattleScript_EffectSolarBeam (bs1:1903). In sun (not suppressed by
-  // Cloud Nine or Air Lock) it fires at once: the plain hit. Otherwise the
-  // first turn charges (BattleScriptFirstChargingTurn, bs1:795): ppreduce
-  // without an attack string, then MOVE_EFFECT_CHARGING locks the move
-  // (STATUS2_MULTIPLETURNS and gLockedMoves, bsc:2571), and moveend. Protect
-  // doesn't stop the charge (the canceler skips a two-turn move's first
-  // turn; here Protect is in accuracy(), which the charge doesn't reach).
-  // The forced second turn (BattleScript_TwoTurnMovesSecondTurn, bs1:785)
-  // clears the lock after the canceler and hits from the accuracy check
-  // with no PP. Showdown's gen3 agrees: twoturnmove, PP on the first turn,
-  // onMoveAborted (see cancel()). Rain, sand and hail halve the power
-  // (damage.hpp). Log: Prepare (and Anim in sun), then Move [from]
-  // lockedmove on the second turn.
-  if (effect == Effect::SolarBeam) {
-    Volatiles& v = battle.side(player).active.volatiles;
+  // The two-turn moves: BattleScript_EffectSolarBeam (bs1:1903), RazorWind
+  // (bs1:778), SkullBash (bs1:1811), SkyAttack (bs1:1064) and
+  // SemiInvulnerable (bs1:1973: Fly, Dig, Dive, Bounce). Solar Beam in sun
+  // (not suppressed by Cloud Nine or Air Lock) fires at once: the plain
+  // hit. Otherwise the first turn charges (BattleScriptFirstChargingTurn,
+  // bs1:795): ppreduce without an attack string, then MOVE_EFFECT_CHARGING
+  // locks the move (STATUS2_MULTIPLETURNS and gLockedMoves, bsc:2571);
+  // Skull Bash raises Defense (at +6, -boost 0 as stat_up_move); Fly and
+  // Bounce take to the air, Dig goes underground and Dive underwater
+  // (setsemiinvulnerablebit); then moveend. Protect doesn't stop the charge
+  // (the canceler skips a two-turn move's first turn; here Protect is in
+  // accuracy(), which the charge doesn't reach). The forced second turn
+  // (BattleScript_TwoTurnMovesSecondTurn, bs1:785;
+  // BattleScript_SecondTurnSemiInvulnerable, bs1:2000) clears the lock and
+  // the semi-invulnerable flag after the canceler and hits from the
+  // accuracy check with no PP; Sky Attack's flinch and Bounce's paralysis
+  // are their secondaries. Showdown's gen3 agrees: twoturnmove, PP on the
+  // first turn, the move's own volatile removed at onTryMove, onMoveAborted
+  // (see cancel()). Where they differ, this follows Showdown: the charge
+  // ends with the next turn even if that turn's move never came
+  // (turn_cleanup, recharge_timer), and Razor Wind's crit ratio
+  // (damage.hpp). Rain, sand and hail halve Solar Beam's power
+  // (damage.hpp). Log: Prepare (then Skull Bash's Boost; in sun, Anim),
+  // then Move [from] lockedmove on the second turn.
+  if (two_turn(effect)) {
+    ActivePokemon& a = battle.side(player).active;
+    Volatiles& v = a.volatiles;
     if (v.multiple_turns) {
       v.multiple_turns = false;
+      v.on_air = false;
+      v.underground = false;
+      v.underwater = false;
       m.no_pp = true;
-    } else if (effective_weather(battle) == Weather::Sun) {
+    } else if (effect == Effect::SolarBeam &&
+               effective_weather(battle) == Weather::Sun) {
       // Showdown's onTryMove still prepares, then marks the move line
       // [still] and plays the attack as -anim (data/moves.ts, solarbeam).
       const ID id = protocol::ident(battle, player);
@@ -3308,11 +3378,22 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       protocol::last_still(options.log);
       protocol::anim(options.log, id, m.move, protocol::ident(battle, foe(player)));
     } else {
+      const ID id = protocol::ident(battle, player);
       protocol::last_still(options.log);
-      protocol::prepare(options.log, protocol::ident(battle, player), m.move);
+      protocol::prepare(options.log, id, m.move);
       pp_reduce(battle, player, m);
+      if (effect == Effect::SkullBash) {
+        protocol::boost(options.log, id, 1, raise(a, 1, 1, m), false);
+      }
       v.multiple_turns = true;
-      battle.side(player).active.locked_move = m.move;
+      a.locked_move = m.move;
+      a.recharge_timer = 2;
+      if (effect == Effect::SemiInvulnerable) {
+        v.on_air = m.move == Move::Fly || m.move == Move::Bounce;
+        v.underground = m.move == Move::Dig;
+        v.underwater = m.move == Move::Dive;
+        assert(v.semi_invulnerable());
+      }
       return moveend(battle, player, m, options);
     }
   }
@@ -3685,6 +3766,22 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       protocol::heal_drain(options.log, protocol::ident(battle, player), user,
                            protocol::ident(battle, defender));
     }
+  }
+
+  // Hyper Beam, Blast Burn, Hydro Cannon and Frenzy Plant
+  // (BattleScript_EffectRecharge, bs1:1111; MOVE_EFFECT_RECHARGE, certain
+  // and on the user, bsc:2727): after a hit that affected the target,
+  // Substitute or not, fainted or not, the user must recharge, locked to
+  // the move with the timer at 2 (turn_cleanup; the canceler spends the
+  // next turn). Showdown's self mustrecharge agrees (duration 2, applied
+  // by selfDrops after the damage and before the secondaries). Log:
+  // MustRecharge.
+  if (effect == Effect::Recharge) {
+    ActivePokemon& a = side.active;
+    a.volatiles.recharge = true;
+    a.recharge_timer = 2;
+    a.locked_move = m.move;
+    protocol::must_recharge(options.log, protocol::ident(battle, player));
   }
 
   if (effect != Effect::Twineedle) secondary(battle, player, m, options);
@@ -4084,25 +4181,6 @@ constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   t.volatiles.yawn = 2;
   protocol::start(options.log, target, protocol::Start::Yawn, user);
   moveend(battle, player, m, options);
-}
-
-// ChangeStatBuffs (bsc:6937) raising the user's own stat by n, as the
-// self-targeting moves do (MOVE_EFFECT_AFFECTS_USER | STAT_CHANGE_ALLOW_PTR):
-// only the cap stops it, and a raise at +6 marks the move MISSED
-// (bsc:7097), which moveend reads (only Conversion 2's last-landed fields,
-// which Showdown doesn't keep). Returns the stages gained, which the log's
-// Boost carries: Showdown prints `-boost|...|0` for a primary raise at the
-// cap (sim/battle.ts:2083) and no -fail (Battle.boost returns null, a
-// silent failure).
-constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
-  int8_t& b = stage(a.boosts, stat);
-  if (b >= 6) {
-    m.result |= MoveResult::MISSED;
-    return 0;
-  }
-  const int8_t gained = b + n > 6 ? int8_t(6 - b) : n;
-  b = int8_t(b + gained);
-  return gained;
 }
 
 // The stat and stages of a one-stat raise: setstatchanger in
@@ -4604,7 +4682,10 @@ constexpr void spikes_move(Battle& battle, Player player, MoveState& m,
 // At least 1, bypassing the user's Substitute; at full HP it does nothing,
 // with no result flag (BattleScript_AlreadyAtFullHp). Showdown floors the
 // same fractions (gen < 5 in sim/battle-actions.ts:1199; the gen4 mod's
-// Morning Sun family, data/mods/gen4/moves.ts:940). Log: Heal, or Fail heal.
+// Morning Sun family, data/mods/gen4/moves.ts:940). That family's gen4
+// onHit is a bare heal, so at full HP Showdown prints nothing after the
+// move line, where the others fail. Log: Heal, or Fail heal (not for the
+// Morning Sun family).
 template <typename O>
 constexpr void heal_move(Battle& battle, Player player, MoveState& m,
                          O& options) {
@@ -4612,14 +4693,17 @@ constexpr void heal_move(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   Pokemon& mon = battle.side(player).get(1);
+  const Effect effect = get(m.move).effect;
+  const bool weather = effect == Effect::MorningSun ||
+                       effect == Effect::Synthesis || effect == Effect::Moonlight;
   if (mon.hp == mon.stats.hp) {
-    protocol::fail(options.log, protocol::ident(battle, player), protocol::Fail::Heal, true);
+    if (!weather) {
+      protocol::fail(options.log, protocol::ident(battle, player), protocol::Fail::Heal, true);
+    }
     return moveend(battle, player, m, options);
   }
-  const Effect effect = get(m.move).effect;
   uint32_t amount = mon.stats.hp / 2u;
-  if (effect == Effect::MorningSun || effect == Effect::Synthesis ||
-      effect == Effect::Moonlight) {
+  if (weather) {
     const Weather w = effective_weather(battle);
     if (w == Weather::Sun) {
       amount = 20u * mon.stats.hp / 30u;
@@ -5416,6 +5500,9 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   const uint8_t i = index(player);
   ActivePokemon& a = battle.side(player).active;
   const uint8_t data = r.choice[i].data();
+
+  // Showdown's runMove counts the action before anything can stop it.
+  if (a.move_actions < 2) a.move_actions++;
 
   MoveState m{};
   m.slot = MoveState::NO_SLOT;

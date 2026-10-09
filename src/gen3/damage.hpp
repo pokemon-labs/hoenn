@@ -170,8 +170,9 @@ constexpr bool typeless(const Hit& hit) {
 
 // The crit stage, 0-4: an index into CRITICAL_HIT_CHANCE. Showdown's critRatio
 // is this plus 1, capped at 5 (battle-actions getDamage), with the same table.
-// The decomp computes the same sum (Cmd_critcalc, bsc:1253). The roll itself
-// is a roll helper in mechanics.hpp.
+// The decomp computes the same sum (Cmd_critcalc, bsc:1253), except that
+// Showdown gives Razor Wind critRatio 2 too, and this follows it. The roll
+// itself is a roll helper in mechanics.hpp.
 constexpr uint8_t crit_stage(const Battle& battle, Player player, Move move) {
   const Side& side = battle.side(player);
   const ActivePokemon& active = side.active;
@@ -181,6 +182,7 @@ constexpr uint8_t crit_stage(const Battle& battle, Player player, Move move) {
   const unsigned stage = 2 * active.volatiles.focus_energy +
                          (effect == Effect::HighCritical) +
                          (effect == Effect::SkyAttack) +
+                         (effect == Effect::RazorWind) +
                          (effect == Effect::BlazeKick) +
                          (effect == Effect::PoisonTail) +
                          (item == HoldEffect::ScopeLens) +

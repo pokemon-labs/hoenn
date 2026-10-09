@@ -292,7 +292,8 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   with Chance and Calc, trapping, faint requests and resuming, the turn cap),
   a few step-3 scenarios (a forced plain hit and its probability, PP, an
   immunity, Focus Band, Struggle, Spikes, a replacement fainting to Spikes,
-  a double KO), then a random self-play soak over the team files.
+  a double KO), some move scenarios (Solar Beam, Dig, Hyper Beam...), then
+  a random self-play soak over the team files.
 
 ```
 CMakeLists.txt, CMakePresets.json
@@ -1083,21 +1084,36 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-- **Resume here:** plan step 5. Group 1 done (10k games: 9936 matched;
-  teams/adv baseline 992/1000). Group 2 written (2026-10-09; Sonic Boom,
-  Dragon Rage, Super Fang, Psywave, Present, Magnitude, the OHKO moves, as
-  Showdown); 10k games: 9956 matched, baseline 992/1000, soak clean. OHKO
-  moves (banned by OHKO Clause) only in `tools/teams/group2_ohko.txt`
-  (soak, check_chance). Fixed on the way, following Showdown: natural
-  immunity vs Wonder Guard on a miss, contact abilities and drain before
-  recoil, no recoil on a 0-HP hit (after the 10k run), Sturdy sets MISSED,
-  Soundproof's and idle Flash Fire's rolls recorded. Open for group 2:
-  Protect's `stall` differs from Showdown on turns Perish Song faints a
-  Pokémon (3 games; Showdown's fieldEvent residual loop, unread); the rest
-  are two-crit rare branches. check_chance's terminal-state comparison
-  flags winner-HP-only differences (1-2 per run, false positives; the
-  user declined changing the test). Next: the stall issue, then group 3.
-  Deferred: the log buffer bound (`MAX_LOG_SIZE` is a placeholder 2048).
+- **Resume here:** plan step 5, group 4 (locked moves; follow Showdown's
+  lockedmove/uproar counters, no Request bit). Groups 1-3 done:
+  - Group 1: 10k games 9936 matched. Group 2 (2026-10-09): 9956; OHKO
+    moves only in `tools/teams/group2_ohko.txt` (soak, check_chance).
+  - Group 3 (2026-10-09): Fly, Dig, Dive, Bounce, Razor Wind, Skull Bash,
+    Sky Attack share Solar Beam's two-turn path (`two_turn`, in `hit()`);
+    Hyper Beam and kin set `recharge`. As Showdown: the charge expires with
+    the next turn if its move never ran (`recharge_timer` doubles as its
+    timer), Razor Wind's high crit, Whirlpool hits Dive. 10k games:
+    9998 matched (the 2 failures match at a 30M-try cap:
+    rare branches); soak and check_chance clean. The teams/adv baseline
+    was 992/1000 before the Fake Out and double-replacement fixes; not
+    rerun after them (run stopped). `check_frame` covers Dig, Skull Bash, the charge expiry
+    and Hyper Beam.
+  - Fixed during group 3, as Showdown: the Morning Sun family at full HP
+    prints no -fail; Fake Out counts move actions (`move_actions`,
+    Showdown's activeMoveActions), not turns; in a double replacement, a
+    first arrival that faints to Spikes cancels the second's switch-in
+    effects (`arrive_both`). `check_showdown` skips `stall` once the
+    battle has ended (the 3 Perish Song games).
+  - Checked: the group 2 Whiscash/Magnitude failures are rare branches
+    (all match at a 30M-try cap), not a Magnitude bug. Known gap: in that
+    double replacement Showdown also keeps the survivor's old toxic stage
+    (its stage lives on the status and persists across switches; ours is
+    in `ActivePokemon`, reset by `enter()`). Fixing it needs a per-Pokémon
+    counter (layout); 2 group-2 games. Unfixed.
+  - check_chance's terminal-state comparison flags winner-HP-only
+    differences (1-2 per run, false positives; the user declined changing
+    the test). Deferred: the log buffer bound (`MAX_LOG_SIZE` is a
+    placeholder 2048).
 - `check_showdown` doesn't build under clang (`json.hpp`'s incomplete
   `std::pair` and a `-Wbitwise-instead-of-logical` at the team setup);
   g++ builds it. Predates group 3d.

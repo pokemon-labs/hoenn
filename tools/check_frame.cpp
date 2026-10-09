@@ -1245,6 +1245,78 @@ void check_solar_beam() {
   CHECK(t.hp < hp && !a.volatiles.multiple_turns);
 }
 
+// Dig: underground for a turn (the foe's move misses, no PP on the second
+// turn); a charge whose second turn never comes (a faint ends the actions
+// first) ends with that turn, as Showdown's twoturnmove. Skull Bash raises
+// Defense as it charges.
+void check_semi_invulnerable() {
+  helpers::Pokemon user = JOLTEON;
+  user.moves[0] = Move::Dig;
+  user.moves[1] = Move::SkullBash;
+  helpers::Pokemon target = SNORLAX;
+  target.moves[2] = Move::Explosion;
+  target.moves[3] = Move::Splash;
+  Observed o{};
+  o.calc.overrides.p1.hit = Optional::True;
+  const uint8_t pp = max_pp(Move::Dig, 3);
+  Battle b = started({user}, {target, SNORLAX});
+  const Pokemon& u = b.sides[0].get(1);
+  const ActivePokemon& a = b.sides[0].active;
+  const auto forced = [&] {
+    std::array<Choice, MAX_CHOICES> out{};
+    const uint8_t n = choices(b, Player::P1, Choice::Move, out);
+    return n == 1 && out[0] == Choice::move(0);
+  };
+  update(b, Choice::move(1), Choice::move(1), o);
+  CHECK(a.volatiles.underground && forced());
+  CHECK(u.hp == u.stats.hp);
+  const uint16_t hp = b.sides[1].get(1).hp;
+  update(b, Choice::move(0), Choice::move(4), o);
+  CHECK(!a.volatiles.underground && !forced());
+  CHECK(b.sides[1].get(1).hp < hp);
+  CHECK(u.moves[0].pp == pp - 1);
+  // Slower now: the foe's Explosion misses and ends the actions, so the
+  // second turn never comes, and the charge ends with the turn.
+  b.sides[0].active.stats.spe = 1;
+  update(b, Choice::move(1), Choice::move(4), o);
+  CHECK(a.volatiles.underground);
+  const Result r = update(b, Choice::move(0), Choice::move(3), o);
+  CHECK(b.sides[1].get(1).fainted() && r.p2() == Choice::Switch);
+  CHECK(u.hp == u.stats.hp);
+  update(b, Choice::pass(), Choice::swap(2), o);
+  CHECK(!a.volatiles.underground && !a.volatiles.multiple_turns && !forced());
+  // Skull Bash: Defense +1 on the charge turn.
+  update(b, Choice::move(2), Choice::move(1), o);
+  CHECK(a.boosts.def == 1 && forced());
+}
+
+// Hyper Beam: a hit makes the user recharge the next turn (no PP, no
+// switch); a miss doesn't.
+void check_recharge() {
+  helpers::Pokemon user = SNORLAX;
+  user.moves[2] = Move::HyperBeam;
+  Observed o{};
+  const uint8_t pp = max_pp(Move::HyperBeam, 3);
+  Battle b = started({user, JOLTEON}, {SNORLAX});
+  const Pokemon& t = b.sides[1].get(1);
+  const ActivePokemon& a = b.sides[0].active;
+  const auto only_recharge = [&] {
+    std::array<Choice, MAX_CHOICES> out{};
+    const uint8_t n = choices(b, Player::P1, Choice::Move, out);
+    return n == 1 && out[0] == Choice::move(0);
+  };
+  o.calc.overrides.p1.hit = Optional::False;
+  update(b, Choice::move(3), Choice::move(2), o);
+  CHECK(!a.volatiles.recharge && !only_recharge());
+  o.calc.overrides.p1.hit = Optional::True;
+  update(b, Choice::move(3), Choice::move(2), o);
+  CHECK(a.volatiles.recharge && only_recharge());
+  const uint16_t hp = t.hp;
+  update(b, Choice::move(0), Choice::move(2), o);
+  CHECK(t.hp == hp && !a.volatiles.recharge && !only_recharge());
+  CHECK(b.sides[0].get(1).moves[2].pp == pp - 2);
+}
+
 // Destiny Bond: the foe that KOs the user faints too (both last: a tie);
 // the user's next move attempt ends it.
 void check_destiny_bond() {
@@ -2817,6 +2889,8 @@ int main(int argc, char** argv) {
   check_thief();
   check_encore();
   check_solar_beam();
+  check_semi_invulnerable();
+  check_recharge();
   check_destiny_bond();
   check_multi_hit();
   check_mimic();

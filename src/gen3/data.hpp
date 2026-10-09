@@ -522,7 +522,7 @@ struct ActivePokemon {
   uint8_t charge_timer;     // 0-2
   uint8_t taunt;            // 0-2
   uint8_t first_turn;       // isFirstTurn, 0-2 (decision 14)
-  uint8_t recharge_timer;   // 0-2
+  uint8_t recharge_timer;   // 0-2; also a two-turn move's charge (turn_cleanup)
   uint8_t mimicked;         // mimickedMoves: a 4-bit mask of move slots
   bool truant;              // truantCounter
   // Showdown's gen3 skippedTime: move attempts spent asleep on Sleep Talk or
@@ -530,6 +530,10 @@ struct ActivePokemon {
   // sleep counter back to the party only when the canceler stops the move
   // or the Pokémon wakes (util:2259), so a switch-out gives these back.
   uint8_t sleep_skipped;
+  // Showdown's activeMoveActions, 0-2 (saturating): move actions since the
+  // switch-in, counted as each starts (runMove), so an action a faint
+  // cancelled doesn't count. Fake Out fails above 1.
+  uint8_t move_actions;
 
   static constexpr uint8_t MAX_TOXIC = 15;
 
@@ -568,6 +572,7 @@ struct ActivePokemon {
            stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
            first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
+           move_actions <= 2 &&
            stall <= 2;
   }
 
