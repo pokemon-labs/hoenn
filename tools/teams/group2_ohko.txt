@@ -1,0 +1,58 @@
+=== [gen3ou] group2 ohko a ===
+
+Lapras @ Leftovers
+Ability: Water Absorb
+EVs: 252 HP / 252 SpA / 4 SpD
+Modest Nature
+- Sheer Cold
+- Horn Drill
+- Surf
+- Substitute
+
+Dugtrio @ Focus Band
+Ability: Arena Trap
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Fissure
+- Earthquake
+- Endure
+- Aerial Ace
+
+Kingler @ Leftovers
+Level: 90
+Ability: Hyper Cutter
+EVs: 252 HP / 252 Atk / 4 Spe
+Adamant Nature
+- Guillotine
+- Crabhammer
+- Swords Dance
+- Protect
+
+=== [gen3ou] group2 ohko b ===
+
+Skarmory @ Leftovers
+Ability: Sturdy
+EVs: 252 HP / 4 Atk / 252 Def
+Impish Nature
+- Spikes
+- Drill Peck
+- Toxic
+- Protect
+
+Rhydon @ Choice Band
+Ability: Lightning Rod
+EVs: 252 HP / 252 Atk / 4 Def
+Adamant Nature
+- Horn Drill
+- Fissure
+- Rock Slide
+- Earthquake
+
+Gengar @ Leftovers
+Ability: Levitate
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Thunderbolt
+- Substitute
+- Destiny Bond
+- Ice Punch

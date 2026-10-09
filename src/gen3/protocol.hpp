@@ -12,6 +12,7 @@
 //   Miss         source, target
 //   Fail         ident, Fail [, ability for Unboost and Ability]
 //   Immune       ident, Immune [, ability for Ability and Confusion]
+//   OHKO         -
 //   Activate     ident, Activate, then: Ability: ability; Magnitude: n;
 //                activate_move: move u16; activate_of: of (move first)
 //   Start        ident, Start, then: Curse..AttractCuteCharm: of;
@@ -161,6 +162,7 @@ enum class Immune : uint8_t {
   None,
   Ability,   // |[from] ability: A, + ability
   Confusion, // |confusion|[from] ability: A, + ability (Own Tempo)
+  OHKO,      // |[ohko]: an OHKO move from a lower level (gen3 tryMoveHit)
 };
 
 // -status's [from]. Showdown's gen3 conditions (data/conditions.ts and the
@@ -523,7 +525,9 @@ void immune(L& log, ID id, Immune reason = Immune::None, Ability a = Ability::No
     log.write(ArgType::Immune);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(reason));
-    if (reason != Immune::None) log.write_byte(uint8_t(a));
+    if (reason == Immune::Ability || reason == Immune::Confusion) {
+      log.write_byte(uint8_t(a));
+    }
   }
 }
 
@@ -543,6 +547,16 @@ template <typename L> void activate_ability(L& log, ID id, Ability a) {
     log.write_byte(id.bits);
     log.write_byte(uint8_t(Activate::Ability));
     log.write_byte(uint8_t(a));
+  }
+}
+
+// -activate|P|move: Magnitude|N.
+template <typename L> void activate_magnitude(L& log, ID id, uint8_t n) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Activate);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(Activate::Magnitude));
+    log.write_byte(n);
   }
 }
 
@@ -677,6 +691,12 @@ template <typename L> void crit(L& log, ID id) {
     log.write(ArgType::Crit);
     log.write_byte(id.bits);
   }
+}
+
+// -ohko: an OHKO move's hit that took the target's last HP, or any of its
+// hits on a Substitute (Showdown's gen4 Substitute onTryPrimaryHit).
+template <typename L> void ohko(L& log) {
+  if constexpr (L::enabled) log.write(ArgType::OHKO);
 }
 
 // -hitcount|P|N after a multi-hit move's loop.

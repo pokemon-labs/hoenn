@@ -81,22 +81,9 @@ inline constexpr MagnitudeEntry MAGNITUDE[7] = {
     {85, 8, 90},  {95, 9, 110}, {100, 10, 150},
 };
 
-// Cmd_presentdamagecalculation (bsc:8613): r = Random() & 0xFF, and the first
-// entry with r < bound gives the power. Otherwise (r >= 204) Present heals the
-// target by maxHP / 4 (at least 1), or fails if it's at full HP.
-struct PresentEntry {
-  uint8_t bound;
-  uint8_t power;
-};
-inline constexpr PresentEntry PRESENT[3] = {{102, 40}, {178, 80}, {204, 120}};
-
 // Cmd_setmultihitcounter (bsc:7140): two draws give 2, 3, 4 or 5 hits with
 // probabilities 3/8, 3/8, 1/8, 1/8. Indexed by hits - 2, in eighths.
 inline constexpr uint8_t MULTI_HIT_EIGHTHS[4] = {3, 3, 1, 1};
-
-// Cmd_psywavedamageeffect (bsc:7932): r is uniform over 0-10 (rejection
-// sampling on Random() % 16), and damage = level * (r * 10 + 50) / 100.
-inline constexpr uint8_t PSYWAVE_ROLLS = 11;
 
 // sHoldEffectToType (src/pokemon.c): the type a type-boosting item boosts, or
 // None if it isn't one. The boost is the item's param (10%).

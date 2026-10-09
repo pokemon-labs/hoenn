@@ -1,0 +1,279 @@
+=== [gen3ou] group2 fixed ===
+
+Magneton @ Leftovers
+Ability: Magnet Pull
+EVs: 252 HP / 252 SpA / 4 Spe
+Modest Nature
+- Sonic Boom
+- Thunderbolt
+- Thunder Wave
+- Substitute
+
+Raticate @ Choice Band
+Ability: Guts
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Super Fang
+- Return
+- Shadow Ball
+- Quick Attack
+
+Gyarados @ Leftovers
+Ability: Intimidate
+EVs: 252 HP / 252 Atk / 4 Spe
+Adamant Nature
+- Dragon Rage
+- Dragon Dance
+- Earthquake
+- Double-Edge
+
+Grumpig @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Psywave
+- Calm Mind
+- Psychic
+- Substitute
+
+Delibird @ Leftovers
+Ability: Hustle
+EVs: 252 HP / 252 Atk / 4 Spe
+Adamant Nature
+- Present
+- Ice Beam
+- Aerial Ace
+- Rapid Spin
+
+Golem @ Leftovers
+Ability: Sturdy
+EVs: 252 HP / 252 Atk / 4 Def
+Adamant Nature
+- Magnitude
+- Rock Slide
+- Explosion
+- Toxic
+
+=== [gen3ou] group2 levitate ===
+
+Electrode @ Leftovers
+Ability: Static
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Sonic Boom
+- Thunderbolt
+- Explosion
+- Taunt
+
+Dragonite @ Choice Band
+Ability: Inner Focus
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Dragon Rage
+- Earthquake
+- Double-Edge
+- Dragon Claw
+
+Misdreavus @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 4 Def / 252 Spe
+Timid Nature
+- Psywave
+- Perish Song
+- Mean Look
+- Protect
+
+Chansey @ Leftovers
+Ability: Natural Cure
+EVs: 252 HP / 252 Def / 4 SpD
+Bold Nature
+- Present
+- Soft-Boiled
+- Seismic Toss
+- Toxic
+
+Dugtrio @ Choice Band
+Ability: Arena Trap
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Magnitude
+- Earthquake
+- Rock Slide
+- Aerial Ace
+
+Shedinja @ Lum Berry
+Ability: Wonder Guard
+EVs: 252 Atk / 4 Def / 252 Spe
+Adamant Nature
+- Shadow Ball
+- Toxic
+- Protect
+- Substitute
+
+=== [gen3ou] group2 sand ===
+
+Camerupt @ Leftovers
+Ability: Magma Armor
+EVs: 252 HP / 252 SpA / 4 SpD
+Quiet Nature
+- Magnitude
+- Fire Blast
+- Rock Slide
+- Toxic
+
+Whiscash @ Leftovers
+Ability: Oblivious
+EVs: 252 HP / 252 Def / 4 SpD
+Relaxed Nature
+- Magnitude
+- Surf
+- Amnesia
+- Rest
+
+Charizard @ Leftovers
+Ability: Blaze
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Dragon Rage
+- Flamethrower
+- Earthquake
+- Rock Slide
+
+Miltank @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 252 Def / 4 Atk
+Impish Nature
+- Present
+- Milk Drink
+- Body Slam
+- Heal Bell
+
+Solrock @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 252 Def / 4 SpA
+Impish Nature
+- Psywave
+- Rock Slide
+- Explosion
+- Reflect
+
+Tyranitar @ Leftovers
+Ability: Sand Stream
+EVs: 252 HP / 252 Atk / 4 SpD
+Adamant Nature
+- Rock Slide
+- Earthquake
+- Crunch
+- Substitute
+
+=== [gen3ou] group2 ghosts ===
+
+Gengar @ Leftovers
+Ability: Levitate
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Thunderbolt
+- Ice Punch
+- Substitute
+- Destiny Bond
+
+Umbreon @ Leftovers
+Ability: Synchronize
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Mean Look
+- Toxic
+- Protect
+- Return
+
+Skarmory @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 4 Atk / 252 Def
+Impish Nature
+- Spikes
+- Roar
+- Drill Peck
+- Toxic
+
+Togetic @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Present
+- Soft-Boiled
+- Thunder Wave
+- Flamethrower
+
+Lunatone @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 252 SpA / 4 Spe
+Modest Nature
+- Psywave
+- Psychic
+- Calm Mind
+- Hypnosis
+
+Raticate @ Focus Band
+Ability: Guts
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Super Fang
+- Substitute
+- Return
+- Endure
+
+=== [gen3ou] group2 walls ===
+
+Blissey @ Leftovers
+Ability: Natural Cure
+EVs: 252 HP / 252 Def / 4 SpD
+Bold Nature
+- Present
+- Soft-Boiled
+- Seismic Toss
+- Calm Mind
+
+Chimecho @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 252 SpD / 4 SpA
+Calm Nature
+- Psywave
+- Psychic
+- Calm Mind
+- Heal Bell
+
+Magneton @ Leftovers
+Ability: Sturdy
+EVs: 252 HP / 252 SpA / 4 Spe
+Modest Nature
+- Sonic Boom
+- Thunderbolt
+- Thunder Wave
+- Protect
+
+Gyarados @ Leftovers
+Ability: Intimidate
+EVs: 252 HP / 4 Atk / 252 SpD
+Careful Nature
+- Dragon Rage
+- Earthquake
+- Taunt
+- Roar
+
+Golem @ Choice Band
+Ability: Rock Head
+EVs: 252 HP / 252 Atk / 4 Def
+Adamant Nature
+- Magnitude
+- Rock Slide
+- Double-Edge
+- Explosion
+
+Electrode @ Focus Band
+Ability: Static
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Sonic Boom
+- Thunderbolt
+- Thunder Wave
+- Endure

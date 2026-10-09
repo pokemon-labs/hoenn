@@ -293,6 +293,9 @@ class Formatter {
     case ArgType::Resisted:
       out.push_back("|-resisted|" + ident(ID{r.byte()}));
       return;
+    case ArgType::OHKO:
+      out.push_back("|-ohko");
+      return;
     case ArgType::HitCount: {
       const ID id{r.byte()};
       out.push_back("|-hitcount|" + ident(id) + "|" + std::to_string(r.byte()));
@@ -349,6 +352,7 @@ class Formatter {
       case I::Confusion:
         s += "|confusion|[from] ability: " + ability_name(Ability(r.byte()));
         break;
+      case I::OHKO: s += "|[ohko]"; break;
       }
       out.push_back(s);
       return;

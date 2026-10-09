@@ -295,6 +295,59 @@ constexpr uint8_t tri_attack(Battle& battle, Player p, O& options) {
   return which;
 }
 
+// Present, Magnitude and Psywave's outcome (Action::variable), as Showdown's
+// draws, which differ from the decomp's:
+// - Present's random(10): 1 heals (2/10), 2, 3, 4 hit with 40, 80, 120 power
+//   (4/10, 3/10, 1/10). The decomp's Random() & 0xFF gives 52, 102, 76 and
+//   26 of 256 (bsc:8613).
+// - Magnitude's random(100): the magnitude, 4-10, by MAGNITUDE's bounds (the
+//   same as the decomp's, bsc:8670).
+// - Psywave's random(50, 151): the percentage of the user's level, 50-150
+//   (the decomp's steps of 10, bsc:7936).
+// variable() draws it, or takes the override; it's recorded by
+// variable_matters() once its outcome can change the state (Magnitude's is
+// drawn and logged before the accuracy roll).
+template <typename O>
+constexpr uint8_t variable(Battle& battle, Player p, Effect effect, O& options) {
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).variable;
+  if (effect == Effect::Present) {
+    assert(forced <= 4);
+    if (forced != 0) return forced;
+    const uint32_t r = battle.rng.range(10);
+    return r < 2 ? 1 : r < 6 ? 2 : r < 9 ? 3 : 4;
+  }
+  if (effect == Effect::Magnitude) {
+    assert(forced == 0 || (forced >= 4 && forced <= 10));
+    if (forced != 0) return forced;
+    const uint32_t r = battle.rng.range(100);
+    for (const MagnitudeEntry& e : MAGNITUDE) {
+      if (r < e.bound) return e.magnitude;
+    }
+    assert(false);
+  }
+  assert(effect == Effect::Psywave);
+  assert(forced == 0 || (forced >= 50 && forced <= 150));
+  return forced != 0 ? forced : uint8_t(50 + battle.rng.range(101));
+}
+
+template <typename O>
+constexpr void variable_matters(Player p, Effect effect, uint8_t value, O& options) {
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).variable, value);
+    if (effect == Effect::Present) {
+      constexpr uint8_t TENTHS[4] = {2, 4, 3, 1};
+      observe(options, TENTHS[value - 1], 10);
+    } else if (effect == Effect::Magnitude) {
+      const uint8_t i = uint8_t(value - 4);
+      observe(options, MAGNITUDE[i].bound - (i == 0 ? 0 : MAGNITUDE[i - 1].bound), 100);
+    } else {
+      observe(options, 1, 101);
+    }
+  }
+  (void)p, (void)effect, (void)value, (void)options;
+}
+
 // A crit on hit `i`: !(Random() % n) with n from the crit stage (bsc:1282).
 template <typename O>
 constexpr bool crit(Battle& battle, Player p, uint8_t i, uint8_t stage,
@@ -1552,9 +1605,10 @@ struct MoveState {
   // Baton Pass worked: the user's side picks the recipient after the action
   // (Phase::BatonPass), as Showdown's switchFlag.
   bool pass;
-  // The multi-hit loop ran the target's contact abilities after each hit
-  // (moveendto MOVEEND_NEXT_TARGET), so moveend doesn't run them again.
-  bool multi;
+  // hit() ran the target's contact abilities: after each hit of a multi-hit
+  // loop (moveendto MOVEEND_NEXT_TARGET), or after a single hit's
+  // secondaries, so moveend doesn't run them again.
+  bool contact_done;
   // gBattleStruct->changedItems for the user: the item Thief or Covet took,
   // given to the user at MOVEEND_CHANGED_ITEMS. None when nothing was taken.
   Item stolen;
@@ -1927,8 +1981,8 @@ constexpr bool protected_from(const MoveState& m, Player player) {
 // roll): a semi-invulnerable target the move can't reach. Lock-On and Mind
 // Reader reach it (the only possible locker in singles is the attacker);
 // Surf hits Dive (HITMARKER_IGNORE_UNDERWATER, bs1:239), and the moves that
-// set ignore_on_air or ignore_underground reach Fly and Dig. TODO(plan
-// step 4): Magnitude.
+// set ignore_on_air or ignore_underground reach Fly and Dig (Earthquake
+// and Magnitude, as Showdown's dig condition).
 constexpr bool invulnerable(const Battle& battle, Player player,
                             const MoveState& m) {
   const Volatiles& v = battle.side(foe(player)).active.volatiles;
@@ -1972,6 +2026,13 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   if (m.pursuing) return 100;
   // Lock-On and Mind Reader.
   if (f.volatiles.lock_on != 0) return 100;
+  // OHKO moves, as Showdown's gen3 tryMoveHit: 30 plus the level
+  // difference (try_hit has stopped a lower-level user), replacing the
+  // stages and the accuracy modifiers. The decomp's Cmd_tryKO (bsc:7490)
+  // skips them too, but hits on Random() % 100 + 1 < 30: 29 in 100.
+  if (data.effect == Effect::Ohko) {
+    return 30u + side.get(1).level - foe_side.get(1).level;
+  }
   // Stomp, Astonish, Needle Arm and Extrasensory into a minimized target, as
   // Showdown's minimize condition (onAccuracy, its gen3 minimize flags); the
   // decomp only doubles their damage.
@@ -2193,6 +2254,39 @@ constexpr Type move_type(const Battle& battle, Move move) {
   }
 }
 
+// The damage of a move with no formula, or 0 for any other: Showdown's
+// getDamage before the formula (sim/battle-actions.ts:1593), after the
+// immunities. The decomp agrees except for Psywave (rolls::variable).
+// - Seismic Toss and Night Shade (dmgtolevel, bsc:7926): the user's level.
+// - Sonic Boom and Dragon Rage (bs1:1720, 819): 20 and 40.
+// - Super Fang (damagetohalftargethp, bsc:7577): half the target's HP
+//   (not its Substitute's), at least 1. Showdown doesn't floor the half:
+//   a Substitute can keep a fractional HP, which flooring here matches
+//   exactly against every later whole-number hit.
+// - Psywave (bs1:1206): `psywave` percent of the user's level, floored and
+//   at least 1 (Showdown's Pokemon.damage) where the level isn't 100.
+// - The OHKO moves (BattleScript_EffectOHKO, bs1:762): the target's HP, as
+//   Showdown's gen3; Endure, Focus Band and a Substitute work as for any
+//   hit (survive(), hp_update()).
+constexpr uint32_t fixed_damage(const Battle& battle, Player player, Effect effect,
+                                uint8_t psywave) {
+  const Pokemon& user = battle.side(player).get(1);
+  const Pokemon& target = battle.side(foe(player)).get(1);
+  switch (effect) {
+  case Effect::LevelDamage: return user.level;
+  case Effect::Sonicboom: return 20;
+  case Effect::DragonRage: return 40;
+  case Effect::SuperFang: return target.hp / 2u == 0 ? 1u : target.hp / 2u;
+  case Effect::Psywave: {
+    assert(psywave >= 50 && psywave <= 150);
+    const uint32_t d = uint32_t(psywave) * user.level / 100u;
+    return d == 0 ? 1u : d;
+  }
+  case Effect::Ohko: return target.hp;
+  default: return 0;
+  }
+}
+
 // The effects whose script is BattleScript_EffectHit, maybe after setting a
 // move effect or a hit marker: the plain hits (Quick Attack and Vital Throw
 // differ only in the table; Pursuit only when the target switches,
@@ -2277,6 +2371,15 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::SecretPower:
   case Effect::PayDay:
   case Effect::RecoilIfMiss:
+  // Step 5 group 2: fixed and variable damage, and the OHKO moves; see
+  // fixed_damage() and hit().
+  case Effect::Sonicboom:
+  case Effect::DragonRage:
+  case Effect::SuperFang:
+  case Effect::Psywave:
+  case Effect::Ohko:
+  case Effect::Present:
+  case Effect::Magnitude:
     return true;
   default:
     return false;
@@ -2677,6 +2780,10 @@ struct Aim {
   // Whether a hit that gets past TryHit changes the state. If not, the roll
   // changes only the log (a miss, or the move's own failure after it).
   bool matters = true;
+  // The target's Wonder Guard stops the move (its TryHit, after Protect's
+  // and the other abilities'). On a miss a natural immunity is still a
+  // plain -immune, so the roll changes the log.
+  bool wonder_guard = false;
 };
 
 // Showdown's gen3 tryMoveHit (data/mods/gen3/scripts.ts:263) from the
@@ -2709,20 +2816,37 @@ constexpr bool try_hit(Battle& battle, Player player, MoveState& m, Aim aim,
     return false;
   }
   const ActivePokemon& t = battle.side(defender).active;
+  // An OHKO move from a lower level fails before the roll (Showdown's gen3
+  // tryMoveHit; Cmd_tryKO, bsc:7490, checks it with the accuracy roll).
+  const bool ohko = get(m.move).effect == Effect::Ohko;
+  if (ohko && battle.side(player).get(1).level < battle.side(defender).get(1).level) {
+    protocol::immune(options.log, target, protocol::Immune::OHKO);
+    m.result |= MoveResult::DOESNT_AFFECT_FOE;
+    return false;
+  }
   const bool protect = protected_from(m, player);
   const bool soundproof = t.ability == Ability::Soundproof && sound(m.move);
+  // Sturdy stops OHKO moves (its onTryHit, after Protect's).
+  const bool sturdy = ohko && t.ability == Ability::Sturdy;
   const Absorb absorb = absorbs(battle, player, m);
-  const bool blocked = protect || soundproof || absorb != Absorb::None;
+  const bool blocked = protect || soundproof || sturdy || absorb != Absorb::None;
 
   bool hits = true;
   if (const uint32_t calc = aim.sure ? 100 : accuracy(battle, player, m); calc < 100) {
     assert(calc > 0);
-    const bool recorded = !protect && !soundproof &&
-                          (absorb != Absorb::None ? absorb == Absorb::Takes
-                                                  : !aim.immune && aim.matters);
+    // A block by Protect, Sturdy, Water Absorb or Volt Absorb with no heal
+    // leaves the state a miss would (a NO_EFFECT flag). Soundproof and
+    // Flash Fire set none, so moveend records the move as landed
+    // (last_landed_move, last_taken_move) and their roll matters even when
+    // the block itself changes nothing.
+    const bool recorded =
+        !protect && !sturdy &&
+        (soundproof || absorb == Absorb::Takes ||
+         (absorb == Absorb::Idle && t.ability == Ability::FlashFire) ||
+         (absorb == Absorb::None && !aim.immune && aim.matters));
     if (recorded) {
       hits = rolls::hit(battle, player, calc, options);
-    } else if (!aim.immune || blocked) {
+    } else if (!aim.immune || blocked || aim.wonder_guard) {
       hits = battle.rng.chance(calc, 100);
     }
   }
@@ -2742,12 +2866,19 @@ constexpr bool try_hit(Battle& battle, Player player, MoveState& m, Aim aim,
     return false;
   }
   // BattleScript_SoundproofProtected (bs1:4158) sets no result flag.
-  if (soundproof) {
-    protocol::immune(options.log, target, protocol::Immune::Ability, Ability::Soundproof);
+  // Sturdy's block sets MISSED (Cmd_tryKO, bsc:7490), as a miss would.
+  if (soundproof || sturdy) {
+    protocol::immune(options.log, target, protocol::Immune::Ability, t.ability);
+    if (sturdy) m.result |= MoveResult::MISSED;
     return false;
   }
   if (absorb != Absorb::None) {
     absorbed(battle, player, m, absorb, options);
+    return false;
+  }
+  if (aim.wonder_guard) {
+    protocol::immune(options.log, target, protocol::Immune::Ability, Ability::WonderGuard);
+    m.result |= MoveResult::DOESNT_AFFECT_FOE;
     return false;
   }
   if (aim.immune) {
@@ -2962,7 +3093,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // SYNCHRONIZE_ATTACKER. No self-targeting move arms Synchronize (Rest's
   // sleep doesn't), so its target case is the foe's.
   if (!m.self) synchronize(battle, foe(player), m, options);
-  if (!m.multi) ability_on_damage(battle, player, m, 0, options);
+  if (!m.contact_done) ability_on_damage(battle, player, m, 0, options);
   ability_immunity(battle, options);
   synchronize(battle, player, m, options);
 
@@ -3316,6 +3447,18 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       }
     }
   }
+  // Present, Magnitude or Psywave's draw (rolls::variable).
+  uint8_t variable = 0;
+  // Magnitude (BattleScript_EffectMagnitude, bs1:1683): the magnitude is
+  // drawn and logged before the accuracy check, as Showdown's onModifyMove
+  // and onUseMoveMessage (the decomp has no accuracy check before it
+  // either), so it is recorded only once the move reaches its target. It
+  // hits Dig (ignore_underground) for double damage (damage.hpp).
+  if (effect == Effect::Magnitude) {
+    variable = rolls::variable(battle, player, effect, options);
+    h.power = MAGNITUDE[variable - 4].power;
+    protocol::activate_magnitude(options.log, protocol::ident(battle, player), variable);
+  }
 
   // typecalc's immunities first, as Showdown (decided; README "Damage"). A
   // move with no effect draws no crit, and its accuracy roll changes only
@@ -3333,14 +3476,19 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   SideConditions& foe_conditions = foe_side.conditions;
   const bool breaks = effect == Effect::BrickBreak &&
                       (foe_conditions.reflect != 0 || foe_conditions.light_screen != 0);
-  const bool immune = !affects && !wonder_guard;
+  // A natural immunity (the type chart or Levitate), whether or not Wonder
+  // Guard would also stop the move.
+  const bool immune = (m.result & MoveResult::DOESNT_AFFECT_FOE) != 0;
   m.attackstring = true;
   pp_reduce(battle, player, m);
   // Protect is part of the accuracy check, which comes before typecalc, so
   // it blocks a move the target is immune to too (Showdown's Protect
   // TryHit also comes first).
   if (!try_hit(battle, player, m,
-               {.immune = immune && !breaks, .matters = affects || breaks}, options)) {
+               {.immune = immune && !breaks,
+                .matters = affects || breaks,
+                .wonder_guard = wonder_guard && !breaks},
+               options)) {
     if (effect == Effect::RecoilIfMiss) crash(battle, player, m, h, options);
     moveend(battle, player, m, options);
     if (effect == Effect::Explosion) faint(battle, player, options);
@@ -3369,6 +3517,39 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     moveend(battle, player, m, options);
     if (effect == Effect::Explosion) faint(battle, player, options);
     return;
+  }
+
+  if (effect == Effect::Magnitude) rolls::variable_matters(player, effect, variable, options);
+  if (effect == Effect::Psywave) {
+    variable = rolls::variable(battle, player, effect, options);
+    rolls::variable_matters(player, effect, variable, options);
+  }
+  // Present (BattleScript_EffectPresent, bs1:1664), as Showdown's
+  // onModifyMove, whose draw comes before the accuracy roll but matters
+  // only after it: 40, 80 or 120 power, or a heal of a quarter of the
+  // target's max HP, with -fail|heal at full HP (runMoveEffects,
+  // sim/battle-actions.ts:1190). The heal sets infiltrates, but gen4
+  // Substitute's onTryPrimaryHit ignores it: getDamage gives no damage, so
+  // the user's move fails into a Substitute (data/mods/gen4/moves.ts:1309).
+  // The decomp's odds differ (rolls::variable). Log: Heal, Fail Heal, or
+  // the user's Fail, each failure with [still].
+  if (effect == Effect::Present) {
+    variable = rolls::variable(battle, player, effect, options);
+    rolls::variable_matters(player, effect, variable, options);
+    if (variable == 1) {
+      const ID id = protocol::ident(battle, defender);
+      if (foe_side.active.volatiles.substitute) {
+        protocol::failed(options.log, protocol::ident(battle, player));
+      } else if (target.hp >= target.stats.hp) {
+        protocol::fail(options.log, id, protocol::Fail::Heal, true);
+      } else {
+        target.hp = uint16_t(std::min<uint32_t>(target.stats.hp,
+                                                target.hp + target.stats.hp / 4u));
+        protocol::heal(options.log, id, target);
+      }
+      return moveend(battle, player, m, options);
+    }
+    h.power = variable == 2 ? 40 : variable == 3 ? 80 : 120;
   }
 
   if (effect == Effect::MultiHit || effect == Effect::DoubleHit ||
@@ -3433,7 +3614,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     }
     if (effect == Effect::TripleKick) rolls::kicks(player, hits, options);
     m.damaged = damaged;
-    m.multi = true;
+    m.contact_done = true;
     protocol::hit_count(options.log, protocol::ident(battle, defender), hits);
     // Showdown's faintMessages after the hit loop (sim/battle-actions.ts:969).
     protocol::faints(options.log);
@@ -3442,11 +3623,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // then whatever lets the target survive at 1 HP (not behind a
     // Substitute). Focus Band is drawn only when the hit would be lethal,
     // and not for False Swipe, which spares the target anyway.
-    // Seismic Toss and Night Shade: the user's level, with no crit or roll
-    // (dmgtolevel, then adjustsetdamage, bsc:5878, which has the same
-    // survival checks).
-    uint32_t d = fixed != 0 ? fixed : user.level;
-    if (effect != Effect::LevelDamage && fixed == 0) {
+    // The moves with no formula (fixed_damage) have no crit or roll
+    // (adjustsetdamage, bsc:5878, has the same survival checks).
+    uint32_t d = fixed != 0 ? fixed : fixed_damage(battle, player, effect, variable);
+    if (d == 0) {
       if (can_crit(battle, player)) {
         h.crit = rolls::crit(battle, player, 0,
                              crit_stage(battle, player, m.move), options);
@@ -3459,6 +3639,12 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // datahpupdate
     m.hp_dealt = hp_update(battle, defender, d, m, options);
     log_hit(battle, player, m, options);
+    // An OHKO move's -ohko: after a hit that took the target's last HP
+    // (gen3 tryMoveHit), or after any hit on its Substitute (gen4
+    // Substitute's onTryPrimaryHit).
+    if (effect == Effect::Ohko && (!m.damaged || target.fainted())) {
+      protocol::ohko(options.log);
+    }
   }
 
   // Showdown's onHit, before the secondaries, on a hit that reached the
@@ -3477,7 +3663,43 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     target.status = Status::none();
   }
 
+  // Absorb, Mega Drain and Giga Drain (BattleScript_EffectAbsorb, bs1:323):
+  // negativedamage (bsc:6925), half the HP dealt, at least 1, healed past
+  // the user's Substitute, or taken from it if the target has Liquid Ooze.
+  // As Showdown, half a Substitute's damage rounds up (gen4 Substitute's
+  // drain, data/mods/gen4/moves.ts:1332; the decomp floors it) and a move
+  // with no effect drains nothing (the decomp still drains 1). The user's
+  // Liquid Ooze faint comes before the target's (bs1:358). Showdown drains
+  // with the damage (spreadDamage, sim/battle.ts:2168), so before the
+  // contact ability below; no drain move has a secondary. Log: Heal [from]
+  // drain, or Damage [from] Liquid Ooze.
+  if (effect == Effect::Absorb && affects && m.hp_dealt != 0) {
+    uint16_t drain = m.damaged ? uint16_t(m.hp_dealt / 2) : uint16_t((m.hp_dealt + 1) / 2);
+    if (drain == 0) drain = 1;
+    if (foe_side.active.ability == Ability::LiquidOoze) {
+      passive_damage(battle, player, drain, options);
+      protocol::damage_ability(options.log, protocol::ident(battle, player), user,
+                               Ability::LiquidOoze, protocol::ident(battle, defender));
+    } else if (user.hp != user.stats.hp) {
+      heal(user, drain);
+      protocol::heal_drain(options.log, protocol::ident(battle, player), user,
+                           protocol::ident(battle, defender));
+    }
+  }
+
   if (effect != Effect::Twineedle) secondary(battle, player, m, options);
+
+  // The target's contact ability, as Showdown's DamagingHit (spreadMoveHit,
+  // sim/battle-actions.ts:1112): after the secondaries, before the
+  // AfterHit handlers (Knock Off, Thief) and the recoil (applyRecoilDamage
+  // in tryMoveHit). The decomp runs it in moveend
+  // (MOVEEND_ON_DAMAGE_ABILITIES), after all of them. Rage and the
+  // defrost, also onHit and DamagingHit there, stay in moveend: no move on
+  // the teams reaches that order.
+  if (!m.contact_done) {
+    ability_on_damage(battle, player, m, 0, options);
+    m.contact_done = true;
+  }
 
   // Knock Off (bs1:2475, MOVE_EFFECT_KNOCK_OFF, bsc:2858), as Showdown's
   // gen4 onAfterHit (data/mods/gen4/moves.ts:718; README decision 8): after
@@ -3574,36 +3796,17 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     if constexpr (CHANCE<O>) options.chance.durations.get(player).binding = 0;
   }
 
-  // Absorb, Mega Drain and Giga Drain (BattleScript_EffectAbsorb, bs1:323):
-  // negativedamage (bsc:6925), half the HP dealt, at least 1, healed past
-  // the user's Substitute, or taken from it if the target has Liquid Ooze.
-  // As Showdown, half a Substitute's damage rounds up (gen4 Substitute's
-  // drain, data/mods/gen4/moves.ts:1332; the decomp floors it) and a move
-  // with no effect drains nothing (the decomp still drains 1). The user's
-  // Liquid Ooze faint comes before the target's (bs1:358). Log: Heal
-  // [from] drain, or Damage [from] Liquid Ooze.
-  if (effect == Effect::Absorb && affects && m.hp_dealt != 0) {
-    uint16_t drain = m.damaged ? uint16_t(m.hp_dealt / 2) : uint16_t((m.hp_dealt + 1) / 2);
-    if (drain == 0) drain = 1;
-    if (foe_side.active.ability == Ability::LiquidOoze) {
-      passive_damage(battle, player, drain, options);
-      protocol::damage_ability(options.log, protocol::ident(battle, player), user,
-                               Ability::LiquidOoze, protocol::ident(battle, defender));
-    } else if (user.hp != user.stats.hp) {
-      heal(user, drain);
-      protocol::heal_drain(options.log, protocol::ident(battle, player), user,
-                           protocol::ident(battle, defender));
-    }
-  }
-
   // seteffectwithchance: the certain recoil of Effect::Recoil
   // (MOVE_EFFECT_RECOIL_25, a quarter of the HP dealt, bsc:2636) and
   // Double-Edge (MOVE_EFFECT_RECOIL_33, a third, bsc:2843), at least 1.
   // Rock Head prevents it except for Struggle (BattleScript_MoveEffectRecoil,
   // bs1:3938). The recoil script faints the user before the target's
   // tryfaintmon below.
+  // As Showdown (applyRecoilDamage only if move.totalDamage), a hit that
+  // took no HP (Endure or Focus Band at 1 HP) has no recoil; the decomp's
+  // is at least 1.
   if ((effect == Effect::Recoil || effect == Effect::DoubleEdge) && affects &&
-      (m.move == Move::Struggle || side.active.ability != Ability::RockHead)) {
+      m.hp_dealt != 0 && (m.move == Move::Struggle || side.active.ability != Ability::RockHead)) {
     uint16_t recoil =
         uint16_t(m.hp_dealt / (effect == Effect::DoubleEdge ? 3 : 4));
     if (recoil == 0) recoil = 1;
@@ -5130,7 +5333,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   // (damage.hpp, as Showdown's Fly condition).
   m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut ||
                     effect == Effect::Gust || effect == Effect::Twister;
-  m.ignore_underground = effect == Effect::Earthquake;
+  m.ignore_underground = effect == Effect::Earthquake || effect == Effect::Magnitude;
 
   if (plain_hit(effect)) return hit(battle, player, m, options);
   if (effect == Effect::Confuse) return confuse_move(battle, player, m, options);

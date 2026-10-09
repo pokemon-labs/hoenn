@@ -16,7 +16,7 @@ citations:
 - `natures.hpp`: `Nature`, the nature stat table and the flavors a nature
   dislikes (for the confusion berries).
 - `tables.hpp`: stat and accuracy stage ratios, crit chances, Protect rates,
-  Flail, Low Kick, Magnitude, Present, multi-hit, Psywave, type-boosting
+  Flail, Low Kick, Magnitude, multi-hit, type-boosting
   items, sound moves (Soundproof), and the link-battle constants for Nature
   Power, Secret Power and Camouflage. Protect's rate index is clamped where
   the decomp reads out of bounds.
@@ -572,9 +572,10 @@ Decided (2026-10-08):
   recorded (CLAUDE.md, "Chance").
 - **`-anim` is the last move line** (Battle.addMove): `[miss]` amends it
   and `[still]` removes it (Battle.attrLastMove, `sim/battle.ts:3121`), in
-  the formatter. `-ohko`, `-mustrecharge` and `-notarget` have no site yet:
-  no OHKO or recharge move is on `teams/adv/`, and a singles target can't
-  be gone when a move runs.
+  the formatter. `-mustrecharge` and `-notarget` have no site yet: no
+  recharge move is on `teams/adv/`, and a singles target can't be gone
+  when a move runs. `-ohko` follows a lethal OHKO hit, or any OHKO hit on
+  a Substitute (gen4 Substitute's onTryPrimaryHit).
 - **Faints are queued** (`FaintQueue` in the log, not in `Battle`): Showdown
   queues a faint at 0 HP and writes the queue at fixed points (after each
   action, residual handler, arrival and multi-hit loop), so recoil and

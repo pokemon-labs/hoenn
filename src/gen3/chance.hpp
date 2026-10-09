@@ -137,9 +137,9 @@ namespace pkmn::gen3 {
 // Out of scope: doubles targeting (util:181-233, 3017, 3838-3875), running
 // (util:434-466), obedience (util:3945-4019), Pickup, catching, Metronome
 // and Mirror Move's random pick (singles has one candidate), Conversion and
-// Conversion 2, OHKO moves (OHKO Clause), and Roar's level check (bsc:7172,
-// which only draws when the user is lower level; Smogon is all level 100).
-// Present, Magnitude, Psywave and Spite are listed but low priority.
+// Conversion 2, and Roar's level check (bsc:7172, which only draws when the
+// user is lower level; Smogon is all level 100). OHKO moves (banned by OHKO
+// Clause) draw only their accuracy, in Action::hit.
 //
 // Notation: P is the player whose action makes the draw. The defender's
 // Focus Band and contact abilities count toward the attacker's hit.
@@ -232,8 +232,8 @@ namespace pkmn::gen3 {
 // Tri Attack's status     burn/freeze/par, 1/3 each   1     bsc:2601
 // Roar/Whirlwind target   uniform over the bench      1     bsc:7346
 // Spite                   2-5 PP, 1/4 each            1     bsc:8333
-// Present, Magnitude,     per decomp                  1     bsc:8615, 8672,
-//   Psywave                                                  7936
+// Present, Magnitude,     as Showdown (see            1     bsc:8615, 8672,
+//   Psywave               rolls::variable)                   7936
 //
 // Per player, end of turn
 // -----------------------
@@ -315,7 +315,9 @@ struct Action {
   uint8_t switch_target; // the SLOT Roar or Whirlwind drags in, 2-6
                          // (bsc:7346)
   uint8_t spite;         // PP removed, 2-5 (bsc:8333)
-  uint8_t variable;      // Present, Magnitude or Psywave's outcome, by move
+  uint8_t variable;      // by move: Present 1 heal, 2-4 for 40, 80, 120
+                         // power; Magnitude 4-10; Psywave 50-150 (% of
+                         // the level). rolls::variable
 
   // End of turn.
   Optional future_hit; // Future Sight or Doom Desire's accuracy, on the
