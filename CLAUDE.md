@@ -1025,7 +1025,13 @@ adapted (see Interface).
   `-hitcount`, `-prepare`, `-anim`). Seed 7 197 of 200, seed 8 992 of
   1000 (groups 1, 2, 3a and the state guard); every failure is a Beat Up
   or Rock Blast rare branch.
-- **Resume here: group 3b**, then 3c, 3d. Check in 3c whether marking a
+- Done (2026-10-08): group 3b (`-status`, `-curestatus` with a bench
+  ident for Heal Bell, `-cureteam`, Heal Bell's `-activate`). Same
+  results: seed 7 197 of 200, seed 8 992 of 1000 (groups 1, 2, 3a, 3b and
+  the guard). A mutation (`[msg]` broken) fails 29 of 50 games, so the
+  comparison sees them. Log markers left for 3d: Shed Skin's and the
+  immunity abilities' `-activate`, Nightmare's and Yawn's `-end`.
+- **Resume here: group 3c**, then 3d. Check in 3c whether marking a
   +6 raise MISSED (the decomp) changes state Showdown keeps (it prints
   `-boost|0` and no `-fail`). Then side conditions and weather, items and
   abilities, then derive the buffer bound (`MAX_LOG_SIZE` is a placeholder

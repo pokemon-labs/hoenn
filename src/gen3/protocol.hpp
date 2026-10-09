@@ -23,6 +23,11 @@
 //                Bound: move u16; Ability: ability, of
 //   Heal         ident, HP, Heal, then: Drain: of; Item: item;
 //                Ability: ability, of; Wish: wisher's party position
+//   Status       ident, status, StatusFrom, then: Move: move u16;
+//                Ability: ability, of
+//   CureStatus   ident, status, Cure, bench (1 for a Pokémon not active),
+//                then: Move: move u16
+//   CureTeam     ident ([from] move: Aromatherapy)
 //   Crit, SuperEffective, Resisted       ident
 //   HitCount     ident, hits
 //   Prepare      ident, move u16
@@ -136,14 +141,48 @@ enum class Immune : uint8_t {
   Confusion, // |confusion|[from] ability: A, + ability (Own Tempo)
 };
 
+// -status's [from]. Showdown's gen3 conditions (data/conditions.ts and the
+// gen3 mod's slp) name a move only for a sleep, and an ability only for the
+// other statuses (Effect Spore's sleep is plain).
+enum class StatusFrom : uint8_t {
+  None,
+  Move,    // |[from] move: M, + move
+  Ability, // |[from] ability: A|[of] P, + ability, of
+};
+
+// Where a status comes from, as inflict()'s callers know it. status()
+// keeps only what Showdown prints.
+struct StatusSource {
+  StatusFrom from;
+  Move move;
+  Ability ability;
+  ID of;
+
+  static constexpr StatusSource none() { return {StatusFrom::None, Move::None, Ability::None, {0}}; }
+  static constexpr StatusSource by_move(Move m) { return {StatusFrom::Move, m, Ability::None, {0}}; }
+  static constexpr StatusSource by_ability(Ability a, ID of) {
+    return {StatusFrom::Ability, Move::None, a, of};
+  }
+};
+
+// -curestatus's form (Pokemon.cureStatus, sim/pokemon.ts:1674, and its
+// callers).
+enum class Cure : uint8_t {
+  Msg,         // |[msg]: waking, thawing, the berries, Refresh, the abilities
+  Silent,      // |[silent]: Heal Bell
+  NaturalCure, // |[from] ability: Natural Cure|[silent]
+  Move,        // |[from] move: M, + move: a thawing move
+};
+
 // -activate's effect. Only the ones that stop a move so far (README,
-// "Protocol": the hit results).
+// "Protocol": the hit results), and Heal Bell's.
 enum class Activate : uint8_t {
   Protect,     // |Protect
   Safeguard,   // |move: Safeguard
   Mist,        // |move: Mist
   SuctionCups, // |ability: Suction Cups
   Ingrain,     // |move: Ingrain
+  HealBell,    // |move: Heal Bell
 };
 
 // The ID of p's active Pokémon: its party position, which never changes.
@@ -343,6 +382,49 @@ template <typename L> void anim(L& log, ID source, Move m, ID target) {
     log.write_byte(source.bits);
     detail::move_id(log, m);
     log.write_byte(target.bits);
+  }
+}
+
+template <typename L>
+void status(L& log, ID id, gen3::Status st, StatusSource src = StatusSource::none()) {
+  if constexpr (L::enabled) {
+    assert(st.any());
+    StatusFrom from = src.from;
+    if (from == StatusFrom::Move && !st.asleep()) from = StatusFrom::None;
+    if (from == StatusFrom::Ability && st.asleep()) from = StatusFrom::None;
+    log.write(ArgType::Status);
+    log.write_byte(id.bits);
+    log.write_byte(st.bits);
+    log.write_byte(uint8_t(from));
+    if (from == StatusFrom::Move) detail::move_id(log, src.move);
+    if (from == StatusFrom::Ability) {
+      log.write_byte(uint8_t(src.ability));
+      log.write_byte(src.of.bits);
+    }
+  }
+}
+
+// -curestatus of the status `st` a Pokémon had. `bench` prints Showdown's
+// ident of a Pokémon that isn't active (p1: NAME).
+template <typename L>
+void cure_status(L& log, ID id, gen3::Status st, Cure cure = Cure::Msg,
+                 bool bench = false, Move m = Move::None) {
+  if constexpr (L::enabled) {
+    assert(st.any());
+    log.write(ArgType::CureStatus);
+    log.write_byte(id.bits);
+    log.write_byte(st.bits);
+    log.write_byte(uint8_t(cure));
+    log.write_byte(bench);
+    if (cure == Cure::Move) detail::move_id(log, m);
+  }
+}
+
+// -cureteam|P|[from] move: Aromatherapy (Showdown's gen4 Aromatherapy).
+template <typename L> void cure_team(L& log, ID id) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::CureTeam);
+    log.write_byte(id.bits);
   }
 }
 

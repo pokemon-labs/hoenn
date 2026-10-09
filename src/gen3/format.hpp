@@ -122,6 +122,13 @@ class Formatter {
            names_.nickname[uint8_t(id.player())][id.position() - 1];
   }
 
+  // Pokemon.toString for a Pokémon that isn't active: no position letter.
+  std::string bench_ident(ID id) const {
+    assert(id.position() >= 1 && id.position() <= 6);
+    return std::string(detail::side_id(id.player())) + ": " +
+           names_.nickname[uint8_t(id.player())][id.position() - 1];
+  }
+
   std::string nickname(Player p, uint8_t position) const {
     assert(position >= 1 && position <= 6);
     return names_.nickname[uint8_t(p)][position - 1];
@@ -202,6 +209,41 @@ class Formatter {
       out.push_back("|-anim|" + ident(source) + "|" + move_name(m) + "|" + ident(ID{r.byte()}));
       return;
     }
+    case ArgType::Status: {
+      const ID id{r.byte()};
+      std::string s = "|-status|" + ident(id) + "|" + detail::status_name(r.byte());
+      using F = protocol::StatusFrom;
+      switch (F(r.byte())) {
+      case F::None: break;
+      case F::Move: s += "|[from] move: " + move_name(Move(r.u16())); break;
+      case F::Ability: {
+        const Ability a = Ability(r.byte());
+        s += "|[from] ability: " + ability_name(a) + "|[of] " + ident(ID{r.byte()});
+        break;
+      }
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::CureStatus: {
+      const ID id{r.byte()};
+      const std::string status = detail::status_name(r.byte());
+      const auto cure = protocol::Cure(r.byte());
+      const bool bench = r.byte() != 0;
+      std::string s = "|-curestatus|" + (bench ? bench_ident(id) : ident(id)) + "|" + status;
+      using C = protocol::Cure;
+      switch (cure) {
+      case C::Msg: s += "|[msg]"; break;
+      case C::Silent: s += "|[silent]"; break;
+      case C::NaturalCure: s += "|[from] ability: Natural Cure|[silent]"; break;
+      case C::Move: s += "|[from] move: " + move_name(Move(r.u16())); break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::CureTeam:
+      out.push_back("|-cureteam|" + ident(ID{r.byte()}) + "|[from] move: Aromatherapy");
+      return;
     case ArgType::Crit:
       out.push_back("|-crit|" + ident(ID{r.byte()}));
       return;
@@ -280,6 +322,7 @@ class Formatter {
       case A::Mist: s += "move: Mist"; break;
       case A::SuctionCups: s += "ability: Suction Cups"; break;
       case A::Ingrain: s += "move: Ingrain"; break;
+      case A::HealBell: s += "move: Heal Bell"; break;
       }
       out.push_back(s);
       return;

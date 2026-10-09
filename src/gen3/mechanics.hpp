@@ -801,27 +801,32 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     v.confusion = 0;
     if constexpr (CHANCE<O>) options.chance.durations.get(player).confusion = 0;
   };
+  // Showdown's berries cure with Pokemon.cureStatus: -curestatus [msg].
+  const auto cure = [&] {
+    protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
+    mon.status = Status::none();
+  };
   switch (item_data(mon.item).effect) {
   case HoldEffect::CurePar:
     if (!mon.status.paralyzed()) return false;
-    mon.status = Status::none();
+    cure();
     break;
   case HoldEffect::CurePsn:
     if (!mon.status.poisoned()) return false;
-    mon.status = Status::none();
+    cure();
     a.toxic = 0;
     break;
   case HoldEffect::CureBrn:
     if (!mon.status.burned()) return false;
-    mon.status = Status::none();
+    cure();
     break;
   case HoldEffect::CureFrz:
     if (!mon.status.frozen()) return false;
-    mon.status = Status::none();
+    cure();
     break;
   case HoldEffect::CureSlp:
     if (!mon.status.asleep()) return false;
-    mon.status = Status::none();
+    cure();
     wake(battle, player, options);
     break;
   case HoldEffect::CureConfusion:
@@ -831,7 +836,7 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
   case HoldEffect::CureStatus:
     if (!mon.status.any() && v.confusion == 0) return false;
     if (mon.status.asleep()) wake(battle, player, options);
-    mon.status = Status::none();
+    if (mon.status.any()) cure();
     a.toxic = 0;
     unconfuse();
     break;
@@ -1094,6 +1099,8 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   // A cured sleep is public, so its count resets before the SLOTs swap.
   Pokemon& out = side.get(1);
   if (side.active.ability == Ability::NaturalCure && out.status.any()) {
+    protocol::cure_status(options.log, protocol::ident(battle, player), out.status,
+                          protocol::Cure::NaturalCure);
     out.status = Status::none();
     if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
   }
@@ -1476,14 +1483,20 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
                          battle.sides[1].active.volatiles.uproar != 0) &&
                         a.ability != Ability::Soundproof;
     if (uproar) {
+      protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
       mon.status = Status::none();
       wake(battle, player, options);
     } else {
       const uint8_t by = a.ability == Ability::EarlyBird ? 2 : 1;
       const bool rest = mon.status.self_inflicted();
+      const Status before = mon.status;
       const bool woke = !mon.status.tick_sleep(by);
       // Showdown's slp onBeforeMove: Snore and Sleep Talk go on after it.
-      if (!woke) cant(protocol::Cant::Sleep);
+      if (woke) {
+        protocol::cure_status(options.log, protocol::ident(battle, player), before);
+      } else {
+        cant(protocol::Cant::Sleep);
+      }
       if constexpr (CHANCE<O>) {
         // Rest's counter is always 3 (Status::REST_SLEEP).
         rolls::tick(options.chance.actions.get(player).sleep,
@@ -1517,6 +1530,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   const bool thaw_hit = get(m.move).effect == Effect::ThawHit;
   if (mon.status.frozen()) {
     if (rolls::thaw(battle, player, options)) {
+      protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
       mon.status = Status::none();
     } else if (!thaw_hit) {
       // As Showdown's onMoveAborted; the decomp keeps a charged move.
@@ -1634,8 +1648,11 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   assert(v.bide == 0 && "Bide isn't implemented");
 
   // CANCELER_THAW
+  // Showdown's frz onModifyMove, before the move line.
   if (mon.status.frozen()) {
     assert(thaw_hit);
+    protocol::cure_status(options.log, protocol::ident(battle, player), mon.status,
+                          protocol::Cure::Move, false, m.move);
     mon.status = Status::none();
   }
 
@@ -2119,10 +2136,12 @@ constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
 // in cancel()), so a Pokémon that wakes or thaws first still fires a
 // charged move, and this follows Showdown. A forced choice then always
 // finds its move locked at the action. Changing the status
-// restarts the toxic counter (data.hpp, Status).
+// restarts the toxic counter (data.hpp, Status). Log: Status, from `src`
+// as Showdown prints it (protocol::status).
 template <typename O>
 constexpr void inflict(Battle& battle, Player target, Secondary s,
-                       MoveState& m, O& options) {
+                       MoveState& m, O& options,
+                       protocol::StatusSource src = protocol::StatusSource::none()) {
   Side& side = battle.side(target);
   Status& status = side.get(1).status;
   switch (s) {
@@ -2141,6 +2160,7 @@ constexpr void inflict(Battle& battle, Player target, Secondary s,
   }
   side.active.toxic = 0;
   if (s != Secondary::Freeze && s != Secondary::Sleep) m.synchronize = s;
+  protocol::status(options.log, protocol::ident(battle, target), status, src);
 }
 
 // MOVE_EFFECT_CONFUSION taking hold on `target` (bsc:2541): the counter is
@@ -2467,7 +2487,9 @@ constexpr void synchronize(Battle& battle, Player holder, MoveState& m,
   m.synchronize = Secondary::None;
   const Player other = foe(holder);
   if (battle.side(other).conditions.safeguard == 0 && can_status(battle, other, s)) {
-    inflict(battle, other, s, m, options);
+    inflict(battle, other, s, m, options,
+            protocol::StatusSource::by_ability(Ability::Synchronize,
+                                               protocol::ident(battle, holder)));
   }
 }
 
@@ -2502,6 +2524,9 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
     return side.conditions.safeguard == 0 && can_status(battle, player, s) &&
            !(s == Secondary::Sleep && sleep_clause(battle, player));
   };
+  const auto from_ability = [&] {
+    return protocol::StatusSource::by_ability(t.ability, protocol::ident(battle, target));
+  };
   Secondary s = Secondary::None;
   switch (t.ability) {
   case Ability::RoughSkin:
@@ -2519,7 +2544,7 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
     s = which == 1   ? Secondary::Sleep
         : which == 2 ? Secondary::Poison
                      : Secondary::Paralysis;
-    if (takes(s)) inflict(battle, player, s, m, options);
+    if (takes(s)) inflict(battle, player, s, m, options, from_ability());
     return;
   }
   case Ability::PoisonPoint: s = Secondary::Poison; break;
@@ -2541,7 +2566,7 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
     return;
   }
   if (takes(s) && rolls::contact(battle, player, i, 3, options)) {
-    inflict(battle, player, s, m, options);
+    inflict(battle, player, s, m, options, from_ability());
   }
 }
 
@@ -2555,9 +2580,14 @@ template <typename O> constexpr void ability_immunity(Battle& battle, O& options
     Pokemon& mon = side.get(1);
     Volatiles& v = side.active.volatiles;
     const Status st = mon.status;
+    // Showdown's onUpdate cures: -activate, then -curestatus [msg].
+    const auto cure = [&] {
+      protocol::cure_status(options.log, protocol::ident(battle, p), st);
+      mon.status = Status::none();
+    };
     switch (side.active.ability) {
     case Ability::Immunity:
-      if (st.poisoned()) mon.status = Status::none();
+      if (st.poisoned()) cure();
       break;
     case Ability::OwnTempo:
       if (v.confusion != 0) {
@@ -2566,21 +2596,21 @@ template <typename O> constexpr void ability_immunity(Battle& battle, O& options
       }
       break;
     case Ability::Limber:
-      if (st.paralyzed()) mon.status = Status::none();
+      if (st.paralyzed()) cure();
       break;
     case Ability::Insomnia:
     case Ability::VitalSpirit:
       if (st.asleep()) {
-        mon.status = Status::none();
+        cure();
         v.nightmare = false;
         if constexpr (CHANCE<O>) options.chance.durations.get(p).sleep[0] = 0;
       }
       break;
     case Ability::WaterVeil:
-      if (st.burned()) mon.status = Status::none();
+      if (st.burned()) cure();
       break;
     case Ability::MagmaArmor:
-      if (st.frozen()) mon.status = Status::none();
+      if (st.frozen()) cure();
       break;
     case Ability::Oblivious:
       v.infatuated = false;
@@ -2617,6 +2647,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
       !physical(type) && !no_effect && type == Type::Fire &&
       data.effect != Effect::HiddenPower) {
+    protocol::cure_status(options.log, protocol::ident(battle, foe(player)), target.status);
     target_side.get(1).status = Status::none();
   }
 
@@ -3276,7 +3307,7 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
   const ID target = protocol::ident(battle, foe(player));
   switch (stop) {
   case StatusStop::None:
-    inflict(battle, foe(player), s, m, options); // Log: Status
+    inflict(battle, foe(player), s, m, options, protocol::StatusSource::by_move(m.move));
     return moveend(battle, player, m, options);
   case StatusStop::Substitute:
   case StatusStop::Other: protocol::failed(options.log, user); break;
@@ -3328,9 +3359,9 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
   mon.status = Status::slf(Status::REST_SLEEP);
   side.active.toxic = 0;
   mon.hp = mon.stats.hp;
-  // Log: Status slp [from] move: Rest, then this.
-  protocol::heal(options.log, protocol::ident(battle, player), mon,
-                 protocol::Heal::Silent);
+  const ID id = protocol::ident(battle, player);
+  protocol::status(options.log, id, mon.status, protocol::StatusSource::by_move(Move::Rest));
+  protocol::heal(options.log, id, mon, protocol::Heal::Silent);
   if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 1;
   moveend(battle, player, m, options);
 }
@@ -4472,6 +4503,7 @@ constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) 
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
+  protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
   mon.status = Status::none();
   battle.side(player).active.toxic = 0; // status1 holds the counter
   moveend(battle, player, m, options);
@@ -4482,8 +4514,9 @@ constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) 
 // cured, the active one's Nightmare too, except that Heal Bell skips
 // Soundproof ones (the active one by its battle ability, the others by
 // their own). It never fails. Showdown's gen4 versions agree. Cured sleeps
-// are public, so their counts reset. Log: Activate Heal Bell (and Immune
-// for Soundproof) or CureTeam.
+// are public, so their counts reset. Log, as Showdown's gen4 mod: Heal
+// Bell's Activate, then by SLOT an Immune for an active Soundproof one or
+// a silent CureStatus; Aromatherapy's one CureTeam.
 template <typename O>
 constexpr void heal_bell(Battle& battle, Player player, MoveState& m,
                          O& options) {
@@ -4492,11 +4525,24 @@ constexpr void heal_bell(Battle& battle, Player player, MoveState& m,
   pp_reduce(battle, player, m);
   Side& side = battle.side(player);
   const bool bell = m.move == Move::HealBell;
+  const ID user = protocol::ident(battle, player);
+  if (bell) {
+    protocol::activate(options.log, user, protocol::Activate::HealBell);
+  } else {
+    protocol::cure_team(options.log, user);
+  }
   for (uint8_t s = 1; s <= 6; s++) {
     Pokemon& mon = side.get(s);
     if (mon.species == Species::None) continue;
     const Ability ability = s == 1 ? side.active.ability : mon.ability;
-    if (bell && ability == Ability::Soundproof) continue;
+    if (bell && ability == Ability::Soundproof) {
+      if (s == 1) protocol::immune(options.log, user, protocol::Immune::Ability, ability);
+      continue;
+    }
+    if (bell && mon.status.any() && !mon.fainted()) {
+      protocol::cure_status(options.log, ID::init(player, side.order[s - 1]), mon.status,
+                            protocol::Cure::Silent, s != 1);
+    }
     if (s == 1) {
       if (mon.status.asleep()) wake(battle, player, options);
       side.active.volatiles.nightmare = false;
@@ -5009,6 +5055,8 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
       if (mon.status.any() &&
           rolls::coin(battle, player, &Action::shed_skin, 1, 3, options)) {
         if (mon.status.asleep()) wake(battle, player, options);
+        // Log: Activate Shed Skin, then this.
+        protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
         mon.status = Status::none();
       }
       break;

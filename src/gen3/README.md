@@ -507,7 +507,10 @@ Decided (2026-10-08):
   Safeguard, Mist, Suction Cups, Ingrain). Group 3a, the rest of the hit
   results (2026-10-08): `-crit`, `-supereffective`, `-resisted` (formula
   damage only, before the damage line), `-hitcount` (before the queued
-  faint), `-prepare` and `-anim` (Solar Beam). Then 3b, major status
+  faint), `-prepare` and `-anim` (Solar Beam). 3b (done 2026-10-08): a
+  sleep names its move and the other statuses their ability (Showdown's
+  gen3 `slp` and conditions); every cure is `[msg]` but Heal Bell's
+  `[silent]` (benched Pokémon print `p1: NAME`) and Natural Cure's. Planned: 3b, major status
   (`-status`, `-curestatus`, `-cureteam`); 3c, boosts; 3d, volatiles
   (`-start`, `-end`, the other `-activate`s, `-singleturn`, `-singlemove`,
   `-sethp`, `-fieldactivate`). Each subgroup writes every form of its

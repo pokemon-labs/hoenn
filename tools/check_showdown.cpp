@@ -85,11 +85,15 @@ const std::set<std::string> LOGGED = {
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",
     // Group 3a: the rest of the hit results.
     "-crit", "-supereffective", "-resisted", "-hitcount", "-prepare", "-anim",
+    // Group 3b: major status.
+    "-status", "-curestatus", "-cureteam",
 };
 
-// The -activate effects written so far: those that stop a move (group 2).
+// The -activate effects written so far: those that stop a move (group 2),
+// and Heal Bell's (3b).
 const std::set<std::string> ACTIVATED = {
     "Protect", "move: Safeguard", "move: Mist", "ability: Suction Cups", "move: Ingrain",
+    "move: Heal Bell",
 };
 
 // Whether a line of a LOGGED type is compared.
