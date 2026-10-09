@@ -521,17 +521,17 @@ void check_confuse() {
     // Psybeam's 10% confusion, forced.
     Battle b = started({confuser}, {IDLE});
     Observed o{};
-    o.calc.overrides.p1.secondary = Optional::True;
+    o.calc.overrides.p1.hits[0].secondary = Optional::True;
     update(b, Choice::move(2), Choice::move(1), o);
     CHECK(b.sides[1].active.volatiles.confusion >= 1);
-    CHECK(o.chance.actions.p1.secondary == Optional::True);
+    CHECK(o.chance.actions.p1.hits[0].secondary == Optional::True);
     // Not through Safeguard: nothing is drawn.
     Battle c = started({confuser}, {IDLE});
     c.sides[1].conditions.safeguard = 5;
     Observed q{};
     update(c, Choice::move(2), Choice::move(1), q);
     CHECK(c.sides[1].active.volatiles.confusion == 0);
-    CHECK(q.chance.actions.p1.secondary == Optional::None);
+    CHECK(q.chance.actions.p1.hits[0].secondary == Optional::None);
   }
 }
 
@@ -1036,7 +1036,7 @@ void check_counter() {
   const auto run = [&](helpers::Pokemon foe, uint8_t slot, uint8_t foe_slot) {
     Battle b = started({user}, {foe});
     Observed o{};
-    o.calc.overrides.p2.secondary = Optional::False;
+    o.calc.overrides.p2.hits[0].secondary = Optional::False;
     o.calc.overrides.p2.hits[0].crit = Optional::False;
     update(b, Choice::move(slot), Choice::move(foe_slot), o);
     const Pokemon& u = b.sides[0].get(1);
@@ -1757,7 +1757,7 @@ void check_screens_and_power() {
     Battle b = started({attacker}, {IDLE});
     setup(b);
     Observed o{};
-    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, 0};
+    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, 0, Optional::None};
     update(b, Choice::move(slot), Choice::move(1), o);
     const Pokemon& t = b.sides[1].get(1);
     return t.stats.hp - t.hp;
@@ -2325,7 +2325,7 @@ void check_move_abilities() {
     o.calc.overrides.p1.hit = Optional::True;
     o.calc.overrides.p1.hits[0].crit = Optional::False;
     o.calc.overrides.p1.hits[0].damage = 85;
-    o.calc.overrides.p1.secondary = Optional::False;
+    o.calc.overrides.p1.hits[0].secondary = Optional::False;
     force(o);
     update(b, Choice::move(m1), Choice::move(1), o);
     return o;
@@ -2420,7 +2420,7 @@ void check_absorbing() {
   const auto run = [](Battle& b, uint8_t m1) {
     Observed o{};
     o.calc.overrides.p1.hit = Optional::True;
-    o.calc.overrides.p1.secondary = Optional::False;
+    o.calc.overrides.p1.hits[0].secondary = Optional::False;
     update(b, Choice::move(m1), Choice::move(1), o);
     return o;
   };
@@ -2450,7 +2450,7 @@ void check_absorbing() {
     Observed o{};
     o.calc.overrides.p1.hits[0].crit = Optional::False;
     o.calc.overrides.p1.hits[0].damage = 85;
-    o.calc.overrides.p1.secondary = Optional::False;
+    o.calc.overrides.p1.hits[0].secondary = Optional::False;
     o.calc.overrides.p2.thaw = Optional::False;
     update(c, Choice::move(3), Choice::move(1), o);
     CHECK(c.sides[1].get(1).hp < c.sides[1].get(1).stats.hp);
@@ -2634,7 +2634,7 @@ void check_sleep() {
     o.calc.overrides.p1.move_slot = 2;
     o.calc.overrides.p1.hits[0].crit = Optional::False;
     o.calc.overrides.p1.hits[0].damage = 100;
-    o.calc.overrides.p1.secondary = Optional::False;
+    o.calc.overrides.p1.hits[0].secondary = Optional::False;
     o.calc.overrides.turn.speed_tie = 1;
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(b.sides[1].get(1).hp < b.sides[1].get(1).stats.hp);

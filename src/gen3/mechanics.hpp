@@ -238,14 +238,46 @@ constexpr bool hit(Battle& battle, Player p, uint32_t calc, O& options) {
   return coin(battle, p, &Action::hit, calc, 100, options);
 }
 
-// A move's secondary effect: Random() % 100 < chance (seteffectwithchance,
-// bsc:2923). Called only for 0 < chance < 100 and when the effect could take
-// hold.
+// A move's secondary effect on hit `i`: Random() % 100 < chance
+// (seteffectwithchance, bsc:2923). Called only for 0 < chance < 100 and when
+// the effect could take hold. Per hit, as Showdown's secondaries (only
+// Twineedle has a secondary and more than one hit); the decomp draws once
+// after its multi-hit loop.
 template <typename O>
-constexpr bool secondary(Battle& battle, Player p, uint32_t chance,
+constexpr bool secondary(Battle& battle, Player p, uint8_t i, uint32_t chance,
                          O& options) {
-  assert(chance > 0 && chance < 100);
-  return coin(battle, p, &Action::secondary, chance, 100, options);
+  assert(chance > 0 && chance < 100 && i < MAX_HITS);
+  Optional forced = Optional::None;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].secondary;
+  Optional* field = nullptr;
+  if constexpr (detail::CHANCE<O>) field = &options.chance.actions.get(p).hits[i].secondary;
+  return coin(battle, forced, field, chance, 100, options);
+}
+
+// Triple Kick's accuracy check before hit `i` (1 or 2), on `calc` of 100
+// outcomes (Showdown's multiaccuracy; the decomp's accuracycheck inside
+// BattleScript_TripleKickLoop, bs1:1397). A miss ends the loop. Actions
+// keeps the hits that landed in multi_hit (1-3), written by the caller once
+// the loop ends (kicks()); a forced count f makes the checks before hits
+// 1..f-1 hit and the one before hit f miss.
+template <typename O>
+constexpr bool kick(Battle& battle, Player p, uint8_t i, uint32_t calc,
+                    O& options) {
+  assert(i >= 1 && i <= 2 && calc > 0 && calc < 100);
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).multi_hit;
+  assert(forced <= 3);
+  const bool yes = forced != 0 ? i < forced : battle.rng.chance(calc, 100);
+  observe(options, yes ? calc : 100 - calc, 100);
+  return yes;
+}
+
+// Records Triple Kick's landed hits, 1-3 (see kick()).
+template <typename O>
+constexpr void kicks(Player p, uint8_t n, O& options) {
+  assert(n >= 1 && n <= 3);
+  if constexpr (detail::CHANCE<O>) record(options.chance.actions.get(p).multi_hit, n);
+  (void)p, (void)n, (void)options;
 }
 
 // Tri Attack's status: Random() % 3, 1 burn, 2 freeze, 3 paralysis
@@ -1393,6 +1425,9 @@ enum class Secondary : uint8_t {
   // MOVE_EFFECT_*_MINUS_1 on the target, in Boosts order (atk-acc), then
   // MOVE_EFFECT_ATK_PLUS_1 and DEF_PLUS_1 with MOVE_EFFECT_AFFECTS_USER.
   AtkDown, DefDown, SpeDown, SpaDown, SpdDown, AccDown, AtkUp, DefUp,
+  // MOVE_EFFECT_ALL_STATS_UP with MOVE_EFFECT_AFFECTS_USER (Ancient Power,
+  // Silver Wind).
+  AllUp,
 };
 
 // The per-turn ProtectStruct (README decision 2): a local of actions(), so
@@ -1422,6 +1457,9 @@ struct MoveState {
   Move move;         // gCurrentMove
   Move chosen;       // gChosenMove: the move itself, or Sleep Talk for the
                      // move Sleep Talk calls
+  Type type;         // the move's type as used: the table's, or Weather
+                     // Ball's (move_type), resolved once in execute() as
+                     // Showdown's onModifyMove
   uint8_t slot;      // gCurrMovePos, 0-3, or NO_SLOT
   uint8_t result;    // gMoveResultFlags (MoveResult)
   uint16_t hp_dealt; // gHpDealt: HP the target or its Substitute lost
@@ -1900,7 +1938,7 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   if (f.ability == Ability::SandVeil && weather == Weather::Sandstorm) {
     modifier = js_chain(modifier, 0.8);
   }
-  if (a.ability == Ability::Hustle && physical(data.type)) {
+  if (a.ability == Ability::Hustle && physical(m.type)) {
     modifier = js_chain(modifier, 3277.0 / 4096);
   }
   const ItemData item = item_data(foe_side.get(1).item);
@@ -2006,7 +2044,7 @@ constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
   if (m.turn != nullptr) {
     m.turn->hit[index(target)] = true;
     const MoveData& data = get(m.move);
-    const bool phys = data.effect == Effect::HiddenPower || physical(data.type);
+    const bool phys = data.effect == Effect::HiddenPower || physical(m.type);
     (phys ? m.turn->physical : m.turn->special)[index(target)] = dealt;
   }
   return dealt;
@@ -2074,6 +2112,22 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // Held items (ItemBattleEffects, util:3243): one function per mode, called
 // where the decomp calls it (decided 2026-10-07).
 // ---------------------------------------------------------------------------
+
+// A move's type as used: the table's, or Weather Ball's in effective
+// weather (setweatherballtype, bsc:9787; Showdown's gen3 onModifyMove):
+// Fire in sun, Water in rain, Rock in sand, Ice in hail. Hidden Power's is
+// in its move ID. Whether it's physical follows the type, as both agree.
+constexpr Type move_type(const Battle& battle, Move move) {
+  const MoveData& data = get(move);
+  if (data.effect != Effect::WeatherBall) return data.type;
+  switch (effective_weather(battle)) {
+  case Weather::Sun: return Type::Fire;
+  case Weather::Rain: return Type::Water;
+  case Weather::Sandstorm: return Type::Rock;
+  case Weather::Hail: return Type::Ice;
+  default: return data.type;
+  }
+}
 
 // The effects whose script is BattleScript_EffectHit, maybe after setting a
 // move effect or a hit marker: the plain hits (Quick Attack and Vital Throw
@@ -2146,6 +2200,19 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::Gust:
   case Effect::Twister:
   case Effect::FakeOut:
+  case Effect::FlinchMinimizeHit:
+  case Effect::AllStatsUpHit:
+  case Effect::Twineedle:
+  case Effect::DoubleHit:
+  case Effect::TripleKick:
+  case Effect::Facade:
+  case Effect::Revenge:
+  case Effect::Smellingsalt:
+  case Effect::WeatherBall:
+  case Effect::LowKick:
+  case Effect::SecretPower:
+  case Effect::PayDay:
+  case Effect::RecoilIfMiss:
     return true;
   default:
     return false;
@@ -2154,19 +2221,27 @@ constexpr bool plain_hit(Effect effect) {
 
 // setmoveeffect in each effect's script (bs1). Blaze Kick and Poison Tail
 // share Burn Hit's and Poison Hit's scripts; Thunder sets PARALYSIS.
+// Stomp, Astonish, Needle Arm and Extrasensory flinch (BattleScript_EffectStomp, bs1:1898); Ancient
+// Power and Silver Wind raise all five stats (bs1:1772); Twineedle poisons
+// (sMULTIHIT_EFFECT, bs1:1078); Secret Power paralyzes in a link battle
+// (getsecretpowereffect's default, tables.hpp), as Showdown's gen4
+// secretpower.
 constexpr Secondary secondary_of(Effect effect) {
   switch (effect) {
   case Effect::PoisonHit:
-  case Effect::PoisonTail: return Secondary::Poison;
+  case Effect::PoisonTail:
+  case Effect::Twineedle: return Secondary::Poison;
   case Effect::PoisonFang: return Secondary::Toxic;
   case Effect::BurnHit:
   case Effect::BlazeKick:
   case Effect::ThawHit: return Secondary::Burn;
   case Effect::FreezeHit: return Secondary::Freeze;
   case Effect::ParalyzeHit:
-  case Effect::Thunder: return Secondary::Paralysis;
+  case Effect::Thunder:
+  case Effect::SecretPower: return Secondary::Paralysis;
   case Effect::ConfuseHit: return Secondary::Confusion;
   case Effect::FlinchHit:
+  case Effect::FlinchMinimizeHit:
   case Effect::Twister:
   case Effect::FakeOut:
   case Effect::Snore: return Secondary::Flinch;
@@ -2179,6 +2254,7 @@ constexpr Secondary secondary_of(Effect effect) {
   case Effect::AccuracyDownHit: return Secondary::AccDown;
   case Effect::AttackUpHit: return Secondary::AtkUp;
   case Effect::DefenseUpHit: return Secondary::DefUp;
+  case Effect::AllStatsUpHit: return Secondary::AllUp;
   default: return Secondary::None;
   }
 }
@@ -2299,10 +2375,11 @@ constexpr void confuse(Battle& battle, Player target, O& options) {
 // secondary effect on its target, after the damage. The chance is the
 // table's, doubled by Serene Grace; it's drawn only when the effect could
 // take hold (or, for Poison Fang, change the result flags), since otherwise
-// no outcome changes anything.
+// no outcome changes anything. `i` is the hit (Twineedle's loop runs it
+// per hit, as Showdown's secondaries).
 template <typename O>
 constexpr void secondary(Battle& battle, Player player, MoveState& m,
-                         O& options) {
+                         O& options, uint8_t i = 0) {
   const MoveData& data = get(m.move);
   const Secondary s = secondary_of(data.effect);
   if (s == Secondary::None || (m.result & MoveResult::NO_EFFECT)) return;
@@ -2319,11 +2396,32 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   // A stat raise on the user (MOVE_EFFECT_AFFECTS_USER): SetMoveEffect's
   // preamble checks the user, which is alive, and ChangeStatBuffs only fails
   // at +6 (bsc:6937).
+  // Ancient Power and Silver Wind (MOVE_EFFECT_ALL_STATS_UP, bsc:2814):
+  // Atk, Def, Spe, SpA and SpD up one each, whichever aren't at +6. Drawn
+  // only if one isn't. Log, as Showdown's self boosts: one -boost per stat
+  // that rose, in its key order (atk, def, spa, spd, spe), none at the cap.
+  if (s == Secondary::AllUp) {
+    ActivePokemon& a = battle.side(player).active;
+    constexpr uint8_t ORDER[5] = {0, 1, 3, 4, 2};
+    bool any = false;
+    for (const uint8_t stat : ORDER) any |= stage(a.boosts, stat) < 6;
+    if (!any) return;
+    if (chance < 100 && !rolls::secondary(battle, player, i, chance, options)) {
+      return;
+    }
+    for (const uint8_t stat : ORDER) {
+      int8_t& b = stage(a.boosts, stat);
+      if (b >= 6) continue;
+      b++;
+      protocol::boost(options.log, protocol::ident(battle, player), stat, 1, false);
+    }
+    return;
+  }
   if (s == Secondary::AtkUp || s == Secondary::DefUp) {
     int8_t& b = stage(battle.side(player).active.boosts,
                       s == Secondary::AtkUp ? 0 : 1);
     if (b >= 6) return;
-    if (chance < 100 && !rolls::secondary(battle, player, chance, options)) {
+    if (chance < 100 && !rolls::secondary(battle, player, i, chance, options)) {
       return;
     }
     b++;
@@ -2391,7 +2489,7 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
     matters = status_takes(battle, player, s);
   }
   if (!matters) return;
-  if (chance < 100 && !rolls::secondary(battle, player, chance, options)) {
+  if (chance < 100 && !rolls::secondary(battle, player, i, chance, options)) {
     return;
   }
 
@@ -2465,11 +2563,11 @@ constexpr Absorb absorbs(const Battle& battle, Player player, const MoveState& m
   case Ability::WaterAbsorb: {
     const Type type =
         t.ability == Ability::VoltAbsorb ? Type::Electric : Type::Water;
-    if (data.type != type || data.bp == 0) return Absorb::None;
+    if (m.type != type || data.bp == 0) return Absorb::None;
     return target.hp != target.stats.hp ? Absorb::Takes : Absorb::Idle;
   }
   case Ability::FlashFire:
-    if (data.type != Type::Fire || target.status.frozen()) return Absorb::None;
+    if (m.type != Type::Fire || target.status.frozen()) return Absorb::None;
     if (data.effect == Effect::WillOWisp &&
         (has_type(t, Type::Fire) || target.status.any() || t.volatiles.substitute)) {
       return Absorb::None;
@@ -2636,11 +2734,11 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
   const MoveData& data = get(m.move);
 
   if (t.ability == Ability::ColorChange) {
-    if (m.move != Move::Struggle && data.bp != 0 && !has_type(t, data.type) &&
+    if (m.move != Move::Struggle && data.bp != 0 && !has_type(t, m.type) &&
         !target_mon.fainted()) {
-      t.types[0] = data.type;
-      t.types[1] = data.type;
-      protocol::start_type(options.log, protocol::ident(battle, target), data.type, true);
+      t.types[0] = m.type;
+      t.types[1] = m.type;
+      protocol::start_type(options.log, protocol::ident(battle, target), m.type, true);
     }
     return;
   }
@@ -2772,8 +2870,11 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   const Pokemon& target = target_side.get(1);
   const MoveData& data = get(m.move);
   const bool no_effect = m.result & MoveResult::NO_EFFECT;
-  // TODO(plan step 4): the dynamic type (Hidden Power, Weather Ball).
-  const Type type = data.type;
+  // Weather Ball's type as used (Conversion 2's last hit type). The thaw
+  // below reads the table's: Showdown's gen3 frz checks the base move's
+  // type (data/mods/gen3/conditions.ts:47), so Weather Ball in sun doesn't
+  // thaw.
+  const Type type = m.type;
 
   // MOVEEND_RAGE. Showdown's rage condition boosts as a plain effect
   // (data/moves.ts:14570), so it prints its 0 at +6.
@@ -2788,8 +2889,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // Power's damage is recorded under its base type, Normal, so Hidden Power
   // Fire doesn't thaw (datahpupdate, bsc:1852).
   if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
-      !physical(type) && !no_effect && type == Type::Fire &&
-      data.effect != Effect::HiddenPower) {
+      !no_effect && data.type == Type::Fire && data.effect != Effect::HiddenPower) {
     protocol::cure_status(options.log, protocol::ident(battle, foe(player)), target.status);
     target_side.get(1).status = Status::none();
   }
@@ -2907,6 +3007,44 @@ constexpr uint32_t survive(Battle& battle, Player player, const MoveState& m,
     return target.hp - 1u;
   }
   return d;
+}
+
+// Jump Kick and Hi Jump Kick's crash (BattleScript_MoveMissedDoDamage,
+// bs1:853), as Showdown's gen3 onMoveFail (data/mods/gen3/moves.ts:357,
+// 372): when the move fails against a target not immune to Fighting (a
+// miss, Protect, a semi-invulnerable target, Wonder Guard, or a hit that
+// took no HP), the user loses half the damage the hit `h` would have
+// dealt, at least 1 and at most half the target's max HP. Showdown
+// computes that damage with getDamage, so it draws a crit and a roll, kept
+// in hits[1] (the move has one hit), and prints neither -crit nor the
+// effectiveness; the user's own Focus Band can save it (its onDamage
+// takes any move's damage), drawn in hits[1] too. The decomp's crash has
+// no crit and no cap (DMG_RECOIL_FROM_MISS, bsc:6747). Rock Head doesn't
+// stop it, nor does a Substitute. Log: a plain -damage, the faint queued.
+template <typename O>
+constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
+                     O& options) {
+  Pokemon& user = battle.side(player).get(1);
+  const Pokemon& target = battle.side(foe(player)).get(1);
+  if (user.fainted() || (matchup(battle, player, h) & MoveResult::DOESNT_AFFECT_FOE)) {
+    return;
+  }
+  h.crit = can_crit(battle, player) &&
+           rolls::crit(battle, player, 1, crit_stage(battle, player, m.move), options);
+  uint32_t d = apply_roll(damage(battle, player, h), rolls::damage(battle, player, 1, options)) / 2;
+  const uint32_t cap = target.stats.hp / 2u;
+  if (d > cap) d = cap;
+  if (d == 0) d = 1;
+  const ItemData item = item_data(user.item);
+  if (d >= user.hp && item.effect == HoldEffect::FocusBand &&
+      rolls::focus_band(battle, player, 1, item.param, options)) {
+    protocol::activate(options.log, protocol::ident(battle, player),
+                       protocol::Activate::FocusBand);
+    d = user.hp - 1u;
+  }
+  user.hp = uint16_t(user.hp - d);
+  protocol::damage(options.log, protocol::ident(battle, player), user);
+  if (user.fainted()) faint(battle, player, options);
 }
 
 // BattleScript_EffectHit (bs1:236), from the attack canceler on.
@@ -3049,6 +3187,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   Pokemon& target = foe_side.get(1);
   const MoveData& data = get(m.move);
   Hit h = Hit::of(m.move);
+  h.type = m.type;
   // Pursuit on a switching target: Showdown doubles the base power
   // (basePowerCallback); the decomp doubles the final damage
   // (dmgMultiplier, bs1:3091). This follows Showdown's arithmetic.
@@ -3080,6 +3219,38 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     const Pokemon& mon = side.get(1);
     const uint32_t power = uint32_t(data.bp) * mon.hp / mon.stats.hp;
     h.power = power == 0 ? uint16_t(1) : uint16_t(power);
+  } else if (data.effect == Effect::WeatherBall) {
+    // Weather Ball (setweatherballtype, bsc:9787): in effective weather
+    // the type changes (move_type) and the power doubles. Showdown's gen3
+    // onModifyMove doubles the base power; the decomp doubles the damage
+    // (dmgMultiplier). This follows Showdown's arithmetic.
+    if (effective_weather(battle) != Weather::None) h.power = uint16_t(h.power * 2);
+  } else if (data.effect == Effect::Revenge) {
+    // Revenge (doubledamagedealtifdamaged, bsc:9339): doubled if the foe's
+    // move took HP from the user itself this turn (Turn::physical and
+    // special; a hit on its Substitute doesn't count). Showdown's
+    // basePowerCallback reads the same (attackedBy with damage > 0 this
+    // turn) and doubles the base power, where the decomp doubles the
+    // damage; this follows Showdown's arithmetic.
+    if (m.turn->physical[index(player)] != 0 || m.turn->special[index(player)] != 0) {
+      h.power = uint16_t(h.power * 2);
+    }
+  } else if (data.effect == Effect::Smellingsalt) {
+    // Smelling Salt (bs1:2268): doubled into a paralyzed target. The decomp
+    // doesn't double into a Substitute (jumpifstatus2 SUBSTITUTE, then the
+    // plain hit); Showdown's basePowerCallback does, and this follows it.
+    if (foe_side.get(1).status.paralyzed()) h.power = uint16_t(h.power * 2);
+  } else if (data.effect == Effect::LowKick) {
+    // Low Kick (weightdamagecalculation, bsc:9467): by the target's weight.
+    // Showdown's basePowerCallback has the same thresholds.
+    const uint16_t weight = get(battle.side(foe(player)).active.species).weight;
+    h.power = LOW_KICK_MAX_POWER;
+    for (const WeightEntry& e : LOW_KICK_POWER) {
+      if (weight < e.weight) {
+        h.power = e.power;
+        break;
+      }
+    }
   }
 
   // typecalc's immunities first, as Showdown (decided; README "Damage"). A
@@ -3106,6 +3277,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // TryHit also comes first).
   if (!try_hit(battle, player, m,
                {.immune = immune && !breaks, .matters = affects || breaks}, options)) {
+    if (effect == Effect::RecoilIfMiss) crash(battle, player, m, h, options);
     moveend(battle, player, m, options);
     if (effect == Effect::Explosion) faint(battle, player, options);
     return;
@@ -3129,27 +3301,50 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     } else {
       protocol::immune(options.log, id);
     }
+    if (effect == Effect::RecoilIfMiss) crash(battle, player, m, h, options);
     moveend(battle, player, m, options);
     if (effect == Effect::Explosion) faint(battle, player, options);
     return;
   }
 
-  if (effect == Effect::MultiHit) {
-    // BattleScript_EffectMultiHit (bs1:604), as Showdown's gen3 loop
-    // (data/mods/gen3/scripts.ts:393): after the accuracy check, 2-5 hits,
-    // each with its own crit, roll and survival, while both Pokémon have HP
-    // and the user isn't asleep (unless Sleep Talk called the move). Each hit
-    // that took the target's own HP runs its contact ability (Showdown's
-    // DamagingHit per hit; the decomp's moveendto MOVEEND_NEXT_TARGET). The
-    // decomp also stops once the target endures a hit
-    // (MOVE_RESULT_FOE_ENDURED, bs1:638); Showdown goes on, and this follows
-    // it. Log: one Damage per hit, then HitCount.
-    const uint8_t n = rolls::multi_hit(battle, player, options);
+  if (effect == Effect::MultiHit || effect == Effect::DoubleHit ||
+      effect == Effect::Twineedle || effect == Effect::TripleKick) {
+    // BattleScript_EffectMultiHit (bs1:604) and the fixed counts that share
+    // its loop (Double Kick and Bonemerang, bs1:839; Twineedle, bs1:1075),
+    // and Triple Kick (bs1:1384), as Showdown's gen3 loop
+    // (data/mods/gen3/scripts.ts:393): after the accuracy check, 2-5, 2 or 3
+    // hits, each with its own crit, roll and survival, while both Pokémon
+    // have HP and the user isn't asleep (unless Sleep Talk called the move).
+    // Each hit that took the target's own HP runs its contact ability
+    // (Showdown's DamagingHit per hit; the decomp's moveendto
+    // MOVEEND_NEXT_TARGET). The decomp also stops once the target endures a
+    // hit (MOVE_RESULT_FOE_ENDURED, bs1:638); Showdown goes on, and this
+    // follows it. As Showdown, more per hit:
+    // - Triple Kick's power is 10, 20, 30, and its second and third hits
+    //   each check accuracy again (multiaccuracy); a miss ends the loop with
+    //   no message. The decomp agrees (bs1:1397).
+    // - Twineedle's poison is drawn per hit (secondaries in moveHit, with
+    //   Synchronize passing it back at once); the decomp draws once after
+    //   the loop (seteffectwithchance, bs1:651).
+    // - After each hit the status-curing items act (eachEvent('Update')),
+    //   so a Lum Berry cures an Effect Spore sleep before the next hit.
+    // Log: per hit its modifiers and Damage (and Twineedle's Status), then
+    // HitCount.
+    const uint8_t n = effect == Effect::MultiHit    ? rolls::multi_hit(battle, player, options)
+                      : effect == Effect::TripleKick ? uint8_t(3)
+                                                     : uint8_t(2);
     bool damaged = false;
     uint8_t hits = 0;
     for (uint8_t i = 0; i < n && !target.fainted() && !user.fainted(); i++) {
       if (i > 0 && user.status.asleep() && m.chosen != Move::SleepTalk) break;
       Hit hi = h;
+      if (effect == Effect::TripleKick) {
+        hi.power = uint16_t(10 * (i + 1));
+        if (i > 0) {
+          const uint32_t calc = accuracy(battle, player, m);
+          if (calc < 100 && !rolls::kick(battle, player, i, calc, options)) break;
+        }
+      }
       if (can_crit(battle, player)) {
         hi.crit = rolls::crit(battle, player, i,
                               crit_stage(battle, player, m.move), options);
@@ -3161,10 +3356,18 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       m.damaged = false;
       m.hp_dealt = hp_update(battle, defender, d, m, options);
       log_hit(battle, player, m, options);
+      if (effect == Effect::Twineedle) {
+        secondary(battle, player, m, options, i);
+        synchronize(battle, defender, m, options);
+      }
       ability_on_damage(battle, player, m, i, options);
+      for (const Player p : {Player::P1, Player::P2}) {
+        if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
+      }
       damaged |= m.damaged;
       hits++;
     }
+    if (effect == Effect::TripleKick) rolls::kicks(player, hits, options);
     m.damaged = damaged;
     m.multi = true;
     protocol::hit_count(options.log, protocol::ident(battle, defender), hits);
@@ -3194,7 +3397,23 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     log_hit(battle, player, m, options);
   }
 
-  secondary(battle, player, m, options);
+  // Showdown's onHit, before the secondaries, on a hit that reached the
+  // target itself (not its Substitute), fainted or not.
+  // - Pay Day (MOVE_EFFECT_PAYDAY, certain, bsc:2583): the coins change
+  //   nothing in a link battle. Log: FieldActivate Pay Day (gen4 onHit).
+  // - Smelling Salt (MOVE_EFFECT_REMOVE_PARALYSIS, bsc:2822): a paralyzed
+  //   target that's still standing is cured (Showdown's cureStatus needs
+  //   HP). Log: CureStatus [msg].
+  if (effect == Effect::PayDay && m.damaged) {
+    protocol::field_activate(options.log, protocol::FieldActivate::PayDay);
+  }
+  if (effect == Effect::Smellingsalt && m.damaged && !target.fainted() &&
+      target.status.paralyzed()) {
+    protocol::cure_status(options.log, protocol::ident(battle, defender), target.status);
+    target.status = Status::none();
+  }
+
+  if (effect != Effect::Twineedle) secondary(battle, player, m, options);
 
   // Knock Off (bs1:2475, MOVE_EFFECT_KNOCK_OFF, bsc:2858), as Showdown's
   // gen4 onAfterHit (data/mods/gen4/moves.ts:718; README decision 8): after
@@ -3328,6 +3547,14 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     protocol::damage(options.log, protocol::ident(battle, player), user,
                      protocol::Damage::Recoil);
     if (user.fainted()) faint(battle, player, options);
+  }
+
+  // A Jump Kick that took no HP (the target at 1 HP kept there by Focus
+  // Band or Endure) returns 0 from Showdown's moveHit, which counts as a
+  // failure: it crashes too (after the target's contact ability there,
+  // before it here).
+  if (effect == Effect::RecoilIfMiss && m.damaged && m.hp_dealt == 0) {
+    crash(battle, player, m, h, options);
   }
 
   // tryfaintmon
@@ -4840,6 +5067,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   assert(m.move != Move::None);
   if (m.chosen == Move::None) m.chosen = m.move;
   m.self = get(m.move).target == Target::User;
+  m.type = move_type(battle, m.move);
   const Effect effect = get(m.move).effect;
   // Gust and Twister (bs1:1892, 1826) hit a target in the air, doubled
   // (damage.hpp, as Showdown's Fly condition).

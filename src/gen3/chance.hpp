@@ -190,6 +190,12 @@ namespace pkmn::gen3 {
 // Multi-hit count         2,3,4,5: 3/8,3/8,1/8,1/8    1     bsc:7147, two draws
 //                                                            folded into one
 //                                                            outcome
+// Triple Kick's later     acc/100 per hit, the loop   2     Showdown's
+//   accuracy checks       stops at a miss                    multiaccuracy
+//                                                            (bsc:1397 in the
+//                                                            loop); kept as
+//                                                            the hits landed
+//                                                            in multi_hit
 // Crit                    1/n, n by crit stage        6     bsc:1282, per hit
 //                                                            (Beat Up: one
 //                                                            per healthy party
@@ -218,9 +224,11 @@ namespace pkmn::gen3 {
 //                                                            At most one can
 //                                                            matter: a flinch
 //                                                            is set once.
-// Secondary effect        chance/100 (x2 Serene       1     bsc:2923, once,
-//                         Grace)                             after a multi-hit
-//                                                            loop too
+// Secondary effect        chance/100 (x2 Serene       2     bsc:2923; once
+//                         Grace)                             in the decomp,
+//                                                            per hit as
+//                                                            Showdown
+//                                                            (Twineedle)
 // Tri Attack's status     burn/freeze/par, 1/3 each   1     bsc:2601
 // Roar/Whirlwind target   uniform over the bench      1     bsc:7346
 // Spite                   2-5 PP, 1/4 each            1     bsc:8333
@@ -269,6 +277,11 @@ struct HitDraws {
                        // 2 poison, 3 paralysis (util:2776). Per hit too: a
                        // status that doesn't take leaves the next hit free
                        // to proc again.
+  Optional secondary;  // the move's secondary effect (bsc:2923). The decomp
+                       // draws it once after a multi-hit loop; Showdown's
+                       // secondaries run per hit (Twineedle's poison on
+                       // either hit), so it's per hit. A single hit uses
+                       // hits[0].
 
   friend constexpr bool operator==(const HitDraws&, const HitDraws&) = default;
 };
@@ -291,11 +304,13 @@ struct Action {
   uint8_t move_slot;     // Sleep Talk's pick, 1-4 (bsc:8268)
   Optional protect;      // Protect, Detect or Endure succeeding (bsc:6514)
   Optional hit;          // accuracy (bsc:1176), once per move
-  uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147)
+  uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147); for Triple Kick
+                         // the hits that landed, 1-3 (its later accuracy
+                         // checks: a count below 3 with the target still
+                         // standing means the next check missed)
   HitDraws hits[6];       // MAX_HITS
   Optional kings_rock;   // True = flinched. A flinch is set at most once and
                          // which draw set it doesn't change state.
-  Optional secondary;    // the move's secondary effect (bsc:2923)
   uint8_t tri_attack;    // 1 burn, 2 freeze, 3 paralysis (bsc:2601)
   uint8_t switch_target; // the SLOT Roar or Whirlwind drags in, 2-6
                          // (bsc:7346)
@@ -350,12 +365,12 @@ struct Actions {
   friend constexpr bool operator==(const Actions&, const Actions&) = default;
 };
 
-static_assert(sizeof(HitDraws) == 5);
+static_assert(sizeof(HitDraws) == 6);
 // The most hits one move execution draws for (Beat Up's six).
 inline constexpr uint8_t MAX_HITS = std::size(Action{}.hits);
 static_assert(MAX_HITS == 6);
-static_assert(sizeof(Action) == 59);
-static_assert(sizeof(Actions) == 3 + 2 * 59);
+static_assert(sizeof(Action) == 65);
+static_assert(sizeof(Actions) == 3 + 2 * 65);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 

@@ -433,6 +433,17 @@ class Formatter {
       out.push_back(s);
       return;
     }
+    case ArgType::FormeChange: {
+      const ID id{r.byte()};
+      const uint8_t t = r.byte();
+      const char* forme = t == uint8_t(gen3::Type::Fire)    ? "Castform-Sunny"
+                          : t == uint8_t(gen3::Type::Water) ? "Castform-Rainy"
+                          : t == uint8_t(gen3::Type::Ice)   ? "Castform-Snowy"
+                                                            : "Castform";
+      out.push_back("|-formechange|" + ident(id) + "|" + forme +
+                    "|[msg]|[from] ability: Forecast");
+      return;
+    }
     case ArgType::End: {
       const ID id{r.byte()};
       std::string s = "|-end|" + ident(id) + "|";

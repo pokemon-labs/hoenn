@@ -94,6 +94,8 @@ const std::set<std::string> LOGGED = {
     "-sidestart", "-sideend", "-weather",
     // Group 5: items and abilities.
     "-item", "-enditem", "-ability",
+    // Forecast, with the step 5 group 1 moves (Weather Ball).
+    "-formechange",
 };
 
 // Whether a line of a LOGGED type is compared.

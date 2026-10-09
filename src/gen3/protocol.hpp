@@ -599,6 +599,19 @@ template <typename L> void start_type(L& log, ID id, gen3::Type t, bool color_ch
   }
 }
 
+// -formechange|P|FORME|[msg]|[from] ability: Forecast: Castform's form,
+// written as the type it takes (Normal for Castform, Fire, Water or Ice for
+// Castform-Sunny, -Rainy, -Snowy).
+template <typename L> void forme_change(L& log, ID id, gen3::Type t) {
+  if constexpr (L::enabled) {
+    assert(t == gen3::Type::Normal || t == gen3::Type::Fire || t == gen3::Type::Water ||
+           t == gen3::Type::Ice);
+    log.write(ArgType::FormeChange);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(t));
+  }
+}
+
 // -start|P|perishN (n 0-3) or -start|P|stockpileN (n 1-3).
 template <typename L> void start_count(L& log, ID id, Start effect, uint8_t n) {
   if constexpr (L::enabled) {

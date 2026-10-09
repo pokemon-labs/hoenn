@@ -243,7 +243,7 @@ constexpr uint8_t matchup(const Battle& battle, Player player, const Hit& hit) {
 // One hit's damage before the roll (battle-actions getDamage, then gen3
 // modifyDamage up to the randomizer), from `player`'s active Pokémon to
 // `target`'s: the foe, or the user itself for confusion's self-hit
-// (Hit::confusion()). Precondition: matchup() set none of NO_EFFECT.
+// (Hit::confusion()). Precondition: matchup() set no immunity.
 //
 // The divisor is never zero for a valid Pokémon: the lowest Def or SpD at
 // any level is 4 (Chansey's base 5 Def, 0 IV, 0 EV, -Def nature), which is 1
@@ -255,8 +255,10 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   assert(hit.move != Move::None && hit.power != 0);
   assert(target != player ||
          (detail::typeless(hit) && hit.power == 40 && !hit.crit));
+  // Jump Kick's crash computes the damage into Wonder Guard (MISSED), so
+  // only an immunity is excluded.
   assert(target == player ||
-         !(matchup(battle, player, hit) & MoveResult::NO_EFFECT));
+         !(matchup(battle, player, hit) & MoveResult::DOESNT_AFFECT_FOE));
 
   const Side& side = battle.side(player);
   const Side& foe_side = battle.side(target);
@@ -439,13 +441,16 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   }
 
   // ModifyDamage: Dig, Dive, Fly and Minimize's conditions on the defender.
+  // Minimize doubles the moves with the minimize flag: Stomp, and in gen3
+  // Astonish, Needle Arm and Extrasensory (data/mods/gen3/moves.ts), the
+  // decomp's EFFECT_FLINCH_MINIMIZE_HIT (bs1:1898).
   const Move move = hit.move;
   const Volatiles& v = defender.volatiles;
   if ((v.underground && (move == Move::Earthquake || move == Move::Magnitude)) ||
       (v.underwater && (move == Move::Surf || move == Move::Whirlpool)) ||
       (v.on_air && defender.locked_move != Move::Bounce &&
        (move == Move::Gust || move == Move::Twister)) ||
-      (v.minimized && move == Move::Stomp)) {
+      (v.minimized && effect == Effect::FlinchMinimizeHit)) {
     d = modify(d, mod::DOUBLE);
   }
   return saturate(d);

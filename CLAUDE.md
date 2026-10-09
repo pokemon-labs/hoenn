@@ -1084,6 +1084,17 @@ adapted (see Interface).
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
 - **Resume here:** plan step 5, the remaining move groups, from group 1.
+  Group 1 is partly written (2026-10-08, WIP commit, builds, ctest
+  passes, not yet checked against Showdown): code paths for Twineedle,
+  Double Kick, Triple Kick, Facade, Revenge, Smelling Salt, Weather Ball,
+  Low Kick, Secret Power, Pay Day, Jump Kick and Hi Jump Kick, the
+  flinch hits and Ancient Power/Silver Wind. Review the diff, then write
+  synthetic teams carrying the group's moves (`tools/teams/group1.txt`,
+  gen3ou-legal) and check them with `check_showdown`. Target per group
+  (the user, 2026-10-08): 99% of 10k Showdown games match to the end;
+  follow Showdown wherever it differs from the cartridge, noting the
+  difference at the code. `scratch/run_group.sh N` (gitignored) runs the
+  whole check.
   Deferred: the log buffer bound (`MAX_LOG_SIZE` is a placeholder 2048).
 - `check_showdown` doesn't build under clang (`json.hpp`'s incomplete
   `std::pair` and a `-Wbitwise-instead-of-logical` at the team setup);
