@@ -69,20 +69,37 @@ using Observed = Options<protocol::FixedLog, Chance<>, NullCalc>;
 // A log unit: one line, or a |split| triplet as one.
 using Unit = std::vector<std::string>;
 
-// The message types written so far, compared on both sides: group 1, the
-// frame (CLAUDE.md, "Next session").
-const std::set<std::string> LOGGED = {
-    "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
-    "-damage", "-heal",
-};
-
-
 // The message type of a line: "|-damage|..." is "-damage".
 std::string kind(const std::string& line) {
   if (line.size() < 2 || line[0] != '|') return "";
   const size_t bar = line.find('|', 1);
   return line.substr(1, bar == std::string::npos ? std::string::npos : bar - 1);
 }
+
+// The message types written so far, compared on both sides: group 1, the
+// frame, and group 2, the hit results (CLAUDE.md, "Next session").
+const std::set<std::string> LOGGED = {
+    "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
+    "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",
+};
+
+// The -activate effects written so far: those that stop a move (group 2).
+const std::set<std::string> ACTIVATED = {
+    "Protect", "move: Safeguard", "move: Mist", "ability: Suction Cups", "move: Ingrain",
+};
+
+// Whether a line of a LOGGED type is compared.
+bool logged(const std::string& line) {
+  const std::string k = kind(line);
+  if (!LOGGED.count(k)) return false;
+  if (k != "-activate") return true;
+  // |-activate|POKEMON|EFFECT...
+  const size_t a = line.find('|', 1), b = line.find('|', a + 1);
+  if (b == std::string::npos) return false;
+  const size_t c = line.find('|', b + 1);
+  return ACTIVATED.count(line.substr(b + 1, c == std::string::npos ? std::string::npos : c - b - 1));
+}
+
 
 // The units of `lines` whose type is in LOGGED.
 std::vector<Unit> units(const std::vector<std::string>& lines) {
@@ -93,7 +110,7 @@ std::vector<Unit> units(const std::vector<std::string>& lines) {
       u = {lines[i], lines[i + 1], lines[i + 2]};
       i += 2;
     }
-    if (LOGGED.count(kind(u.back() == "" ? u[1] : u.back()))) out.push_back(u);
+    if (logged(u.back() == "" ? u[1] : u.back())) out.push_back(u);
   }
   return out;
 }
@@ -104,10 +121,10 @@ std::string show(const Unit& u) {
   return s;
 }
 
-// Until group 2 (-fail, -miss and the accuracy order behind them) lands,
-// the move line's [still] and [miss] aren't compared: both are dropped, and
-// a target either side blanked for [still] is blanked on both.
-constexpr bool MOVE_ATTRIBUTES = false;
+// Whether the move line's [still] and [miss] are compared (since group 2).
+// If not, both are dropped, and a target either side blanked for [still]
+// is blanked on both.
+constexpr bool MOVE_ATTRIBUTES = true;
 
 // The move lines of two units, normalized as MOVE_ATTRIBUTES says.
 void normalize(Unit& a, Unit& b) {

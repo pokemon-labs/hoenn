@@ -889,14 +889,16 @@ adapted (see Interface).
   residual pass (`perish_count`), so `Phase::FaintAfterPerish` is gone; the
   user's Soundproof doesn't protect it; a semi-invulnerable foe is missed.
 - Done (2026-10-07): the one-stat drops (Screech, Metal Sound...), Tickle
-  (blocked by a Substitute, as Showdown), Superpower and Overheat, Haze,
-  Psych Up (copies Focus Energy, as Showdown).
+  (through a Substitute: the decomp and Showdown's gen3 `bypasssub` agree;
+  fixed 2026-10-08), Superpower and Overheat, Haze, Psych Up (copies Focus
+  Energy and misses a semi-invulnerable target, as Showdown).
 - Done (2026-10-07): Reflect, Light Screen, Return, Frustration, Flail and
   Reversal (the decomp and Showdown agree; power at least 1).
 - **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
   written, start the realizability test (see Testing).
-- Done (2026-10-07): Mean Look (Protect doesn't stop it, as Showdown; the
-  protect flags otherwise match on every teams/adv/ move). 99%
+- Done (2026-10-07): Mean Look (Protect stops it: the decomp and Showdown,
+  whose gen5 mod adds the flag, agree; fixed 2026-10-08; the protect flags
+  match on every teams/adv/ move but Counter and Mirror Coat). 99%
   (15598 of 15696 slots).
 - Done (2026-10-08): `check_chance`, the user's chance-key test (see
   Testing): 0 collisions over 500 games at 128 samples.
@@ -959,7 +961,7 @@ adapted (see Interface).
   `tie`, every `-damage` and `-heal`. Decisions in README "Protocol".
   `check_showdown` now compares the log (`LOGGED`, both lines of each
   `|split|` triplet) whenever the state guard passes; the move line's
-  `[still]` and `[miss]` are normalized away until group 2
+  `[still]` and `[miss]` were normalized away until group 2
   (`MOVE_ATTRIBUTES`). The traces carry nicknames (`sets[].name`), so
   regenerate old ones. Result: 184 of 200 games (seed 7) match to the
   end, every failure by the log alone. Run 4 processes at most (the user's
@@ -989,23 +991,32 @@ adapted (see Interface).
     crit on hit 1, about 2e-7 per try) doesn't match in 20M tries;
     undiagnosed, bad luck at maybe 2%. This is gap 3 below.
   - Result: 197 of 200 games (seed 7) match to the end at the 1M cap.
-- **Resume here: group 2**, Showdown's gen3 `tryMoveHit` order
-  (`data/mods/gen3/scripts.ts:263`): semi-invulnerable miss; type
-  immunity noted; the accuracy roll (also into Protect: an unrecorded
-  draw where only the log differs); `TryHit` (Protect's `-activate`,
-  absorbing abilities); `-immune` if naturally immune; then
-  `TryPrimaryHit` (Substitute: `-fail` `[still]`), then the status's
-  `setStatus` (`-fail|target|par` for the same status, `-fail|user`
-  `[still]` for another, `-immune` for a type, `-immune [from] ability`,
-  Safeguard's `-activate`). Messages: `-fail` (encoding written, not
-  wired), `-miss` (`protocol::miss` writes `[miss]` too), `-immune`,
-  `[still]`; then set `MOVE_ATTRIBUTES` true. The survey of which moves
-  get `[still]`, from the traces: plain `-fail|user` and heal moves'
-  `-fail|heal` do, Rest's and Endeavor's `-fail` don't, a status the
-  target already has is `-fail|target|par` without it; Counter, Fake
-  Out and Snore fail with no line at all.
-  - Later groups: statuses and volatiles (`-status`, `-curestatus`,
-    `-start`, `-end`, `-activate`, `-boost`...), side conditions and
+- Done (2026-10-08), **group 2, the hit results**: `-fail`, `-miss`,
+  `-immune`, the move line's `[still]` and `[miss]` (`MOVE_ATTRIBUTES`
+  on), and the `-activate` of what stops a move (Protect, Safeguard, Mist,
+  Suction Cups, Ingrain; `check_showdown`'s `ACTIVATED`). Every move aimed
+  at the foe goes through `try_hit`, Showdown's gen3 `tryMoveHit` order
+  (README "Protocol"); then each move's own checks in Showdown's order
+  (`status_stop`, `drops()` for Clear Body, Hyper Cutter and Mist).
+  Soundproof moved from the canceler into `try_hit`. Fixed on the way,
+  following Showdown: Tickle through a Substitute, Protect stopping Mean
+  Look, Psych Up missing Fly/Dig/Dive, Flash Fire's Will-O-Wisp
+  exceptions, `[still]` on a sun Solar Beam. Results (state guard plus
+  groups 1 and 2, 1M-try cap): seed 7 197 of 200, seed 8 990 of 1000.
+- **Open, found by group 2's runs (mechanics, not messages; undiagnosed):**
+  - Beat Up (seed 7 games 8, 74; seed 8 games 504, 703, 837, 946, 958):
+    the closest try misses the first hit by 1-3 HP, which a single hit
+    shouldn't at 1M tries. Likely Beat Up's damage arithmetic.
+  - Rock Blast (seed 7 game 13; seed 8 games 32, 403, 690), all Armaldo's.
+    Game 403 (turn 2) never reproduces a first-hit crit for 72; likely a
+    multi-hit crit or damage bug. The others may be rare branches (gap 3).
+  - Two voluntary switches in the wrong order (seed 8 games 572, 873):
+    Showdown sends Blissey in before a faster Skarmory or Snorlax. Guess:
+    Showdown orders by the outgoing Pokémon's Speed.
+- **Resume here: group 3**, statuses and volatiles.
+  - Group 3 and later: statuses and volatiles (`-status`, `-curestatus`,
+    `-start`, `-end`, the other `-activate`s, `-boost`/`-unboost` with
+    Showdown's 0 at the cap...), side conditions and
     weather, items and abilities, then derive the buffer bound
     (`MAX_LOG_SIZE` is a placeholder 2048).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random

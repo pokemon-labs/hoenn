@@ -138,6 +138,9 @@ class Formatter {
   }
 
   static std::string move_name(Move m) { return std::string(display::MOVE_NAMES[uint16_t(m)]); }
+  static std::string ability_name(Ability a) {
+    return std::string(display::ABILITY_NAMES[uint8_t(a)]);
+  }
 
   // A line with HP: the split triplet. `before` is the line up to the HP
   // and `after` what follows it.
@@ -204,11 +207,45 @@ class Formatter {
       case F::Toxic: s += "|tox"; break;
       case F::Substitute: s += "|move: Substitute"; break;
       case F::SubstituteWeak: s += "|move: Substitute|[weak]"; break;
-      case F::Unboost:
+      case F::Unboost: {
         // Showdown names the holder as both the target and the source.
-        s += "|unboost|[from] ability: " +
-             std::string(display::ABILITY_NAMES[r.byte()]) + "|[of] " + ident(id);
+        // Hyper Cutter and Keen Eye guard one stat, which they name.
+        const Ability a = Ability(r.byte());
+        s += "|unboost";
+        if (a == Ability::HyperCutter) s += "|atk";
+        if (a == Ability::KeenEye) s += "|accuracy";
+        s += "|[from] ability: " + ability_name(a) + "|[of] " + ident(id);
         break;
+      }
+      case F::Ability:
+        s += "|[from] ability: " + ability_name(Ability(r.byte())) + "|[of] " + ident(id);
+        break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::Immune: {
+      std::string s = "|-immune|" + ident(ID{r.byte()});
+      using I = protocol::Immune;
+      switch (I(r.byte())) {
+      case I::None: break;
+      case I::Ability: s += "|[from] ability: " + ability_name(Ability(r.byte())); break;
+      case I::Confusion:
+        s += "|confusion|[from] ability: " + ability_name(Ability(r.byte()));
+        break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::Activate: {
+      std::string s = "|-activate|" + ident(ID{r.byte()}) + "|";
+      using A = protocol::Activate;
+      switch (A(r.byte())) {
+      case A::Protect: s += "Protect"; break;
+      case A::Safeguard: s += "move: Safeguard"; break;
+      case A::Mist: s += "move: Mist"; break;
+      case A::SuctionCups: s += "ability: Suction Cups"; break;
+      case A::Ingrain: s += "move: Ingrain"; break;
       }
       out.push_back(s);
       return;

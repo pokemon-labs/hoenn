@@ -1702,7 +1702,28 @@ void check_stat_changes() {
     Observed none{};
     update(b, Choice::move(1), Choice::move(1), none);
     CHECK(b.sides[1].active.boosts.def == 0);
-    CHECK(none.chance.actions.p1.hit == Optional::None); // no draw
+    CHECK(none.chance.actions.p1.hit == Optional::None); // not recorded
+  }
+  {
+    // Tickle goes through a Substitute (neither the decomp nor Showdown's
+    // gen3, bypasssub, checks one).
+    Battle b = started({user}, {IDLE});
+    b.sides[1].active.volatiles.substitute = true;
+    b.sides[1].active.substitute_hp = 10;
+    update(b, Choice::move(2), Choice::move(1), o);
+    CHECK(b.sides[1].active.boosts.atk == -1 && b.sides[1].active.boosts.def == -1);
+  }
+  {
+    // Into Protect the accuracy roll changes only the log (-miss or
+    // -activate), so it isn't recorded.
+    helpers::Pokemon protector = SNORLAX;
+    protector.moves[0] = Move::Protect;
+    Battle b = started({user}, {protector});
+    b.sides[1].active.stats.spe = 999;
+    Observed q{};
+    update(b, Choice::move(1), Choice::move(1), q);
+    CHECK(b.sides[1].active.boosts.def == 0);
+    CHECK(q.chance.actions.p1.hit == Optional::None);
   }
   {
     helpers::Pokemon hitter = SNORLAX;
@@ -1756,8 +1777,8 @@ void check_screens_and_power() {
   CHECK(dealt(fighter, 1, full) < dealt(fighter, 2, full) / 2); // 20
 }
 
-// Mean Look: the target can't switch until the user leaves; Protect doesn't
-// stop it (as Showdown); a Substitute does.
+// Mean Look: the target can't switch until the user leaves; Protect stops
+// it (the decomp and Showdown's gen3 agree), and so does a Substitute.
 void check_mean_look() {
   helpers::Pokemon user = JOLTEON;
   user.moves[0] = Move::MeanLook;
@@ -1765,14 +1786,19 @@ void check_mean_look() {
   protector.moves[0] = Move::Protect;
   Null null{};
   {
-    Battle b = started({user, DUGTRIO}, {protector, IDLE});
+    Battle b = started({user}, {protector});
     b.sides[1].active.stats.spe = 999; // Protect first
+    update(b, Choice::move(1), Choice::move(1), null);
+    CHECK(!b.sides[1].active.volatiles.escape_prevention);
+  }
+  {
+    Battle b = started({user, DUGTRIO}, {IDLE, protector});
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[1].active.volatiles.escape_prevention);
     std::array<Choice, MAX_CHOICES> out{};
     const uint8_t n = choices(b, Player::P2, Choice::Move, out);
     for (uint8_t i = 0; i < n; i++) CHECK(out[i].type() != Choice::Switch);
-    update(b, Choice::swap(2), Choice::move(2), null);
+    update(b, Choice::swap(2), Choice::move(1), null);
     CHECK(!b.sides[1].active.volatiles.escape_prevention);
   }
   {

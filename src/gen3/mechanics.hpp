@@ -900,21 +900,78 @@ constexpr Weather ability_weather(Ability ability) {
   }
 }
 
+// The stage a stat change moves: 0 Atk, 1 Def, 2 Spe, 3 SpA, 4 SpD, 5 Acc,
+// 6 Eva (the decomp's STAT_* minus 1).
+constexpr int8_t& stage(Boosts& b, uint8_t stat) {
+  switch (stat) {
+  case 0: return b.atk;
+  case 1: return b.def;
+  case 2: return b.spe;
+  case 3: return b.spa;
+  case 4: return b.spd;
+  case 5: return b.acc;
+  default: assert(stat == 6); return b.eva;
+  }
+}
+
+// Showdown's TryBoost (sim/battle.ts:2038) for primary drops, from the foe,
+// of the stats in `mask` (bit i for stage(b, i)) on p's active Pokémon, as
+// ChangeStatBuffs (bsc:6937) for each. A stat at -6 can't fall and gets no
+// message here (getCappedBoost runs first; its -unboost of 0 is the
+// caller's). Then the Pokémon's ability, whose handler runs before its
+// side's (Speed first, comparePriority): Clear Body and White Smoke stop
+// every drop, Hyper Cutter Attack's and Keen Eye accuracy's, with one
+// -fail|unboost; then Mist stops the rest, with -activate. The decomp
+// checks Mist first; only the message differs. Returns the stats that
+// fall.
+template <typename L>
+constexpr uint8_t drops(const Battle& battle, Player p, uint8_t mask, L& log) {
+  const Side& side = battle.side(p);
+  const ActivePokemon& t = side.active;
+  Boosts b = t.boosts;
+  for (uint8_t i = 0; i < 7; i++) {
+    if (stage(b, i) <= -6) mask = uint8_t(mask & ~(1 << i));
+  }
+  if (mask == 0) return 0;
+  uint8_t stopped = 0;
+  switch (t.ability) {
+  case Ability::ClearBody:
+  case Ability::WhiteSmoke: stopped = mask; break;
+  case Ability::HyperCutter: stopped = mask & 1; break;
+  case Ability::KeenEye: stopped = mask & (1 << 5); break;
+  default: break;
+  }
+  const ID id = protocol::ident(battle, p);
+  if (stopped != 0) {
+    protocol::fail_unboost(log, id, t.ability);
+    mask = uint8_t(mask & ~stopped);
+  }
+  if (mask != 0 && side.conditions.mist != 0) {
+    protocol::activate(log, id, protocol::Activate::Mist);
+    mask = 0;
+  }
+  return mask;
+}
+
+// drops() without its messages.
+constexpr uint8_t droppable(const Battle& battle, Player p, uint8_t mask) {
+  protocol::NullLog log;
+  return drops(battle, p, mask, log);
+}
+
 // Intimidate (bs1:4024; Showdown's gen3 onStart, data/mods/gen3/abilities.ts:61):
 // -1 Attack to the foe unless it has a Substitute, Clear Body, White Smoke
-// or Hyper Cutter, its side has Mist (Showdown's onTryBoost), or it is at
-// -6. Showdown's White Herb reacts at once (onUpdate).
+// or Hyper Cutter, its side has Mist (Showdown's onTryBoost, drops()), or it
+// is at -6. Showdown's White Herb reacts at once (onUpdate). Log: Ability
+// Intimidate boost, then Unboost (0 at -6) or drops()'s message; nothing
+// into a Substitute (gen3).
 template <typename O>
 constexpr void intimidate(Battle& battle, Player player, O& options) {
   const Player target = foe(player);
   Side& side = battle.side(target);
   ActivePokemon& t = side.active;
-  if (side.get(1).fainted() || t.volatiles.substitute ||
-      t.ability == Ability::ClearBody || t.ability == Ability::WhiteSmoke ||
-      t.ability == Ability::HyperCutter || side.conditions.mist != 0 ||
-      t.boosts.atk <= -6) {
-    return;
-  }
+  if (side.get(1).fainted() || t.volatiles.substitute) return;
+  if (drops(battle, target, 1, options.log) == 0) return;
   t.boosts.atk--;
   item_cure(battle, target, options);
 }
@@ -1290,9 +1347,9 @@ constexpr bool physical(Type type) { return type < Type::Mystery; }
 
 constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m);
 
-// The sound moves (sSoundMovesTable, util:688). Showdown's gen3 `sound` flag
-// is on the same moves, plus Perish Song and Heal Bell, which handle
-// Soundproof themselves in both.
+// The sound moves (sSoundMovesTable, util:688), which Soundproof stops
+// (try_hit). Showdown's gen3 `sound` flag is on the same moves, plus Perish
+// Song and Heal Bell, which handle Soundproof themselves in both.
 constexpr bool sound(Move move) {
   switch (move) {
   case Move::Growl:
@@ -1344,21 +1401,6 @@ constexpr void log_move(const Battle& battle, Player player, const MoveState& m,
                  protocol::ident(battle, target), from, by);
 }
 
-// ABILITYEFFECT_MOVES_BLOCK (util:2645) on the foe, from Cmd_attackcanceler
-// (bsc:932): Soundproof stops a sound move after attackstring and ppreduce
-// (BattleScript_SoundproofProtected, bs1:4158), with no result flag. It
-// runs for a move Sleep Talk calls too, whose canceler tracker is already
-// at its end. Showdown's Soundproof (onTryHit) agrees, and its move uses PP
-// first. Returns whether it stopped the move. Log: Immune, from the ability.
-constexpr bool soundproof(Battle& battle, Player player, MoveState& m) {
-  if (battle.side(foe(player)).active.ability != Ability::Soundproof || !sound(m.move)) {
-    return false;
-  }
-  m.attackstring = true;
-  pp_reduce(battle, player, m);
-  return true;
-}
-
 // AtkCanceler_UnableToUseMove (util:1987), then the rest of
 // Cmd_attackcanceler (bsc:915). Returns whether the move goes ahead; if not,
 // the caller goes to moveend, as every canceling script does. The first case
@@ -1383,7 +1425,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   if (m.called) {
     m.obeys = true;
     log_move(battle, player, m, options);
-    return !soundproof(battle, player, m);
+    return true;
   }
   const auto cant = [&](protocol::Cant reason) {
     protocol::cant(options.log, protocol::ident(battle, player), reason, m.move);
@@ -1577,9 +1619,8 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
 
   // No PP left (BattleScript_NoPPForMove, bs1:3556): only if the PP went
   // to 0 after selection, by Spite or Pressure from a faster foe. Showdown
-  // checks it before the move line (runMove, sim/battle-actions.ts:283) and
-  // Soundproof after (its TryHit), the reverse of the decomp; this follows
-  // Showdown: a sound move with no PP left into Soundproof is marked missed.
+  // checks it before the move line (runMove, sim/battle-actions.ts:283);
+  // the decomp checks Soundproof first (see below).
   if (m.slot != MoveState::NO_SLOT && a.moves[m.slot].pp == 0 &&
       m.move != Move::Struggle && !v.multiple_turns) {
     cant(protocol::Cant::PP);
@@ -1589,11 +1630,12 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   }
 
   log_move(battle, player, m, options);
-  if (soundproof(battle, player, m)) return false;
-
+  // ABILITYEFFECT_MOVES_BLOCK (util:2645), Soundproof, comes here in the
+  // decomp; Showdown's is a TryHit handler, after the accuracy roll and
+  // Protect, and this follows it (try_hit). Both take the PP first.
   m.obeys = true;
   // TODO(plan step 4): Magic Coat and Snatch, in the per-turn Turn. Protect
-  // is in the accuracy check (accuracy()).
+  // is with the accuracy check (try_hit).
   return true;
 }
 
@@ -1620,9 +1662,38 @@ constexpr double js_chain(double modifier, double next) {
 inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
                                               7.0 / 3,   8.0 / 3, 3};
 
-// The accuracy check without its draw: 0 for a certain miss, 100 or more
-// for a certain hit, otherwise the number of the 100 outcomes that hit.
-// A protected target is a certain miss, as in Cmd_accuracycheck.
+// Whether the foe's Protect or Detect blocks m (DEFENDER_IS_PROTECTED,
+// bsc:57). Showdown's protect flag agrees with the decomp's
+// FLAG_PROTECT_AFFECTED on every move on teams/adv/ (checked 2026-10-07)
+// except Counter and Mirror Coat, which Showdown's protect flag covers;
+// this follows Showdown. (Mean Look has it in both: Showdown's gen5 mod,
+// which gen3 inherits, adds it to the base data's.) Log: Activate Protect
+// (try_hit).
+constexpr bool protected_from(const MoveState& m, Player player) {
+  assert(m.turn != nullptr);
+  return m.turn->protect[index(foe(player))] &&
+         ((get(m.move).flags & Flag::ProtectAffected) ||
+          m.move == Move::Counter || m.move == Move::MirrorCoat);
+}
+
+// Showdown's Invulnerability event (gen3 tryMoveHit, before the accuracy
+// roll): a semi-invulnerable target the move can't reach. Lock-On and Mind
+// Reader reach it (the only possible locker in singles is the attacker);
+// Surf hits Dive (HITMARKER_IGNORE_UNDERWATER, bs1:239), and the moves that
+// set ignore_on_air or ignore_underground reach Fly and Dig. TODO(plan
+// step 4): Magnitude.
+constexpr bool invulnerable(const Battle& battle, Player player,
+                            const MoveState& m) {
+  const Volatiles& v = battle.side(foe(player)).active.volatiles;
+  if (m.pursuing || v.lock_on != 0) return false;
+  return (v.on_air && !m.ignore_on_air) ||
+         (v.underground && !m.ignore_underground) ||
+         (v.underwater && m.move != Move::Surf);
+}
+
+// The accuracy check without its draw, for a target that isn't protected
+// or semi-invulnerable (try_hit checks those): 100 or more for a certain
+// hit, otherwise the number of the 100 outcomes that hit (at least 1).
 // The certain cases are the decomp's (Cmd_accuracycheck, bsc:1099, and
 // AccuracyCalcHelper, bsc:1054); the arithmetic is Showdown's (decided,
 // 2026-10-07), from its gen3 tryMoveHit (data/mods/gen3/scripts.ts:319-363):
@@ -1639,20 +1710,6 @@ inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
 //   BrightPowder that leaves a fraction the chained modifiers are dropped.
 // - randomChance(acc, 100) is `random(100) < acc` (sim/prng.ts:115), so a
 //   fractional accuracy hits on ceil(acc) outcomes of 100.
-// Whether the foe's Protect or Detect blocks m (DEFENDER_IS_PROTECTED,
-// bsc:57). Showdown's protect flag agrees with the decomp's
-// FLAG_PROTECT_AFFECTED on every move on teams/adv/ (checked 2026-10-07)
-// except Counter and Mirror Coat, which Showdown's protect flag covers, and
-// Mean Look, which it doesn't (mean_look); this follows Showdown.
-// Log:
-// Activate Protect.
-constexpr bool protected_from(const MoveState& m, Player player) {
-  assert(m.turn != nullptr);
-  return m.turn->protect[index(foe(player))] &&
-         ((get(m.move).flags & Flag::ProtectAffected) ||
-          m.move == Move::Counter || m.move == Move::MirrorCoat);
-}
-
 constexpr uint32_t accuracy(const Battle& battle, Player player,
                             const MoveState& m) {
   const Side& side = battle.side(player);
@@ -1662,21 +1719,12 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   const MoveData& data = get(m.move);
   const Weather weather = effective_weather(battle);
 
-  // JumpIfMoveAffectedByProtect (bsc:1041), before anything else: the foe
-  // protected itself and the move has the protect flag, so it misses.
-  if (protected_from(m, player)) return 0;
+  assert(!invulnerable(battle, player, m));
   // Pursuit on a switching target can't miss (Showdown's onModifyMove sets
   // accuracy true; the decomp's script has no accuracycheck).
   if (m.pursuing) return 100;
-  // Lock-On and Mind Reader: the only possible locker in singles is the
-  // attacker.
+  // Lock-On and Mind Reader.
   if (f.volatiles.lock_on != 0) return 100;
-  // Semi-invulnerable targets, unless the move reaches them: Surf hits Dive
-  // (HITMARKER_IGNORE_UNDERWATER, bs1:239), and the moves that set
-  // ignore_on_air or ignore_underground. TODO(plan step 4): Magnitude.
-  if (f.volatiles.on_air && !m.ignore_on_air) return 0;
-  if (f.volatiles.underground && !m.ignore_underground) return 0;
-  if (f.volatiles.underwater && m.move != Move::Surf) return 0;
   if ((weather == Weather::Rain && data.effect == Effect::Thunder) ||
       data.effect == Effect::AlwaysHit || data.effect == Effect::VitalThrow) {
     return 100;
@@ -1923,20 +1971,6 @@ constexpr bool plain_hit(Effect effect) {
     return true;
   default:
     return false;
-  }
-}
-
-// The stage a stat change moves: 0 Atk, 1 Def, 2 Spe, 3 SpA, 4 SpD, 5 Acc,
-// 6 Eva (the decomp's STAT_* minus 1).
-constexpr int8_t& stage(Boosts& b, uint8_t stat) {
-  switch (stat) {
-  case 0: return b.atk;
-  case 1: return b.def;
-  case 2: return b.spe;
-  case 3: return b.spa;
-  case 4: return b.spd;
-  case 5: return b.acc;
-  default: assert(stat == 6); return b.eva;
   }
 }
 
@@ -2227,38 +2261,157 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
 // takes a damaging Electric or Water move, healing a quarter of its max HP
 // through a Substitute unless already full (BattleScript_MoveHPDrain,
 // bs1:4078, which marks the move DOESNT_AFFECT_FOE); Flash Fire takes any
-// Fire move, Will-O-Wisp included, unless the holder is frozen
-// (BattleScript_FlashFireBoost, bs1:4101). Showdown agrees (gen3 Volt
-// Absorb skips Thunder Wave; gen4 Flash Fire's frozen check). Returns
-// whether the move was absorbed; its script then goes to moveend, after
-// attackstring and ppreduce.
-template <typename O>
-constexpr bool absorbed(Battle& battle, Player player, MoveState& m, O& options) {
-  Side& side = battle.side(foe(player));
-  ActivePokemon& t = side.active;
-  Pokemon& target = side.get(1);
+// Fire move unless the holder is frozen (BattleScript_FlashFireBoost,
+// bs1:4101). Showdown agrees (gen3 Volt Absorb skips Thunder Wave; gen4
+// Flash Fire's frozen check), except that its Flash Fire lets a
+// Will-O-Wisp through to a Fire type, a statused holder or one behind a
+// Substitute (its onTryHit), where the move then fails as usual; this
+// follows Showdown. Showdown's absorbing abilities are TryHit handlers, so
+// they come after the accuracy roll and Protect (try_hit).
+enum class Absorb : uint8_t {
+  None,
+  Idle,  // absorbed with no effect: -immune [from] the ability
+  Takes, // absorbed, healing or starting Flash Fire
+};
+
+constexpr Absorb absorbs(const Battle& battle, Player player, const MoveState& m) {
+  const Side& side = battle.side(foe(player));
+  const ActivePokemon& t = side.active;
+  const Pokemon& target = side.get(1);
   const MoveData& data = get(m.move);
   switch (t.ability) {
   case Ability::VoltAbsorb:
   case Ability::WaterAbsorb: {
     const Type type =
         t.ability == Ability::VoltAbsorb ? Type::Electric : Type::Water;
-    if (data.type != type || data.bp == 0) return false;
-    if (target.hp != target.stats.hp) {
-      heal(target, fraction(target, 4));
-      protocol::heal_ability(options.log, protocol::ident(battle, foe(player)),
-                             target, t.ability, protocol::ident(battle, player));
-    }
-    m.result |= MoveResult::DOESNT_AFFECT_FOE;
-    return true;
+    if (data.type != type || data.bp == 0) return Absorb::None;
+    return target.hp != target.stats.hp ? Absorb::Takes : Absorb::Idle;
   }
   case Ability::FlashFire:
-    if (data.type != Type::Fire || target.status.frozen()) return false;
-    t.volatiles.flash_fire = true;
-    return true;
+    if (data.type != Type::Fire || target.status.frozen()) return Absorb::None;
+    if (data.effect == Effect::WillOWisp &&
+        (has_type(t, Type::Fire) || target.status.any() || t.volatiles.substitute)) {
+      return Absorb::None;
+    }
+    return t.volatiles.flash_fire ? Absorb::Idle : Absorb::Takes;
   default:
+    return Absorb::None;
+  }
+}
+
+// The absorption absorbs() found; its script then goes to moveend.
+template <typename O>
+constexpr void absorbed(Battle& battle, Player player, MoveState& m, Absorb a,
+                        O& options) {
+  assert(a != Absorb::None);
+  Side& side = battle.side(foe(player));
+  ActivePokemon& t = side.active;
+  Pokemon& target = side.get(1);
+  const ID id = protocol::ident(battle, foe(player));
+  if (t.ability != Ability::FlashFire) m.result |= MoveResult::DOESNT_AFFECT_FOE;
+  if (a == Absorb::Idle) {
+    protocol::immune(options.log, id, protocol::Immune::Ability, t.ability);
+  } else if (t.ability == Ability::FlashFire) {
+    t.volatiles.flash_fire = true; // Log: Start Flash Fire
+  } else {
+    heal(target, fraction(target, 4));
+    protocol::heal_ability(options.log, id, target, t.ability,
+                           protocol::ident(battle, player));
+  }
+}
+
+// How a move aimed at the foe meets it, for try_hit.
+struct Aim {
+  // A natural immunity: the type chart (Showdown's runImmunity, which
+  // includes Levitate) or Leech Seed's Grass (onTryImmunity). Reported as
+  // -immune whether the roll hits or not, after TryHit if it does.
+  bool immune = false;
+  // Showdown's accuracy `true`: no roll (Nightmare, Pain Split, Mimic,
+  // Memento, Mean Look, Yawn, Ghost Curse; the decomp's
+  // NO_ACC_CALC_CHECK_LOCK_ON).
+  bool sure = false;
+  // Whether a hit that gets past TryHit changes the state. If not, the roll
+  // changes only the log (a miss, or the move's own failure after it).
+  bool matters = true;
+};
+
+// Showdown's gen3 tryMoveHit (data/mods/gen3/scripts.ts:263) from the
+// Invulnerability check through TryHit, for a move aimed at the foe, with
+// its messages: a semi-invulnerable target is missed with no roll; then
+// the accuracy roll; on a miss -immune for a natural immunity, else -miss;
+// on a hit TryHit's handlers in their order (Protect's priority 3, then
+// the target's ability: Soundproof and the absorbing abilities), then
+// -immune for a natural immunity. Returns whether the move goes on, to its
+// own checks (TryPrimaryHit's Substitute, then its effect), which the
+// caller makes; if not, the log is written and the result flags set.
+//
+// The decomp checks most of a move's own failures before its accuracy
+// check, and Protect and semi-invulnerability inside it; the state is the
+// same either way, and the order of the messages is Showdown's. The roll is
+// recorded only if its outcome can change the state: not into Protect or
+// Soundproof, not for an absorption that changes nothing, and not when
+// `aim.matters` is false. Otherwise it is drawn for the log alone,
+// unrecorded (CLAUDE.md, "Chance"), and not at all when both outcomes log
+// the same -immune.
+template <typename O>
+constexpr bool try_hit(Battle& battle, Player player, MoveState& m, Aim aim,
+                       O& options) {
+  const Player defender = foe(player);
+  const ID user = protocol::ident(battle, player);
+  const ID target = protocol::ident(battle, defender);
+  if (invulnerable(battle, player, m)) {
+    protocol::miss(options.log, user, target);
+    m.result |= MoveResult::MISSED;
     return false;
   }
+  const ActivePokemon& t = battle.side(defender).active;
+  const bool protect = protected_from(m, player);
+  const bool soundproof = t.ability == Ability::Soundproof && sound(m.move);
+  const Absorb absorb = absorbs(battle, player, m);
+  const bool blocked = protect || soundproof || absorb != Absorb::None;
+
+  bool hits = true;
+  if (const uint32_t calc = aim.sure ? 100 : accuracy(battle, player, m); calc < 100) {
+    assert(calc > 0);
+    const bool recorded = !protect && !soundproof &&
+                          (absorb != Absorb::None ? absorb == Absorb::Takes
+                                                  : !aim.immune && aim.matters);
+    if (recorded) {
+      hits = rolls::hit(battle, player, calc, options);
+    } else if (!aim.immune || blocked) {
+      hits = battle.rng.chance(calc, 100);
+    }
+  }
+  if (!hits) {
+    if (aim.immune) {
+      protocol::immune(options.log, target);
+      m.result |= MoveResult::DOESNT_AFFECT_FOE;
+    } else {
+      protocol::miss(options.log, user, target);
+      m.result |= MoveResult::MISSED;
+    }
+    return false;
+  }
+  if (protect) {
+    protocol::activate(options.log, target, protocol::Activate::Protect);
+    m.result |= MoveResult::MISSED;
+    return false;
+  }
+  // BattleScript_SoundproofProtected (bs1:4158) sets no result flag.
+  if (soundproof) {
+    protocol::immune(options.log, target, protocol::Immune::Ability, Ability::Soundproof);
+    return false;
+  }
+  if (absorb != Absorb::None) {
+    absorbed(battle, player, m, absorb, options);
+    return false;
+  }
+  if (aim.immune) {
+    protocol::immune(options.log, target);
+    m.result |= MoveResult::DOESNT_AFFECT_FOE;
+    return false;
+  }
+  return true;
 }
 
 // ABILITYEFFECT_SYNCHRONIZE and ATK_SYNCHRONIZE (util:2957, 2973): if
@@ -2571,7 +2724,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // out (jumpifnotfirstturn, bsc:6786; README decision 14), else
   // FailedFromAtkString; then the plain hit with a certain flinch
   // (secondary()). Showdown's activeMoveActions > 1 check fails it on the
-  // same turns in singles. Log: Fail.
+  // same turns in singles, with no message (onTry returns false).
   if (effect == Effect::FakeOut && battle.side(player).active.first_turn == 0) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
@@ -2595,7 +2748,11 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     if (v.multiple_turns) {
       v.multiple_turns = false;
       m.no_pp = true;
-    } else if (effective_weather(battle) != Weather::Sun) {
+    } else if (effective_weather(battle) == Weather::Sun) {
+      // Showdown's onTryMove still prepares, then marks the move line
+      // [still] (Log: Prepare, then Anim).
+      protocol::last_still(options.log);
+    } else {
       protocol::last_still(options.log);
       pp_reduce(battle, player, m);
       v.multiple_turns = true;
@@ -2613,7 +2770,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // to Mirror Coat) and adjustsetdamage, but no crit or roll. Showdown's
   // gen3 onTry agrees. A failure under Pressure still costs 2 PP, as
   // Showdown deducts before onTry; the decomp spares it
-  // (ppNotAffectedByPressure). Log: Fail.
+  // (ppNotAffectedByPressure). No message.
   //
   // Endeavor (BattleScript_EffectEndeavor, bs1:2479): attackstring and
   // ppreduce, then Cmd_setdamagetohealthdifference (bsc:9366) fails it
@@ -2636,6 +2793,11 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       m.attackstring = true;
       pp_reduce(battle, player, m);
       m.result |= MoveResult::FAILED;
+      // Endeavor's onTry prints a -fail without [still]; Counter and Mirror
+      // Coat fail with no message (onTry returns false).
+      if (effect == Effect::Endeavor) {
+        protocol::fail(options.log, protocol::ident(battle, player));
+      }
       return moveend(battle, player, m, options);
     }
   }
@@ -2698,54 +2860,51 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // typecalc's immunities first, as Showdown (decided; README "Damage"). A
-  // move with no effect draws neither accuracy nor crit: the decomp draws
-  // them, but no outcome changes anything.
+  // move with no effect draws no crit, and its accuracy roll changes only
+  // the log (try_hit).
   m.result |= matchup(battle, player, h);
   const bool affects = !(m.result & MoveResult::NO_EFFECT);
+  // Wonder Guard is Showdown's TryHit, so its -immune names it, even where
+  // a type immunity would also stop the move.
+  const bool wonder_guard =
+      !affects && foe_side.active.ability == Ability::WonderGuard;
   // Brick Break's accuracy check comes before typecalc and its screen
   // breaking after, so it breaks screens even into a Ghost type: its
-  // accuracy matters then too. Showdown agrees (gen3 tryMoveHit runs TryHit
-  // before it reports the immunity, data/mods/gen3/scripts.ts:367).
-  SideConditions& foe_conditions = battle.side(foe(player)).conditions;
+  // accuracy matters then too. Showdown agrees (its TryHit breaks them, and
+  // the immunity is reported after, data/mods/gen3/scripts.ts:367).
+  SideConditions& foe_conditions = foe_side.conditions;
   const bool breaks = effect == Effect::BrickBreak &&
                       (foe_conditions.reflect != 0 || foe_conditions.light_screen != 0);
+  const bool immune = !affects && !wonder_guard;
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
   // Protect is part of the accuracy check, which comes before typecalc, so
   // it blocks a move the target is immune to too (Showdown's Protect
   // TryHit also comes first).
-  if (affects || breaks || protected_from(m, player)) {
-    const uint32_t calc = accuracy(battle, player, m);
-    const bool hits =
-        calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options));
-    if (!hits) {
-      // BattleScript_PrintMoveMissed (bs1:273)
-      protocol::miss(options.log, protocol::ident(battle, player),
-                     protocol::ident(battle, defender));
-      m.result |= MoveResult::MISSED;
-      m.attackstring = true;
-      pp_reduce(battle, player, m);
-      moveend(battle, player, m, options);
-      if (effect == Effect::Explosion) faint(battle, player, options);
-      return;
-    }
-  }
-  // JumpIfMoveFailed (bsc:1009) after a hit: the absorbing abilities.
-  if (affects && absorbed(battle, player, m, options)) {
-    m.attackstring = true;
-    pp_reduce(battle, player, m);
+  if (!try_hit(battle, player, m,
+               {.immune = immune && !breaks, .matters = affects || breaks}, options)) {
     moveend(battle, player, m, options);
     if (effect == Effect::Explosion) faint(battle, player, options);
     return;
   }
-
-  m.attackstring = true;
-  pp_reduce(battle, player, m);
   // removelightscreenreflect (bsc:9883), before the damage.
   if (breaks) {
     foe_conditions.reflect = 0;
     foe_conditions.light_screen = 0;
   }
+  if (!affects) {
+    const ID id = protocol::ident(battle, defender);
+    if (wonder_guard) {
+      protocol::immune(options.log, id, protocol::Immune::Ability, Ability::WonderGuard);
+    } else {
+      protocol::immune(options.log, id);
+    }
+    moveend(battle, player, m, options);
+    if (effect == Effect::Explosion) faint(battle, player, options);
+    return;
+  }
 
-  if (affects && effect == Effect::MultiHit) {
+  if (effect == Effect::MultiHit) {
     // BattleScript_EffectMultiHit (bs1:604), as Showdown's gen3 loop
     // (data/mods/gen3/scripts.ts:393): after the accuracy check, 2-5 hits,
     // each with its own crit, roll and survival, while both Pokémon have HP
@@ -2777,7 +2936,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     m.multi = true;
     // Showdown's faintMessages after the hit loop (sim/battle-actions.ts:969).
     protocol::faints(options.log);
-  } else if (affects) {
+  } else {
     // critcalc, damagecalc, typecalc, then adjustnormaldamage: the roll,
     // then whatever lets the target survive at 1 HP (not behind a
     // Substitute). Focus Band is drawn only when the hit would be lethal,
@@ -2913,7 +3072,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
 // Tempo, a Substitute or an existing confusion, then checks accuracy, then
 // Safeguard. On the cartridge Safeguard's script ends with end2 (bs1:3257),
 // skipping moveend, so the move isn't recorded as used; Showdown fails the
-// move normally, and this follows it.
+// move normally, and this follows it. The checks and their messages come
+// in Showdown's order: try_hit, the Substitute (TryPrimaryHit), an existing
+// confusion (addVolatile), then TryAddVolatile's Own Tempo (whose onHit
+// prints its -immune) and Safeguard.
 template <typename O>
 constexpr void confuse_move(Battle& battle, Player player, MoveState& m,
                             O& options) {
@@ -2922,27 +3084,27 @@ constexpr void confuse_move(Battle& battle, Player player, MoveState& m,
   pp_reduce(battle, player, m);
   const Side& foe_side = battle.side(foe(player));
   const ActivePokemon& t = foe_side.active;
+  const ID target = protocol::ident(battle, foe(player));
+  const bool takes = !t.volatiles.substitute && t.volatiles.confusion == 0 &&
+                     t.ability != Ability::OwnTempo && foe_side.conditions.safeguard == 0;
+  if (!try_hit(battle, player, m, {.matters = takes}, options)) {
+    return moveend(battle, player, m, options);
+  }
   // BattleScript_OwnTempoPrevents and BattleScript_AlreadyConfused set no
   // result flag.
-  if (t.ability == Ability::OwnTempo) return moveend(battle, player, m, options);
   if (t.volatiles.substitute) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
-  if (t.volatiles.confusion != 0) return moveend(battle, player, m, options);
-  const uint32_t calc = accuracy(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
-    m.result |= MoveResult::MISSED | MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
-  // accuracycheck's JumpIfMoveFailed: the absorbing abilities. Of the
-  // status moves only Will-O-Wisp can be taken, by Flash Fire.
-  if (absorbed(battle, player, m, options)) return moveend(battle, player, m, options);
-  if (foe_side.conditions.safeguard != 0) {
+  } else if (t.volatiles.confusion != 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+  } else if (t.ability == Ability::OwnTempo) {
+    protocol::immune(options.log, target, protocol::Immune::Confusion, Ability::OwnTempo);
+  } else if (foe_side.conditions.safeguard != 0) {
+    protocol::activate(options.log, target, protocol::Activate::Safeguard);
     m.result |= MoveResult::FAILED;
-    return moveend(battle, player, m, options);
+  } else {
+    confuse(battle, foe(player), options); // Log: Start confusion
   }
-  confuse(battle, foe(player), options);
   moveend(battle, player, m, options);
 }
 
@@ -2958,18 +3120,91 @@ constexpr Secondary primary_status(Effect effect) {
   }
 }
 
+// Why a primary status move that hits stops, in Showdown's order: the
+// Substitute (TryPrimaryHit), then setStatus (sim/pokemon.ts:1685): the
+// status the target already has (-fail|T|status if it's this move's, else
+// -fail|user [still]: trySetStatus passes the current status), the type
+// immunities (runStatusImmunity: Poison and Steel to poison, Fire to burn),
+// then the SetStatus handlers, the target's ability before its side's
+// Safeguard before the format's Sleep Clause (Speed first, then subOrder:
+// comparePriority, sim/battle.ts:408).
+enum class StatusStop : uint8_t {
+  None,
+  Substitute,
+  Same,
+  Other,
+  Type,
+  Ability,
+  Safeguard,
+  Clause, // Sleep Clause Mod: only a -message, which the log drops
+  Uproar,
+};
+
+constexpr StatusStop status_stop(const Battle& battle, Player player, Secondary s) {
+  const Side& side = battle.side(foe(player));
+  const ActivePokemon& t = side.active;
+  const Status status = side.get(1).status;
+  if (t.volatiles.substitute) return StatusStop::Substitute;
+  if (status.any()) {
+    const bool same = (s == Secondary::Sleep && status.asleep()) ||
+                      (s == Secondary::Poison && status.poisoned() && !status.badly_poisoned()) ||
+                      (s == Secondary::Toxic && status.badly_poisoned()) ||
+                      (s == Secondary::Burn && status.burned()) ||
+                      (s == Secondary::Paralysis && status.paralyzed());
+    return same ? StatusStop::Same : StatusStop::Other;
+  }
+  switch (s) {
+  case Secondary::Poison:
+  case Secondary::Toxic:
+    if (has_type(t, Type::Poison) || has_type(t, Type::Steel)) return StatusStop::Type;
+    if (t.ability == Ability::Immunity) return StatusStop::Ability;
+    break;
+  case Secondary::Burn:
+    if (has_type(t, Type::Fire)) return StatusStop::Type;
+    if (t.ability == Ability::WaterVeil) return StatusStop::Ability;
+    break;
+  case Secondary::Paralysis:
+    if (t.ability == Ability::Limber) return StatusStop::Ability;
+    break;
+  case Secondary::Sleep:
+    if (t.ability == Ability::Insomnia || t.ability == Ability::VitalSpirit) {
+      return StatusStop::Ability;
+    }
+    break;
+  default:
+    assert(false && "not a primary status");
+  }
+  if (side.conditions.safeguard != 0) return StatusStop::Safeguard;
+  if (s == Secondary::Sleep && sleep_clause(battle, foe(player))) return StatusStop::Clause;
+  // TODO(plan step 4): Uproar's -fail, with the move.
+  if (s == Secondary::Sleep && uproar(battle)) return StatusStop::Uproar;
+  return StatusStop::None;
+}
+
+// -fail's form for the status a target already has.
+constexpr protocol::Fail fail_status(Status status) {
+  if (status.asleep()) return protocol::Fail::Sleep;
+  if (status.badly_poisoned()) return protocol::Fail::Toxic;
+  if (status.poisoned()) return protocol::Fail::Poison;
+  if (status.burned()) return protocol::Fail::Burn;
+  if (status.frozen()) return protocol::Fail::Freeze;
+  return protocol::Fail::Paralysis;
+}
+
 // The primary status moves: BattleScript_EffectPoison (bs1:986), Toxic
 // (bs1:686), Paralyze (bs1:1007; Thunder Wave, Stun Spore, Glare),
 // Will-O-Wisp (bs1:2174) and Sleep (bs1:284; Spore, Hypnosis, Sleep Powder,
-// Lovely Kiss, Sing, Grass Whistle). After the canceler, attackstring and ppreduce,
-// each script runs its checks in its own order, then accuracy, then
-// Safeguard, then seteffectprimary. The order only changes the result
-// flags, which moveend reads: the "already statused" and ability scripts
-// set none, NotAffected sets DOESNT_AFFECT_FOE, ButItFailed sets FAILED.
-// Paralyze's typecalc is only the type immunity (Thunder Wave into Ground,
-// Glare into Ghost, unless Foresight): Wonder Guard needs power (bsc:1409),
-// and Showdown's skips status moves too. Safeguard runs moveend as
-// Showdown does (see confuse_move).
+// Lovely Kiss, Sing, Grass Whistle). After the canceler, attackstring and
+// ppreduce, each script runs its checks in its own order, then accuracy,
+// then Safeguard, then seteffectprimary. Every check fails the move the
+// same way, so the order changes only the messages, and this takes
+// Showdown's: try_hit (Thunder Wave's Ground and Glare's Ghost immunity are
+// natural ones, as Showdown's ignoreImmunity false; Glare's is negated by
+// Foresight), then status_stop. Paralyze's typecalc is only that type
+// immunity: Wonder Guard needs power (bsc:1409), and Showdown's skips
+// status moves too. Safeguard runs moveend as Showdown does (see
+// confuse_move). Sleep Clause (Smogon) fails the move after the accuracy
+// check, as Showdown's onSetStatus.
 template <typename O>
 constexpr void status_move(Battle& battle, Player player, MoveState& m,
                            Secondary s, O& options) {
@@ -2978,82 +3213,42 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
   pp_reduce(battle, player, m);
   const Side& foe_side = battle.side(foe(player));
   const ActivePokemon& t = foe_side.active;
-  const Status status = foe_side.get(1).status;
-  const bool poison_immune = has_type(t, Type::Poison) || has_type(t, Type::Steel);
-
-  // The checks before accuracy: NONE fails with no flag, nonzero with these
-  // flags, 0 goes on.
-  constexpr uint8_t NONE = 0xFF;
-  const uint8_t failed = [&]() -> uint8_t {
-    switch (s) {
-    case Secondary::Poison:
-    case Secondary::Toxic:
-      if (t.ability == Ability::Immunity) return NONE;
-      if (t.volatiles.substitute) return MoveResult::FAILED;
-      if (status.poisoned()) return NONE;
-      // Poison checks the types before any other status, Toxic after.
-      if (s == Secondary::Poison && poison_immune) return MoveResult::DOESNT_AFFECT_FOE;
-      if (status.any()) return MoveResult::FAILED;
-      if (poison_immune) return MoveResult::DOESNT_AFFECT_FOE;
-      return 0;
-    case Secondary::Paralysis: {
-      if (t.ability == Ability::Limber) return NONE;
-      if (t.volatiles.substitute) return MoveResult::FAILED;
-      const Type type = get(m.move).type;
-      for (const Type d : t.types) {
-        const bool negated = t.volatiles.foresight && d == Type::Ghost &&
-                             (type == Type::Normal || type == Type::Fighting);
-        if (effectiveness(type, d) == Effectiveness::Immune && !negated) {
-          return MoveResult::DOESNT_AFFECT_FOE | MoveResult::FAILED;
-        }
-      }
-      if (status.paralyzed()) return NONE;
-      if (status.any()) return MoveResult::FAILED;
-      return 0;
+  bool immune = false;
+  if (m.move == Move::ThunderWave || m.move == Move::Glare) {
+    const Type type = get(m.move).type;
+    for (const Type d : t.types) {
+      const bool negated = t.volatiles.foresight && d == Type::Ghost &&
+                           (type == Type::Normal || type == Type::Fighting);
+      immune |= effectiveness(type, d) == Effectiveness::Immune && !negated;
     }
-    case Secondary::Burn:
-      if (t.volatiles.substitute) return MoveResult::FAILED;
-      if (status.burned()) return NONE;
-      if (has_type(t, Type::Fire)) return MoveResult::DOESNT_AFFECT_FOE;
-      if (t.ability == Ability::WaterVeil) return NONE;
-      if (status.any()) return MoveResult::FAILED;
-      return 0;
-    case Secondary::Sleep:
-      // BattleScript_EffectSleep (bs1:284): jumpifcantmakeasleep is
-      // Uproar, Vital Spirit and Insomnia.
-      if (t.volatiles.substitute) return MoveResult::FAILED;
-      if (status.asleep()) return NONE;
-      if (!can_status(battle, foe(player), Secondary::Sleep) && !status.any()) {
-        return NONE;
-      }
-      if (status.any()) return MoveResult::FAILED;
-      return 0;
-    default:
-      assert(false && "not a primary status");
-      return MoveResult::FAILED;
-    }
-  }();
-  if (failed != 0) {
-    if (failed != NONE) m.result |= failed;
+  }
+  const StatusStop stop = status_stop(battle, player, s);
+  if (!try_hit(battle, player, m, {.immune = immune, .matters = stop == StatusStop::None},
+               options)) {
     return moveend(battle, player, m, options);
   }
-
-  const uint32_t calc = accuracy(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
-    m.result |= MoveResult::MISSED | MoveResult::FAILED;
+  const ID user = protocol::ident(battle, player);
+  const ID target = protocol::ident(battle, foe(player));
+  switch (stop) {
+  case StatusStop::None:
+    inflict(battle, foe(player), s, m, options); // Log: Status
     return moveend(battle, player, m, options);
+  case StatusStop::Substitute:
+  case StatusStop::Other: protocol::failed(options.log, user); break;
+  case StatusStop::Same:
+    protocol::fail(options.log, target, fail_status(foe_side.get(1).status));
+    break;
+  case StatusStop::Type: protocol::immune(options.log, target); break;
+  case StatusStop::Ability:
+    protocol::immune(options.log, target, protocol::Immune::Ability, t.ability);
+    break;
+  case StatusStop::Safeguard:
+    protocol::activate(options.log, target, protocol::Activate::Safeguard);
+    break;
+  case StatusStop::Clause:
+  case StatusStop::Uproar: break;
   }
-  // accuracycheck's JumpIfMoveFailed: the absorbing abilities. Of the
-  // status moves only Will-O-Wisp can be taken, by Flash Fire.
-  if (absorbed(battle, player, m, options)) return moveend(battle, player, m, options);
-  // Sleep Clause (Smogon) fails the move after the accuracy check, as
-  // Showdown's onSetStatus.
-  if (foe_side.conditions.safeguard != 0 ||
-      (s == Secondary::Sleep && sleep_clause(battle, foe(player)))) {
-    m.result |= MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
-  inflict(battle, foe(player), s, m, options);
+  m.result |= MoveResult::FAILED;
   moveend(battle, player, m, options);
 }
 
@@ -3061,7 +3256,9 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
 // with Vital Spirit or Insomnia, and at full HP (Cmd_trysetrest); otherwise
 // 3 turns of self-inflicted sleep (Status::slf), any other status replaced,
 // and full HP. Showdown agrees (Rest's onTry and onHit; Sleep Clause skips
-// a sleep from the Pokémon itself).
+// a sleep from the Pokémon itself). Its messages are Showdown's onTry's, in
+// its order: none while asleep, then -fail|heal at full HP, then -fail
+// [from] the ability.
 template <typename O>
 constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -3072,6 +3269,14 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
   const ActivePokemon& a = side.active;
   if (mon.status.asleep() || uproar(battle) || a.ability == Ability::VitalSpirit ||
       a.ability == Ability::Insomnia || mon.hp == mon.stats.hp) {
+    const ID id = protocol::ident(battle, player);
+    if (!mon.status.asleep() && mon.hp == mon.stats.hp) {
+      protocol::fail(options.log, id, protocol::Fail::Heal);
+    } else if (!mon.status.asleep() &&
+               (a.ability == Ability::VitalSpirit || a.ability == Ability::Insomnia)) {
+      protocol::fail_ability(options.log, id, a.ability);
+    }
+    // TODO(plan step 4): Uproar's -fail, with the move.
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3092,6 +3297,9 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
 // also fails it during an Uproar (jumpifcantmakeasleep); Showdown doesn't
 // (Yawn's onTryHit checks only the status and sleep immunity), and this
 // follows Showdown. ENDTURN_YAWN puts the target to sleep (battler_stage).
+// The messages come in Showdown's order: try_hit, a status (onTryHit), the
+// Substitute, a pending Yawn (addVolatile), then TryAddVolatile's ability
+// and Safeguard.
 template <typename O>
 constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -3099,22 +3307,26 @@ constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   pp_reduce(battle, player, m);
   Side& foe_side = battle.side(foe(player));
   ActivePokemon& t = foe_side.active;
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  const ID user = protocol::ident(battle, player);
+  const ID target = protocol::ident(battle, foe(player));
+  if (foe_side.get(1).status.any() || t.volatiles.substitute || t.volatiles.yawn != 0) {
+    protocol::failed(options.log, user);
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
   if (t.ability == Ability::VitalSpirit || t.ability == Ability::Insomnia) {
+    protocol::immune(options.log, target, protocol::Immune::Ability, t.ability);
     return moveend(battle, player, m, options);
   }
-  if (t.volatiles.substitute || foe_side.conditions.safeguard != 0) {
+  if (foe_side.conditions.safeguard != 0) {
+    protocol::activate(options.log, target, protocol::Activate::Safeguard);
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  if (accuracy(battle, player, m) == 0) {
-    m.result |= MoveResult::MISSED | MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
-  if (foe_side.get(1).status.any() || t.volatiles.yawn != 0) {
-    m.result |= MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
-  t.volatiles.yawn = 2;
+  t.volatiles.yawn = 2; // Log: Start Yawn, of the user
   moveend(battle, player, m, options);
 }
 
@@ -3219,57 +3431,42 @@ constexpr StatChange stat_down(Effect effect) {
   }
 }
 
-// Whether ChangeStatBuffs (bsc:6937) lets a primary drop of `stat` reach
-// p's active Pokémon: not under Mist, Clear Body or White Smoke, Hyper
-// Cutter for Attack or Keen Eye for accuracy, and not already at -6.
-// Showdown's Mist and onTryBoost handlers agree.
-constexpr bool can_lower(const Battle& battle, Player p, uint8_t stat) {
-  const Side& side = battle.side(p);
-  const ActivePokemon& t = side.active;
-  return side.conditions.mist == 0 && t.ability != Ability::ClearBody &&
-         t.ability != Ability::WhiteSmoke &&
-         !(t.ability == Ability::HyperCutter && stat == 0) &&
-         !(t.ability == Ability::KeenEye && stat == 5) &&
-         [&] { Boosts b = t.boosts; return stage(b, stat); }() > -6;
-}
-
 // BattleScript_EffectStatDown (bs1:534), for Screech, Metal Sound and the
 // other one-stat drops: after the canceler, a Substitute fails it
 // (FailedFromAtkString); then accuracy (with Protect), attackstring,
-// ppreduce and the drop. A drop that can't happen (can_lower) changes
-// nothing whatever the accuracy draw, so nothing is drawn. Showdown's
-// order differs only in its log (see leech_seed). Log: Unboost, or Fail
-// or Miss.
+// ppreduce and the drop. Every failure is the same state, so the checks
+// and their messages come in Showdown's order: try_hit (Soundproof stops
+// Screech, Metal Sound and Growl), the Substitute (TryPrimaryHit), then
+// drops(). Log: Unboost (0 at -6).
 template <typename O>
 constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
                               StatChange c, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
-  if (t.volatiles.substitute) {
-    m.attackstring = true;
-    pp_reduce(battle, player, m);
+  const uint8_t bit = uint8_t(1 << c.stat);
+  const bool sub = t.volatiles.substitute;
+  if (!try_hit(battle, player, m,
+               {.matters = !sub && droppable(battle, target, bit) != 0}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (sub) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  const bool can = can_lower(battle, target, c.stat);
-  const uint32_t calc = can ? accuracy(battle, player, m) : 100;
-  m.attackstring = true;
-  pp_reduce(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
-    m.result |= MoveResult::MISSED;
-    return moveend(battle, player, m, options);
-  }
-  if (can) lower(t, c.stat, c.n);
+  if (drops(battle, target, bit, options.log) != 0) lower(t, c.stat, c.n);
   moveend(battle, player, m, options);
 }
 
 // BattleScript_EffectTickle (bs1:2652): after the canceler, attackstring and
 // ppreduce it fails with Attack and Defense both at -6, then on a missed
-// accuracy check (ButItFailed); then each drop that can happen. The decomp
-// has no Substitute check; Showdown's Tickle (no bypasssub) fails into one,
-// and this follows it. As stat_down_move, nothing is drawn when neither
-// drop can happen. Log: Unboost each, or Fail.
+// accuracy check (ButItFailed); then each drop that can happen. Neither the
+// decomp nor Showdown's gen3 (bypasssub, data/mods/gen3/moves.ts:639)
+// checks a Substitute. The order of the messages is Showdown's: try_hit,
+// then drops(). Log: Unboost each (0 at -6).
 template <typename O>
 constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -3277,30 +3474,24 @@ constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
   pp_reduce(battle, player, m);
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
-  const bool atk = can_lower(battle, target, 0);
-  const bool def = can_lower(battle, target, 1);
-  if (t.volatiles.substitute || (t.boosts.atk == -6 && t.boosts.def == -6)) {
-    m.result |= MoveResult::FAILED;
+  if (!try_hit(battle, player, m, {.matters = droppable(battle, target, 0b11) != 0},
+               options)) {
     return moveend(battle, player, m, options);
   }
-  const uint32_t calc = atk || def ? accuracy(battle, player, m) : 100;
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
-    m.result |= MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
-  if (atk) lower(t, 0, 1);
-  if (def) lower(t, 1, 1);
+  const uint8_t falls = drops(battle, target, 0b11, options.log);
+  if (falls & 1) lower(t, 0, 1);
+  if (falls & 2) lower(t, 1, 1);
   moveend(battle, player, m, options);
 }
 
 // Memento, as Showdown's gen3 (accuracy true, boosts -2/-2, selfdestruct
-// "ifHit"): after attackstring and ppreduce, Protect, a semi-invulnerable
-// target (unless Locked-On) or a Substitute stops it and the user lives;
-// otherwise each drop that can happen (can_lower), then the user faints,
-// even if neither stat could fall. The decomp (bs1:2204, Cmd_trymemento,
-// bsc:9072) faints the user through Protect, a Substitute and Fly, and
-// fails with both stats at -6 and the user alive. Log: Unboost each, then
-// Faint; or Fail or Miss.
+// "ifHit"): after attackstring and ppreduce, try_hit (Protect, a
+// semi-invulnerable target unless Locked-On) or a Substitute
+// (TryPrimaryHit) stops it and the user lives; otherwise each drop that
+// can happen (drops()), then the user faints, even if neither stat could
+// fall. The decomp (bs1:2204, Cmd_trymemento, bsc:9072) faints the user
+// through Protect, a Substitute and Fly, and fails with both stats at -6
+// and the user alive. Log: Unboost each, then Faint.
 template <typename O>
 constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -3308,14 +3499,18 @@ constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) 
   pp_reduce(battle, player, m);
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
-  if (protected_from(m, player) ||
-      (t.volatiles.semi_invulnerable() && t.volatiles.lock_on == 0) ||
-      t.volatiles.substitute) {
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  if (can_lower(battle, target, 0)) lower(t, 0, 2);
-  if (can_lower(battle, target, 3)) lower(t, 3, 2);
+  if (t.volatiles.substitute) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const uint8_t falls = drops(battle, target, 1 << 0 | 1 << 3, options.log);
+  if (falls & 1 << 0) lower(t, 0, 2);
+  if (falls & 1 << 3) lower(t, 3, 2);
   battle.side(player).get(1).hp = 0;
   moveend(battle, player, m, options);
   faint(battle, player, options);
@@ -3342,6 +3537,7 @@ constexpr void imprison(Battle& battle, Player player, MoveState& m, O& options)
     }
   }
   if (a.volatiles.imprisoned_others || !shared) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3352,9 +3548,9 @@ constexpr void imprison(Battle& battle, Player player, MoveState& m, O& options)
 // BattleScript_EffectNightmare (bs1:1459): after attackstring and ppreduce
 // it fails on a Substitute, a target already in a Nightmare or one not
 // asleep (Rest counts). No accuracy check; Showdown's gen3 (accuracy true,
-// protect flag) also fails it into Protect and a semi-invulnerable target,
-// and this follows it. The residual takes 1/4 while it sleeps; waking ends
-// it. Log: Start Nightmare, or Fail.
+// protect flag) also fails it into Protect and a semi-invulnerable target
+// (try_hit), and this follows it. The residual takes 1/4 while it sleeps;
+// waking ends it. Log: Start Nightmare.
 template <typename O>
 constexpr void nightmare(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -3362,9 +3558,12 @@ constexpr void nightmare(Battle& battle, Player player, MoveState& m, O& options
   pp_reduce(battle, player, m);
   Side& foe_side = battle.side(foe(player));
   Volatiles& v = foe_side.active.volatiles;
-  if (protected_from(m, player) ||
-      (v.semi_invulnerable() && v.lock_on == 0) || v.substitute ||
-      v.nightmare || !foe_side.get(1).status.asleep()) {
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (v.substitute || v.nightmare || !foe_side.get(1).status.asleep()) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3387,14 +3586,18 @@ constexpr void haze(Battle& battle, Player player, MoveState& m, O& options) {
 // BattleScript_EffectPsychUp (bs1:1790), Cmd_copyfoestats (bsc:8809): the
 // user takes the foe's stages, through a Substitute and Protect; it never
 // fails. Showdown's Psych Up also copies Focus Energy (its onHit's
-// volatilesToCopy, which gen3 inherits), and this follows it. Log:
-// CopyBoost.
+// volatilesToCopy, which gen3 inherits), and misses a semi-invulnerable
+// target (its target is 'normal', so tryMoveHit's Invulnerability check
+// applies; accuracy true); this follows Showdown. Log: CopyBoost.
 template <typename O>
 constexpr void psych_up(Battle& battle, Player player, MoveState& m,
                         O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   m.attackstring = true;
   pp_reduce(battle, player, m);
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
+    return moveend(battle, player, m, options);
+  }
   ActivePokemon& a = battle.side(player).active;
   const ActivePokemon& f = battle.side(foe(player)).active;
   a.boosts = f.boosts;
@@ -3438,6 +3641,7 @@ constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
   const Pokemon& mon = side.get(1);
   const uint32_t half = fraction(mon, 2);
   if (side.active.boosts.atk >= 6 || mon.hp <= half) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3488,19 +3692,17 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   ActivePokemon& t = battle.side(foe(player)).active;
-  if (t.volatiles.substitute) {
-    m.result |= MoveResult::FAILED;
-    return moveend(battle, player, m, options);
-  }
   // NO_ACC_CALC_CHECK_LOCK_ON (Cmd_accuracycheck, bsc:1099): Lock-On, then
-  // only the semi-invulnerable check. Curse's accuracy is 0 in the data, so
-  // accuracy() doesn't apply.
-  // A miss goes to BattleScript_ButItFailed, so FAILED only.
-  if (t.volatiles.lock_on == 0 && t.volatiles.semi_invulnerable()) {
-    m.result |= MoveResult::FAILED;
+  // only the semi-invulnerable check (try_hit, which Showdown's accuracy
+  // true agrees with). A miss goes to BattleScript_ButItFailed (here
+  // MISSED, which moveend reads the same). Showdown's messages: -miss, then
+  // -fail for a curse already there (onTryHit) or a Substitute
+  // (TryPrimaryHit).
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
     return moveend(battle, player, m, options);
   }
-  if (t.volatiles.cursed) {
+  if (t.volatiles.substitute || t.volatiles.cursed) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3532,6 +3734,9 @@ constexpr void substitute(Battle& battle, Player player, MoveState& m,
   const Pokemon& mon = battle.side(player).get(1);
   const uint32_t quarter = fraction(mon, 4);
   if (a.volatiles.substitute || mon.hp <= quarter) {
+    protocol::fail(options.log, protocol::ident(battle, player),
+                   a.volatiles.substitute ? protocol::Fail::Substitute
+                                          : protocol::Fail::SubstituteWeak);
     return moveend(battle, player, m, options);
   }
   assert(quarter <= UINT8_MAX);
@@ -3570,6 +3775,7 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
   if (a.stall == 0) a.protect_uses = 0;
   const uint8_t n = a.protect_uses < 3 ? a.protect_uses : 3;
   if (!m.first || (n != 0 && !rolls::protect(battle, player, n, options))) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     a.protect_uses = 0;
     m.result |= MoveResult::MISSED;
     return moveend(battle, player, m, options);
@@ -3597,6 +3803,7 @@ constexpr void spikes_move(Battle& battle, Player player, MoveState& m,
   pp_reduce(battle, player, m);
   uint8_t& layers = battle.side(foe(player)).conditions.spikes;
   if (layers >= 3) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3620,7 +3827,10 @@ constexpr void heal_move(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   Pokemon& mon = battle.side(player).get(1);
-  if (mon.hp == mon.stats.hp) return moveend(battle, player, m, options);
+  if (mon.hp == mon.stats.hp) {
+    protocol::fail(options.log, protocol::ident(battle, player), protocol::Fail::Heal, true);
+    return moveend(battle, player, m, options);
+  }
   const Effect effect = get(m.move).effect;
   uint32_t amount = mon.stats.hp / 2u;
   if (effect == Effect::MorningSun || effect == Effect::Synthesis ||
@@ -3652,38 +3862,43 @@ constexpr uint8_t bench(const Battle& battle, Player player) {
 // BattleScript_EffectRoar (bs1:593), for Roar and Whirlwind. Showdown's
 // gen3 Roar has accuracy 100 and the protect flag (data/mods/gen4/moves.ts:
 // 1164, inheriting gen5's accuracy), as the decomp's.
-// - After the canceler (Soundproof stops Roar, a sound move), attackstring
-//   and ppreduce: Suction Cups and Ingrain stop it with no result flag
-//   (Showdown's onDragOut), then a semi-invulnerable target fails it
-//   (accuracycheck with NO_ACC_CALC_CHECK_LOCK_ON), then the accuracy roll
-//   (ACC_CURR_MOVE: evasion can make it miss), then an empty bench fails
-//   it (forcerandomswitch; Showdown's canSwitch). The bench is checked
-//   before the roll, since the roll can't matter without one.
+// - After the canceler, attackstring and ppreduce: Suction Cups and
+//   Ingrain stop it with no result flag (Showdown's onDragOut), then a
+//   semi-invulnerable target fails it (accuracycheck with
+//   NO_ACC_CALC_CHECK_LOCK_ON; here MISSED, which moveend reads the same),
+//   then the accuracy roll (ACC_CURR_MOVE: evasion can make it miss), then
+//   an empty bench fails it (forcerandomswitch; Showdown's canSwitch).
+// - The messages come in Showdown's order: try_hit (Protect, Soundproof
+//   for Roar), then -fail for an empty bench (forceSwitch's canSwitch),
+//   and only at the drag Suction Cups' or Ingrain's -activate (DragOut).
+//   The roll is recorded only when it decides a drag.
 // - No level check: TryDoForceSwitchOut (bsc:7163) only draws when the
 //   user's level is lower, and Showdown has none.
 // - The drag happens after the whole action (Showdown's forceSwitchFlag;
 //   the decomp drags before moveend), so this only sets m.drag.
-// - It hits through a Substitute in both; Protect stops it (accuracy()).
+// - It hits through a Substitute in both.
 template <typename O>
 constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   m.attackstring = true;
   pp_reduce(battle, player, m);
   const ActivePokemon& t = battle.side(foe(player)).active;
-  // BattleScript_AbilityPreventsPhasingOut and BattleScript_PrintMonIsRooted
-  // set no result flag. Log: Activate (Suction Cups, Ingrain).
-  if (t.ability == Ability::SuctionCups || t.volatiles.rooted) {
+  const bool anchored = t.ability == Ability::SuctionCups || t.volatiles.rooted;
+  const bool bench_empty = bench(battle, foe(player)) == 0;
+  if (!try_hit(battle, player, m, {.matters = !anchored && !bench_empty}, options)) {
     return moveend(battle, player, m, options);
   }
-  const uint32_t calc = accuracy(battle, player, m);
-  // accuracy() is 0 only for a semi-invulnerable target here: Roar's
-  // accuracy is 100.
-  if (calc == 0 || bench(battle, foe(player)) == 0) {
+  if (bench_empty) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  if (calc < 100 && !rolls::hit(battle, player, calc, options)) {
-    m.result |= MoveResult::MISSED;
+  // BattleScript_AbilityPreventsPhasingOut and BattleScript_PrintMonIsRooted
+  // set no result flag.
+  if (anchored) {
+    protocol::activate(options.log, protocol::ident(battle, foe(player)),
+                       t.volatiles.rooted ? protocol::Activate::Ingrain
+                                          : protocol::Activate::SuctionCups);
     return moveend(battle, player, m, options);
   }
   m.drag = true;
@@ -3719,6 +3934,7 @@ constexpr void baton_pass(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   if (bench(battle, player) == 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3766,6 +3982,11 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   }
   if (!battle.side(player).get(1).status.asleep() || a.choice_move != Move::None ||
       a.encore_timer != 0 || mask == 0) {
+    // Showdown's onTry fails silently when awake; its onTryHit (the lock)
+    // and onHit (nothing to call) print -fail.
+    if (battle.side(player).get(1).status.asleep()) {
+      protocol::failed(options.log, protocol::ident(battle, player));
+    }
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3811,6 +4032,7 @@ constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
   pp_reduce(battle, player, m);
   Side& side = battle.side(player);
   if (side.conditions.wish != 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3821,13 +4043,11 @@ constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
 
 // BattleScript_EffectLeechSeed (bs1:1157): after the canceler, attackstring
 // and ppreduce, a Substitute fails it (ButItFailed); then accuracy; then
-// Cmd_setseeded (bsc:6718) misses an already seeded or Grass target. Those
-// two outcomes don't depend on the accuracy draw, so they're checked before
-// it and nothing is drawn. Showdown checks Grass first (TryImmunity) and
-// the Substitute and the seed after its accuracy draw, so its log can show
-// a miss where this fails; the state is the same, and the status moves
-// share this (settle with the log). The drain is in battler_stage.
-// Log: Start Leech Seed, or Fail, Immune or Miss.
+// Cmd_setseeded (bsc:6718) misses an already seeded or Grass target. The
+// messages come in Showdown's order: try_hit, with Grass a natural
+// immunity (onTryImmunity), then the Substitute (TryPrimaryHit) and an
+// existing seed (addVolatile), each -fail. The drain is in battler_stage.
+// Log: Start Leech Seed.
 template <typename O>
 constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -3835,14 +4055,14 @@ constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   ActivePokemon& t = battle.side(foe(player)).active;
-  if (t.volatiles.substitute) {
-    m.result |= MoveResult::FAILED;
+  const bool takes = !t.volatiles.substitute && !t.volatiles.leech_seed;
+  if (!try_hit(battle, player, m,
+               {.immune = has_type(t, Type::Grass), .matters = takes}, options)) {
     return moveend(battle, player, m, options);
   }
-  const uint32_t calc =
-      t.volatiles.leech_seed || has_type(t, Type::Grass) ? 0 : accuracy(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
-    m.result |= MoveResult::MISSED;
+  if (!takes) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= t.volatiles.substitute ? MoveResult::FAILED : MoveResult::MISSED;
     return moveend(battle, player, m, options);
   }
   t.volatiles.leech_seed = true;
@@ -3875,6 +4095,7 @@ constexpr void weather_move(Battle& battle, Player player, MoveState& m,
   pp_reduce(battle, player, m);
   Field& field = battle.field;
   if (field.weather == w) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::MISSED;
     return moveend(battle, player, m, options);
   }
@@ -3899,13 +4120,8 @@ constexpr void weather_move(Battle& battle, Player player, MoveState& m,
 template <typename O>
 constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
-  const uint32_t calc = accuracy(battle, player, m);
   m.attackstring = true;
   pp_reduce(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
-    m.result |= MoveResult::MISSED;
-    return moveend(battle, player, m, options);
-  }
   const Side& side = battle.side(player);
   const Player defender = foe(player);
   const Pokemon& target = battle.side(defender).get(1);
@@ -3917,7 +4133,11 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
       allies[n++] = ally.species;
     }
   }
+  if (!try_hit(battle, player, m, {.matters = n != 0}, options)) {
+    return moveend(battle, player, m, options);
+  }
   if (n == 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -3952,18 +4172,27 @@ constexpr void perish_song(Battle& battle, Player player, MoveState& m,
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   m.attackstring = true;
   pp_reduce(battle, player, m);
+  // Showdown's getAllActive order, P1 first.
   bool result = false;
-  for (const Player p : {player, foe(player)}) {
+  for (const Player p : {Player::P1, Player::P2}) {
     ActivePokemon& a = battle.side(p).active;
-    if (p != player && (a.volatiles.semi_invulnerable() || a.ability == Ability::Soundproof)) {
+    const ID id = protocol::ident(battle, p);
+    if (p != player && a.volatiles.semi_invulnerable()) {
+      protocol::miss(options.log, protocol::ident(battle, player), id, false);
+      result = true;
+    } else if (p != player && a.ability == Ability::Soundproof) {
+      protocol::immune(options.log, id, protocol::Immune::Ability, Ability::Soundproof);
       result = true;
     } else if (!a.volatiles.perish_song) {
-      a.volatiles.perish_song = true;
+      a.volatiles.perish_song = true; // Log: Start perish3 [silent]
       a.perish_song_timer = 3;
       result = true;
     }
   }
-  if (!result) m.result |= MoveResult::FAILED;
+  if (!result) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+  }
   moveend(battle, player, m, options);
 }
 
@@ -3980,6 +4209,7 @@ constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
   SideConditions& c = battle.side(player).conditions;
   uint8_t& turns = get(m.move).effect == Effect::Reflect ? c.reflect : c.light_screen;
   if (turns != 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::MISSED;
     return moveend(battle, player, m, options);
   }
@@ -3988,13 +4218,13 @@ constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
 }
 
 // BattleScript_EffectMeanLook (bs1:1444): after the canceler, attackstring
-// and ppreduce, it misses a semi-invulnerable target (accuracycheck with
-// NO_ACC_CALC, no draw) and fails on one already trapped or behind a
+// and ppreduce, Protect stops it and it misses a semi-invulnerable target
+// (accuracycheck with NO_ACC_CALC, no draw: try_hit, as Showdown's
+// accuracy true), and it fails on one already trapped or behind a
 // Substitute; otherwise the target can't switch (escape_prevention, which
-// ends when the user switches out normally, README decision 9). The
-// decomp's check also stops it at Protect; Showdown's Mean Look has no
-// protect flag, and this follows it. Log: Activate trapped, or Fail or
-// Miss.
+// ends when the user switches out normally, README decision 9). Showdown
+// agrees (its protect flag comes from the gen5 mod). Log: Activate
+// trapped.
 template <typename O>
 constexpr void mean_look(Battle& battle, Player player, MoveState& m,
                          O& options) {
@@ -4002,11 +4232,11 @@ constexpr void mean_look(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   Volatiles& v = battle.side(foe(player)).active.volatiles;
-  if (v.semi_invulnerable()) {
-    m.result |= MoveResult::MISSED;
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
     return moveend(battle, player, m, options);
   }
   if (v.escape_prevention || v.substitute) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -4027,8 +4257,11 @@ constexpr void taunt(Battle& battle, Player player, MoveState& m, O& options) {
   m.attackstring = true;
   pp_reduce(battle, player, m);
   ActivePokemon& t = battle.side(foe(player)).active;
-  const uint32_t calc = t.taunt != 0 ? 0 : accuracy(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+  if (!try_hit(battle, player, m, {.matters = t.taunt == 0}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (t.taunt != 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -4068,8 +4301,11 @@ constexpr void encore(Battle& battle, Player player, MoveState& m, O& options) {
   default: break;
   }
   fails = fails || t.moves[slot].pp == 0;
-  const uint32_t calc = fails ? 0 : accuracy(battle, player, m);
-  if (!(calc >= 100 || (calc > 0 && rolls::hit(battle, player, calc, options)))) {
+  if (!try_hit(battle, player, m, {.matters = !fails}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (fails) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -4121,10 +4357,13 @@ constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
   for (const MoveSlot& ms : a.moves) {
     known |= ms.id == last || (is_hidden_power(ms.id) && is_hidden_power(last));
   }
-  if (t.volatiles.substitute || protected_from(m, player) ||
-      (t.volatiles.semi_invulnerable() && t.volatiles.lock_on == 0) ||
-      a.volatiles.transformed || last == Move::None ||
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (t.volatiles.substitute || a.volatiles.transformed || last == Move::None ||
       (get(last).extra & Extra::NoMimic) || known) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -4153,9 +4392,12 @@ constexpr void pain_split(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   Side& foe_side = battle.side(foe(player));
-  const Volatiles& v = foe_side.active.volatiles;
-  if (protected_from(m, player) ||
-      (v.semi_invulnerable() && v.lock_on == 0) || v.substitute) {
+  if (!try_hit(battle, player, m, {.sure = true}, options)) {
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  if (foe_side.active.volatiles.substitute) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
@@ -4178,6 +4420,7 @@ constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) 
   pp_reduce(battle, player, m);
   Pokemon& mon = battle.side(player).get(1);
   if (!mon.status.poisoned() && !mon.status.burned() && !mon.status.paralyzed()) {
+    protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }

@@ -196,12 +196,12 @@ is the same and only the messages differ.
 | Protect's chance after 4 uses | indexes past its 4-entry table (bsc:6514) | stays at 1/8 |
 | Roar and Whirlwind | a lower-level user can fail (`TryDoForceSwitchOut`) | no level check |
 | Safeguard vs Confuse Ray | script ends without moveend | fails normally |
-| Tickle | no Substitute check | fails into a Substitute |
 | Drain moves | Substitute's half rounds down; drains on no effect | rounds up; no drain without effect |
 | Counter under Pressure, failed | spares the PP | costs 2 PP |
 | Baton Pass | binding not passed; Lock-On reset | binding passes; Lock-On keeps its count |
 | Beat Up | own formula, no roll, no screens (bsc:8957) | typeless special hit with a roll ("Damage") |
-| Mean Look | — | ignores Protect |
+| Psych Up into Fly, Dig or Dive | copies the stages | misses |
+| Flash Fire and Will-O-Wisp | absorbed whatever the holder | not absorbed by a Fire type, a statused holder or one behind a Substitute |
 | Last move after a lost turn | `MOVE_UNAVAILABLE` (Encore, Mimic fail) | keeps the previous move |
 | 2-5 hit moves | stop after Endure or Focus Band | keep hitting |
 | Sleep or freeze on a charging Pokémon | cancels the charge at once | charge kept until the move is aborted |
@@ -501,8 +501,20 @@ Decided (2026-10-08):
   `check_showdown` compares only the message types written so far
   (`LOGGED`), on both sides. Group 1, the frame: `move` (with `[from]`,
   `[still]`, `[miss]`), `switch`, `drag`, `cant`, `faint`, `turn`, `win`,
-  `tie`, `-damage`, `-heal`, `-miss`. Then hit results, statuses and
-  volatiles, side conditions, weather, items and abilities.
+  `tie`, `-damage`, `-heal`, `-miss`. Group 2, the hit results
+  (2026-10-08): `-fail`, `-miss`, `-immune`, the move line's `[still]`
+  and `[miss]`, and the `-activate` of what stops a move (Protect,
+  Safeguard, Mist, Suction Cups, Ingrain). Then statuses and volatiles,
+  side conditions, weather, items and abilities.
+- **Group 2 follows Showdown's gen3 `tryMoveHit` order** (`try_hit` in
+  `mechanics.hpp`): a semi-invulnerable miss, the accuracy roll, TryHit
+  (Protect, Soundproof, the absorbing abilities), a natural immunity, then
+  each move's own checks (TryPrimaryHit's Substitute, `setStatus`,
+  `addVolatile`...). The decomp checks most failures before its accuracy
+  roll; every reordered check fails the move the same way, so only the
+  messages and the draws change. A roll whose outcome changes only the log
+  (into Protect or Soundproof, or before a failure) is drawn and not
+  recorded (CLAUDE.md, "Chance").
 - **Faints are queued** (`FaintQueue` in the log, not in `Battle`): Showdown
   queues a faint at 0 HP and writes the queue at fixed points (after each
   action, residual handler, arrival and multi-hit loop), so recoil and
