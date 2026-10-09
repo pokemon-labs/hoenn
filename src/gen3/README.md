@@ -479,8 +479,8 @@ The inventory (reasons in *italics* are new over libpkmn's gen1 and gen2):
 | `SingleMove`, `SingleTurn` | Destiny Bond, Grudge, Rage; Protect, Endure, Focus Punch, Snatch |
 | `SideStart`, `SideEnd` | Reflect, Light Screen, Spikes, Safeguard (+ persistent), Mist; Spikes from Rapid Spin + of |
 | `Weather` | type, none, upkeep, *`[from] ability`* + of (Sand Stream, Drizzle, Drought) |
-| *`Ability`* | Intimidate and Speed Boost (boost), *Trace* + old ability + of, *Pressure* (silent, split) |
-| `Item`, `EndItem` | eat, Knock Off + of, Thief / Covet + of, Trick (silent), plain (White Herb, Mental Herb) |
+| *`Ability`* | Intimidate and Speed Boost (boost), *Trace* and *Role Play* + old ability + of, *Pressure* (silent, split) |
+| `Item`, `EndItem` | `-item`: Thief / Covet + of, Trick; `-enditem`: eat (every berry), plain (White Herb, Mental Herb, Berry Juice), Knock Off + of, Thief + of (silent; Covet prints none), Trick (silent) |
 | *`FormeChange`*, `Transform` | Castform's Forecast; Transform |
 
 Decided (2026-10-08):
@@ -547,8 +547,20 @@ Decided (2026-10-08):
   has no Speed, so two sides' screens running out in one turn print in
   random order (an unrecorded coin). Brick Break prints Reflect's
   `-sideend`, then Light Screen's, before its damage; Rapid Spin's Spikes
-  `-sideend` comes between Leech Seed's and the binding's `-end`. Then
-  items and abilities (group 5).
+  `-sideend` comes between Leech Seed's and the binding's `-end`. Group 5
+  (done 2026-10-08), items and abilities (`-item`, `-enditem`,
+  `-ability`): an item used up prints its `-enditem` before its effect's
+  lines (`use_item`: eatItem's `[eat]` for a berry, else useItem's plain
+  form); Knock Off's and Thief's lines come at the hit, before the contact
+  abilities (gen < 5 runs AfterHit before DamagingHit,
+  `sim/battle-actions.ts:1113`), and Covet prints only its `-item`;
+  Intimidate's `-ability` is skipped with the boost into a Substitute or a
+  fainted foe; Speed Boost's comes with its boost, so not at +6; Pressure's
+  is a `|split|` with an empty public line, and a traced Pressure prints
+  none (gen3's setAbility doesn't start it). Air Lock and Cloud Nine print
+  nothing in gen3 (gen4 mod). Trick's and Role Play's forms have reasons but
+  no site (the moves aren't written); `-formechange` and `-transform`
+  (Castform, Ditto; on no team) have neither.
 - **Group 2 follows Showdown's gen3 `tryMoveHit` order** (`try_hit` in
   `mechanics.hpp`): a semi-invulnerable miss, the accuracy roll, TryHit
   (Protect, Soundproof, the absorbing abilities), a natural immunity, then

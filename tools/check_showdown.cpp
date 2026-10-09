@@ -78,7 +78,7 @@ std::string kind(const std::string& line) {
 }
 
 // The message types written so far, compared on both sides: group 1, the
-// frame, group 2, the hit results, group 3 and group 4 (CLAUDE.md, "Next session").
+// frame, group 2, the hit results, groups 3 to 5 (CLAUDE.md, "Next session").
 const std::set<std::string> LOGGED = {
     "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",
@@ -92,6 +92,8 @@ const std::set<std::string> LOGGED = {
     "-start", "-end", "-singleturn", "-singlemove", "-sethp", "-fieldactivate",
     // Group 4: side conditions and weather.
     "-sidestart", "-sideend", "-weather",
+    // Group 5: items and abilities.
+    "-item", "-enditem", "-ability",
 };
 
 // Whether a line of a LOGGED type is compared.

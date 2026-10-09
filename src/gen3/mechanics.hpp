@@ -779,6 +779,20 @@ constexpr void consume_item(Side& side) {
   side.get(1).item = Item::None;
 }
 
+constexpr bool is_berry(Item i) { return i >= Item::CheriBerry && i <= Item::EnigmaBerry; }
+
+// p's active Pokémon uses up its item: Showdown's eatItem for a berry
+// (-enditem [eat]) or useItem (-enditem), both before the item's effect
+// (sim/pokemon.ts:1783, 1831).
+template <typename O>
+constexpr void use_item(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  const Item item = side.get(1).item;
+  protocol::end_item(options.log, protocol::ident(battle, player), item,
+                     is_berry(item) ? protocol::EndItemFrom::Eat : protocol::EndItemFrom::None);
+  consume_item(side);
+}
+
 // What ending p's active Pokémon's sleep clears besides the status: the
 // Nightmare, the Sleep Talk turns kept for switch-out (sleep_skipped, which
 // a later sleep mustn't inherit) and, since the cure is public, the sleep
@@ -813,8 +827,10 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     v.confusion = 0;
     if constexpr (CHANCE<O>) options.chance.durations.get(player).confusion = 0;
   };
-  // Showdown's berries cure with Pokemon.cureStatus: -curestatus [msg].
+  // Showdown's berries cure with Pokemon.cureStatus: -curestatus [msg],
+  // after the item's -enditem.
   const auto cure = [&] {
+    use_item(battle, player, options);
     protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
     mon.status = Status::none();
   };
@@ -843,21 +859,28 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     break;
   case HoldEffect::CureConfusion:
     if (v.confusion == 0) return false;
+    use_item(battle, player, options);
     unconfuse();
     break;
   case HoldEffect::CureStatus: {
     // Lum Berry's onEat: cureStatus, then removeVolatile('confusion').
     if (!mon.status.any() && v.confusion == 0) return false;
     const bool asleep = mon.status.asleep();
-    if (mon.status.any()) cure();
+    use_item(battle, player, options);
+    if (mon.status.any()) {
+      protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
+      mon.status = Status::none();
+    }
     if (asleep) wake(battle, player, options);
     a.toxic = 0;
     unconfuse();
     break;
   }
   case HoldEffect::CureAttract: {
-    // Mental Herb (gen4 onUpdate): removeVolatile's silent -end, then its own.
+    // Mental Herb (gen4 onUpdate): useItem's -enditem, removeVolatile's
+    // silent -end, then its own.
     if (!v.infatuated) return false;
+    use_item(battle, player, options);
     v.infatuated = false;
     const ID id = protocol::ident(battle, player);
     protocol::end_effect(options.log, id, protocol::End::Attract);
@@ -877,14 +900,14 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
     reset(b.acc), reset(b.eva);
     if (!lowered) return false;
-    // Showdown's onUse, after useItem's -enditem (group 5).
+    // Showdown's onUse, after useItem's -enditem.
+    use_item(battle, player, options);
     protocol::clear_negative_boost(options.log, protocol::ident(battle, player));
     break;
   }
   default:
     return false;
   }
-  consume_item(side);
   return true;
 }
 
@@ -1020,8 +1043,8 @@ constexpr uint8_t lower_stats(Battle& battle, Player p, uint8_t mask, int8_t n, 
 // Intimidate (bs1:4024; Showdown's gen3 onStart, data/mods/gen3/abilities.ts:61):
 // -1 Attack to the foe unless it has a Substitute, Clear Body, White Smoke
 // or Hyper Cutter, its side has Mist (Showdown's onTryBoost, drops()), or it
-// is at -6. Showdown's White Herb reacts at once (onUpdate). Log: Ability
-// Intimidate boost (group 5), then lower_stats()'s messages (Showdown's
+// is at -6. Showdown's White Herb reacts at once (onUpdate). It prints
+// -ability|P|Intimidate|boost, then lower_stats()'s messages (Showdown's
 // boost is a secondary from an ability, which prints its 0 at -6);
 // nothing into a Substitute (gen3).
 template <typename O>
@@ -1029,6 +1052,8 @@ constexpr void intimidate(Battle& battle, Player player, O& options) {
   const Player target = foe(player);
   Side& side = battle.side(target);
   if (side.get(1).fainted() || side.active.volatiles.substitute) return;
+  protocol::ability(options.log, protocol::ident(battle, player), Ability::Intimidate,
+                    protocol::AbilityFrom::Boost);
   if (lower_stats(battle, target, 1, 1, options.log) == 0) return;
   item_cure(battle, target, options);
 }
@@ -1040,6 +1065,8 @@ constexpr void intimidate(Battle& battle, Player player, O& options) {
 // - Trace copies the foe's ability if the foe stands; in Gen III the copy
 //   doesn't take effect on entry (Showdown's setAbility starts it only for
 //   gen > 3, sim/pokemon.ts:1941; the decomp doesn't run it either).
+// - Pressure announces itself, in the omniscient stream only (Showdown's
+//   gen3 onStart, data/mods/gen3/abilities.ts:148).
 template <typename O>
 constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -1058,7 +1085,15 @@ constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
     const Side& f = battle.side(foe(player));
     if (!f.get(1).fainted() && f.active.ability != Ability::None) {
       a.ability = f.active.ability;
+      protocol::ability_copy(options.log, protocol::ident(battle, player), a.ability,
+                             Ability::Trace, protocol::AbilityFrom::Trace,
+                             protocol::ident(battle, foe(player)));
     }
+    return;
+  }
+  if (a.ability == Ability::Pressure) {
+    protocol::ability(options.log, protocol::ident(battle, player), Ability::Pressure,
+                      protocol::AbilityFrom::Pressure);
   }
 }
 
@@ -3166,13 +3201,15 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // a hit on the target itself (not its Substitute) with the user still
   // in, its item becomes the inert Item::KnockedOff, unless a living
   // target's Sticky Hold keeps it. Its Choice Band lock ends with it
-  // (bsc:2885). Log: EndItem [from] Knock Off, or Activate Sticky Hold.
+  // (bsc:2885).
   if (effect == Effect::KnockOff && m.damaged && !user.fainted() &&
       target.item != Item::None && target.item != Item::KnockedOff) {
     if (foe_side.active.ability == Ability::StickyHold && !target.fainted()) {
       protocol::activate_ability(options.log, protocol::ident(battle, defender),
                                  Ability::StickyHold);
     } else {
+      protocol::end_item(options.log, protocol::ident(battle, defender), target.item,
+                         protocol::EndItemFrom::KnockOff, protocol::ident(battle, player));
       target.item = Item::KnockedOff;
       foe_side.active.choice_move = Move::None;
     }
@@ -3187,8 +3224,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // Choice Band lock). A Knocked Off item can't be
   // taken, nor can a user whose item was knocked off take one (Showdown's
   // takeItem, gen <= 4). Showdown's gen3 doesn't keep the decomp's Enigma
-  // Berry and Mail out, and this follows it. Log: EndItem [silent] and Item
-  // [from] Thief, or Activate Sticky Hold.
+  // Berry and Mail out, and this follows it. Showdown logs the theft here,
+  // at onAfterHit (Covet prints no -enditem).
   if (effect == Effect::Thief && m.damaged && !user.fainted() &&
       user.item == Item::None && target.item != Item::None &&
       target.item != Item::KnockedOff) {
@@ -3196,6 +3233,14 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       protocol::activate_ability(options.log, protocol::ident(battle, defender),
                                  Ability::StickyHold);
     } else {
+      const ID thief = protocol::ident(battle, player);
+      const ID robbed = protocol::ident(battle, defender);
+      if (m.move == Move::Thief) {
+        protocol::end_item(options.log, robbed, target.item, protocol::EndItemFrom::Thief, thief);
+        protocol::item(options.log, thief, target.item, protocol::ItemFrom::Thief, robbed);
+      } else {
+        protocol::item(options.log, thief, target.item, protocol::ItemFrom::Covet, robbed);
+      }
       m.stolen = target.item;
       target.item = Item::None;
       foe_side.active.choice_move = Move::None;
@@ -5044,14 +5089,16 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
   Pokemon& mon = side.get(1);
   ActivePokemon& a = side.active;
   if (mon.fainted()) return;
-  const ItemData item = item_data(mon.item);
+  const Item held = mon.item;
+  const ItemData item = item_data(held);
   switch (item.effect) {
   case HoldEffect::RestoreHp:
     // Oran, Sitrus (30 HP in Gen III) and Berry Juice: a fixed amount.
+    // Showdown's gen3 eatItem or useItem, then the heal from the item.
     if (move_turn || mon.hp > mon.stats.hp / 2) return;
+    use_item(battle, player, options);
     heal(mon, item.param);
-    protocol::heal_item(options.log, protocol::ident(battle, player), mon, mon.item);
-    consume_item(side);
+    protocol::heal_item(options.log, protocol::ident(battle, player), mon, held);
     return;
   case HoldEffect::Leftovers:
     if (!move_turn && mon.hp != mon.stats.hp) {
@@ -5072,9 +5119,8 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     int8_t& b = stage(a.boosts, stat);
     const int8_t n = b < 6 ? 1 : 0;
     b = int8_t(b + n);
-    // Log: EndItem [eat] first (group 5).
-    protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, mon.item);
-    consume_item(side);
+    use_item(battle, player, options);
+    protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, held);
     return;
   }
   case HoldEffect::CriticalUp:
@@ -5082,11 +5128,11 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     // Focus Energy; Showdown eats it anyway (data/items.ts:3267), as here.
     // Its addVolatile prints nothing if Focus Energy is already there.
     if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    use_item(battle, player, options);
     if (!a.volatiles.focus_energy) {
       protocol::start(options.log, protocol::ident(battle, player), protocol::Start::FocusEnergy);
     }
     a.volatiles.focus_energy = true;
-    consume_item(side);
     return;
   case HoldEffect::RandomStatUp: {
     // Starf Berry: +2 to a random stat below +6 (util:3450). With none,
@@ -5094,16 +5140,13 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     // (data/items.ts:6003), as here.
     if (move_turn || mon.hp > mon.stats.hp / item.param) return;
     const Boosts& b = a.boosts;
-    if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) {
-      consume_item(side);
-      return;
-    }
+    use_item(battle, player, options);
+    if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) return;
     const uint8_t stat = uint8_t(rolls::starf(battle, player, options) - 1);
     int8_t& s = stage(a.boosts, stat);
     const int8_t n = s + 2 > 6 ? int8_t(6 - s) : int8_t(2);
     s = int8_t(s + n);
-    protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, mon.item);
-    consume_item(side);
+    protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, held);
     return;
   }
   default:
@@ -5292,10 +5335,13 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
       }
       break;
     case Ability::SpeedBoost:
-      // Not on the turn it came in (isFirstTurn, decision 14).
-      // Log: Ability Speed Boost boost (group 5), then this.
+      // Not on the turn it came in (isFirstTurn, decision 14). Battle.boost
+      // prints -ability|P|Speed Boost|boost before a boost from an ability,
+      // and neither at +6 (sim/battle.ts:2073).
       if (a.boosts.spe < 6 && a.first_turn != 2) {
         a.boosts.spe++;
+        protocol::ability(options.log, protocol::ident(battle, player), Ability::SpeedBoost,
+                          protocol::AbilityFrom::Boost);
         protocol::boost(options.log, protocol::ident(battle, player), 2, 1, false);
       }
       break;

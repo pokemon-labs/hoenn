@@ -661,6 +661,56 @@ class Formatter {
       split(out, id.player(), "|-heal|" + ident(id) + "|", hp, max, status, after);
       return;
     }
+    case ArgType::Item: {
+      const ID id{r.byte()};
+      std::string s = "|-item|" + ident(id) + "|" + std::string(display::ITEM_NAMES[r.byte()]);
+      using F = protocol::ItemFrom;
+      switch (F(r.byte())) {
+      case F::Thief: s += "|[from] move: Thief|[of] " + ident(ID{r.byte()}); break;
+      case F::Covet: s += "|[from] move: Covet|[of] " + ident(ID{r.byte()}); break;
+      case F::Trick: s += "|[from] move: Trick"; break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::EndItem: {
+      const ID id{r.byte()};
+      std::string s = "|-enditem|" + ident(id) + "|" + std::string(display::ITEM_NAMES[r.byte()]);
+      using F = protocol::EndItemFrom;
+      switch (F(r.byte())) {
+      case F::None: break;
+      case F::Eat: s += "|[eat]"; break;
+      case F::KnockOff: s += "|[from] move: Knock Off|[of] " + ident(ID{r.byte()}); break;
+      case F::Thief: s += "|[silent]|[from] move: Thief|[of] " + ident(ID{r.byte()}); break;
+      case F::Trick: s += "|[silent]|[from] move: Trick"; break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::Ability: {
+      const ID id{r.byte()};
+      std::string s = "|-ability|" + ident(id) + "|" + ability_name(Ability(r.byte()));
+      using F = protocol::AbilityFrom;
+      const F from = F(r.byte());
+      switch (from) {
+      case F::Boost: out.push_back(s + "|boost"); return;
+      case F::Pressure:
+        // addSplit with no public line (data/mods/gen3/abilities.ts:148).
+        out.push_back(std::string("|split|") + detail::side_id(id.player()));
+        out.push_back(s + "|[silent]");
+        out.push_back("");
+        return;
+      case F::Trace:
+      case F::RolePlay: {
+        s += "|" + ability_name(Ability(r.byte()));
+        s += from == F::Trace ? "|[from] ability: Trace" : "|[from] move: Role Play";
+        s += "|[of] " + ident(ID{r.byte()});
+        out.push_back(s);
+        return;
+      }
+      }
+      return;
+    }
     default:
       assert(false && "unknown protocol message");
       out.push_back("|?|" + std::to_string(uint8_t(type)));

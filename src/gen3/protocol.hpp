@@ -50,6 +50,10 @@
 //   SideEnd      player, SideCondition [, of for SpikesRapidSpin]
 //   Weather      weather (gen3::Weather), WeatherFrom [, ability, of for
 //                Ability]
+//   Item         ident, item, ItemFrom [, of for Thief and Covet]
+//   EndItem      ident, item, EndItemFrom [, of for KnockOff and Thief]
+//   Ability      ident, ability, AbilityFrom [, old ability, of for Trace
+//                and RolePlay]
 //   None         ends the update's messages
 //
 // The species, moves, items and abilities are the engine's enum values.
@@ -340,6 +344,30 @@ enum class WeatherFrom : uint8_t {
   None,    // a move's weather, or none when it ends
   Upkeep,  // |[upkeep]
   Ability, // |[from] ability: A|[of] P, + ability, of
+};
+
+// -item's form: the item gained.
+enum class ItemFrom : uint8_t {
+  Thief, // |[from] move: Thief|[of] P, + of
+  Covet, // |[from] move: Covet|[of] P, + of
+  Trick, // |[from] move: Trick
+};
+
+// -enditem's form: the item lost.
+enum class EndItemFrom : uint8_t {
+  None,     // useItem: White Herb, Mental Herb, Berry Juice
+  Eat,      // |[eat]: eatItem, every berry
+  KnockOff, // |[from] move: Knock Off|[of] P, + of
+  Thief,    // |[silent]|[from] move: Thief|[of] P, + of (Covet prints none)
+  Trick,    // |[silent]|[from] move: Trick
+};
+
+// -ability's form.
+enum class AbilityFrom : uint8_t {
+  Boost,    // |boost: Intimidate, and Speed Boost before its -boost
+  Pressure, // |[silent], in a |split| triplet with an empty public line
+  Trace,    // NEW|OLD|[from] ability: Trace|[of] P, + old ability, of
+  RolePlay, // NEW|OLD|[from] move: Role Play|[of] P, + old ability, of
 };
 
 // The ID of p's active Pokémon: its party position, which never changes.
@@ -810,6 +838,57 @@ template <typename L> void weather_ability(L& log, gen3::Weather w, Ability a, I
     log.write_byte(uint8_t(w));
     log.write_byte(uint8_t(WeatherFrom::Ability));
     log.write_byte(uint8_t(a));
+    log.write_byte(of.bits);
+  }
+}
+
+// -item: Thief's and Covet's `of` is the Pokémon robbed; Trick has none.
+template <typename L> void item(L& log, ID id, Item i, ItemFrom from, ID of = NO_ID) {
+  if constexpr (L::enabled) {
+    assert((from != ItemFrom::Trick) == (of != NO_ID));
+    log.write(ArgType::Item);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(i));
+    log.write_byte(uint8_t(from));
+    if (from != ItemFrom::Trick) log.write_byte(of.bits);
+  }
+}
+
+// -enditem: Knock Off's and Thief's `of` is the user.
+template <typename L>
+void end_item(L& log, ID id, Item i, EndItemFrom from, ID of = NO_ID) {
+  if constexpr (L::enabled) {
+    const bool has_of = from == EndItemFrom::KnockOff || from == EndItemFrom::Thief;
+    assert(has_of == (of != NO_ID));
+    log.write(ArgType::EndItem);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(i));
+    log.write_byte(uint8_t(from));
+    if (has_of) log.write_byte(of.bits);
+  }
+}
+
+// -ability|P|A|boost (Intimidate, Speed Boost) or Pressure's split line.
+template <typename L> void ability(L& log, ID id, Ability a, AbilityFrom from) {
+  if constexpr (L::enabled) {
+    assert(from == AbilityFrom::Boost || from == AbilityFrom::Pressure);
+    log.write(ArgType::Ability);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(a));
+    log.write_byte(uint8_t(from));
+  }
+}
+
+// -ability|P|NEW|OLD|[from] ...|[of] Q: Trace and Role Play (setAbility).
+template <typename L>
+void ability_copy(L& log, ID id, Ability a, Ability old, AbilityFrom from, ID of) {
+  if constexpr (L::enabled) {
+    assert(from == AbilityFrom::Trace || from == AbilityFrom::RolePlay);
+    log.write(ArgType::Ability);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(a));
+    log.write_byte(uint8_t(from));
+    log.write_byte(uint8_t(old));
     log.write_byte(of.bits);
   }
 }
