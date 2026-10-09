@@ -1047,10 +1047,14 @@ adapted (see Interface).
   (groups 1-3 and the guard), every failure a Beat Up or Rock Blast rare
   branch. Found by the comparison: Flash Fire's silent `-end` at
   switch-out and faint. A mutation (two 3d strings) fails 43 of 200.
-- **Resume here: group 4** (side conditions and weather), then 5 (items
-  and abilities: White Herb's and the berries' `-enditem` come before
-  their boost lines), then derive the buffer bound (`MAX_LOG_SIZE` is a
-  placeholder 2048).
+- Done (2026-10-08): group 4 (`-sidestart`, `-sideend`, `-weather`;
+  README "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of
+  1000 (groups 1-4 and the guard), every failure a Beat Up or Rock Blast
+  rare branch. A mutation (two group 4 strings) fails 179 of 200. Two
+  sides' screens ending in one turn print in a random, unrecorded order.
+- **Resume here: group 5** (items and abilities: White Herb's and the
+  berries' `-enditem` come before their boost lines), then derive the
+  buffer bound (`MAX_LOG_SIZE` is a placeholder 2048).
 - `check_showdown` doesn't build under clang (`json.hpp`'s incomplete
   `std::pair` and a `-Wbitwise-instead-of-logical` at the team setup);
   g++ builds it. Predates group 3d.

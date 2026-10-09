@@ -539,7 +539,16 @@ Decided (2026-10-08):
   types, those from items and abilities too (Synchronize's `-status`,
   Salac's `-boost`); the `-ability` and `-enditem` lines beside them wait
   for group 5. Their reason enums cover the whole gen3 inventory above.
-  Then side conditions and weather (group 4), items and abilities (5).
+  Group 4 (done 2026-10-08), side conditions and weather (`-sidestart`,
+  `-sideend`, `-weather`): the end-of-turn order is Showdown's gen4
+  orders, Reflect, Light Screen, Mist, Safeguard (both sides each), then
+  Wish, then the weather (upkeep or `none`, the upkeep printed even under
+  Cloud Nine), then the per-Pokémon residuals. A side condition's handler
+  has no Speed, so two sides' screens running out in one turn print in
+  random order (an unrecorded coin). Brick Break prints Reflect's
+  `-sideend`, then Light Screen's, before its damage; Rapid Spin's Spikes
+  `-sideend` comes between Leech Seed's and the binding's `-end`. Then
+  items and abilities (group 5).
 - **Group 2 follows Showdown's gen3 `tryMoveHit` order** (`try_hit` in
   `mechanics.hpp`): a semi-invulnerable miss, the accuracy roll, TryHit
   (Protect, Soundproof, the absorbing abilities), a natural immunity, then

@@ -495,6 +495,44 @@ class Formatter {
                         ? "|-fieldactivate|move: Perish Song"
                         : "|-fieldactivate|move: Pay Day");
       return;
+    case ArgType::SideStart:
+    case ArgType::SideEnd: {
+      const Player p = Player(r.byte() & 1);
+      std::string s = std::string(type == ArgType::SideStart ? "|-sidestart|" : "|-sideend|") +
+                      detail::side_id(p) + ": " + names_.player[uint8_t(p)] + "|";
+      using C = protocol::SideCondition;
+      switch (C(r.byte())) {
+      case C::Reflect: s += "Reflect"; break;
+      case C::LightScreen: s += "move: Light Screen"; break;
+      case C::Mist: s += "Mist"; break;
+      case C::Safeguard: s += "Safeguard"; break;
+      case C::Spikes: s += "Spikes"; break;
+      case C::SpikesRapidSpin:
+        s += "Spikes|[from] move: Rapid Spin|[of] " + ident(ID{r.byte()});
+        break;
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::Weather: {
+      static constexpr const char* NAMES[] = {"none", "RainDance", "SunnyDay", "Sandstorm",
+                                              "Hail"};
+      const uint8_t w = r.byte();
+      assert(w < 5);
+      std::string s = std::string("|-weather|") + NAMES[w];
+      using F = protocol::WeatherFrom;
+      switch (F(r.byte())) {
+      case F::None: break;
+      case F::Upkeep: s += "|[upkeep]"; break;
+      case F::Ability: {
+        const Ability a = Ability(r.byte());
+        s += "|[from] ability: " + ability_name(a) + "|[of] " + ident(ID{r.byte()});
+        break;
+      }
+      }
+      out.push_back(s);
+      return;
+    }
     case ArgType::SetHP: {
       const ID id{r.byte()};
       const uint16_t hp = r.u16(), max = r.u16();

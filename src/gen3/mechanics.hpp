@@ -1049,6 +1049,7 @@ constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
       field.weather = w;
       field.weather_turns = 0;
       field.permanent = true;
+      protocol::weather_ability(options.log, w, a.ability, protocol::ident(battle, player));
     }
     return;
   }
@@ -3074,8 +3075,15 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     if (effect == Effect::Explosion) faint(battle, player, options);
     return;
   }
-  // removelightscreenreflect (bsc:9883), before the damage.
+  // removelightscreenreflect (bsc:9883), before the damage. Log: Reflect's
+  // SideEnd, then Light Screen's (Showdown's gen3 Brick Break TryHit).
   if (breaks) {
+    if (foe_conditions.reflect != 0) {
+      protocol::side_end(options.log, defender, protocol::SideCondition::Reflect);
+    }
+    if (foe_conditions.light_screen != 0) {
+      protocol::side_end(options.log, defender, protocol::SideCondition::LightScreen);
+    }
     foe_conditions.reflect = 0;
     foe_conditions.light_screen = 0;
   }
@@ -3218,12 +3226,15 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // it frees the user from binding and Leech Seed and clears its side's
   // Spikes, all three.
   // Log, as Showdown's gen4 self onHit: End Leech Seed [from] Rapid Spin,
-  // then (group 4) Spikes' SideEnd, then the binding's End.
+  // then Spikes' SideEnd, then the binding's End.
   if (effect == Effect::RapidSpin && affects && !user.fainted()) {
     ActivePokemon& a = side.active;
     const ID id = protocol::ident(battle, player);
     if (a.volatiles.leech_seed) {
       protocol::end_effect(options.log, id, protocol::End::LeechSeedRapidSpin);
+    }
+    if (side.conditions.spikes != 0) {
+      protocol::side_end(options.log, player, protocol::SideCondition::SpikesRapidSpin, id);
     }
     if (a.volatiles.wrapped != 0) {
       protocol::end_effect(options.log, id, protocol::End::Bound, a.wrapped_move);
@@ -4050,6 +4061,7 @@ constexpr void spikes_move(Battle& battle, Player player, MoveState& m,
     return moveend(battle, player, m, options);
   }
   layers++;
+  protocol::side_start(options.log, foe(player), protocol::SideCondition::Spikes);
   moveend(battle, player, m, options);
 }
 
@@ -4345,6 +4357,7 @@ constexpr void weather_move(Battle& battle, Player player, MoveState& m,
   field.weather = w;
   field.weather_turns = 5;
   field.permanent = false;
+  protocol::weather(options.log, w);
   moveend(battle, player, m, options);
 }
 
@@ -4466,6 +4479,10 @@ constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
     return moveend(battle, player, m, options);
   }
   turns = 5;
+  protocol::side_start(options.log, player,
+                       get(m.move).effect == Effect::Reflect
+                           ? protocol::SideCondition::Reflect
+                           : protocol::SideCondition::LightScreen);
   moveend(battle, player, m, options);
 }
 
@@ -5103,19 +5120,28 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
 template <typename O>
 constexpr Flow field_residuals(Battle& battle, O& options) {
   // ENDTURN_REFLECT, LIGHT_SCREEN, MIST, SAFEGUARD (util:1218-1311): each
-  // is one pass over both sides.
-  for (Side& side : battle.sides) {
-    if (side.conditions.reflect != 0) side.conditions.reflect--;
-  }
-  for (Side& side : battle.sides) {
-    if (side.conditions.light_screen != 0) side.conditions.light_screen--;
-  }
-  for (Side& side : battle.sides) {
-    if (side.conditions.mist != 0) side.conditions.mist--;
-  }
-  for (Side& side : battle.sides) {
-    if (side.conditions.safeguard != 0) side.conditions.safeguard--;
-  }
+  // is one pass over both sides. Showdown's gen4 orders agree (1-4, before
+  // Wish's 7 and the weather's 8). Log: SideEnd when one runs out. A side
+  // condition's handler has no Speed, so when both sides' run out in one
+  // turn their lines come in random order: a coin that isn't recorded
+  // (CLAUDE.md, "Chance").
+  using SC = protocol::SideCondition;
+  const auto count_down = [&](uint8_t SideConditions::*turns, SC c) {
+    bool ends[2];
+    for (const Player p : {Player::P1, Player::P2}) {
+      uint8_t& t = battle.side(p).conditions.*turns;
+      ends[uint8_t(p)] = t != 0 && --t == 0;
+    }
+    Player first = Player::P1;
+    if (ends[0] && ends[1] && battle.rng.chance(1, 2)) first = Player::P2;
+    for (const Player p : {first, foe(first)}) {
+      if (ends[uint8_t(p)]) protocol::side_end(options.log, p, c);
+    }
+  };
+  count_down(&SideConditions::reflect, SC::Reflect);
+  count_down(&SideConditions::light_screen, SC::LightScreen);
+  count_down(&SideConditions::mist, SC::Mist);
+  count_down(&SideConditions::safeguard, SC::Safeguard);
 
   // ENDTURN_WISH (util:1312): it lands on whoever is active, healing half of
   // its max HP (trywish, bsc:9311), unless it has fainted.
@@ -5145,13 +5171,17 @@ constexpr Flow field_residuals(Battle& battle, O& options) {
   // dies first and loses. Showdown's weather is one field handler that hurts
   // both before its faint queue and checkWin run (sim/battle.ts:2539, 2610),
   // so both last Pokémon fainting is a tie; this follows Showdown.
+  // Log: Weather none when it runs out, otherwise its upkeep (printed even
+  // under Cloud Nine or Air Lock), then the damage.
   Field& field = battle.field;
   if (field.weather == Weather::None) return std::nullopt;
   if (!field.permanent && --field.weather_turns == 0) {
     field.weather = Weather::None;
+    protocol::weather(options.log, Weather::None);
     return std::nullopt;
   }
   const Weather weather = field.weather;
+  protocol::weather(options.log, weather, protocol::WeatherFrom::Upkeep);
   if ((weather != Weather::Sandstorm && weather != Weather::Hail) ||
       effective_weather(battle) == Weather::None) {
     return std::nullopt;

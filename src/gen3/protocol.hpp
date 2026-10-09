@@ -46,6 +46,10 @@
 //   HitCount     ident, hits
 //   Prepare      ident, move u16
 //   Anim         source, move u16, target
+//   SideStart    player, SideCondition
+//   SideEnd      player, SideCondition [, of for SpikesRapidSpin]
+//   Weather      weather (gen3::Weather), WeatherFrom [, ability, of for
+//                Ability]
 //   None         ends the update's messages
 //
 // The species, moves, items and abilities are the engine's enum values.
@@ -317,6 +321,25 @@ enum class SingleMove : uint8_t {
 enum class FieldActivate : uint8_t {
   PerishSong, // |move: Perish Song
   PayDay,     // |move: Pay Day
+};
+
+// -sidestart's and -sideend's condition (gen3's: no Persistent, so no
+// Safeguard [persistent]).
+enum class SideCondition : uint8_t {
+  Reflect,     // |Reflect
+  LightScreen, // |move: Light Screen
+  Mist,        // |Mist
+  Safeguard,   // |Safeguard
+  Spikes,      // |Spikes
+  // -sideend only, + of: |Spikes|[from] move: Rapid Spin|[of] P
+  SpikesRapidSpin,
+};
+
+// -weather's form.
+enum class WeatherFrom : uint8_t {
+  None,    // a move's weather, or none when it ends
+  Upkeep,  // |[upkeep]
+  Ability, // |[from] ability: A|[of] P, + ability, of
 };
 
 // The ID of p's active Pokémon: its party position, which never changes.
@@ -743,6 +766,51 @@ template <typename L> void clear_negative_boost(L& log, ID id) {
   if constexpr (L::enabled) {
     log.write(ArgType::ClearNegativeBoost);
     log.write_byte(id.bits);
+  }
+}
+
+template <typename L> void side_start(L& log, Player p, SideCondition c) {
+  if constexpr (L::enabled) {
+    assert(c != SideCondition::SpikesRapidSpin);
+    log.write(ArgType::SideStart);
+    log.write_byte(uint8_t(p));
+    log.write_byte(uint8_t(c));
+  }
+}
+
+// -sideend, with the Rapid Spin user `of` for SpikesRapidSpin.
+template <typename L>
+void side_end(L& log, Player p, SideCondition c, ID of = NO_ID) {
+  if constexpr (L::enabled) {
+    assert((c == SideCondition::SpikesRapidSpin) == (of != NO_ID));
+    log.write(ArgType::SideEnd);
+    log.write_byte(uint8_t(p));
+    log.write_byte(uint8_t(c));
+    if (c == SideCondition::SpikesRapidSpin) log.write_byte(of.bits);
+  }
+}
+
+// -weather: a move's (plain), the end of the weather (Weather::None), or
+// its residual (Upkeep).
+template <typename L>
+void weather(L& log, gen3::Weather w, WeatherFrom from = WeatherFrom::None) {
+  if constexpr (L::enabled) {
+    assert(from != WeatherFrom::Ability);
+    assert((w == gen3::Weather::None) <= (from == WeatherFrom::None));
+    log.write(ArgType::Weather);
+    log.write_byte(uint8_t(w));
+    log.write_byte(uint8_t(from));
+  }
+}
+
+// -weather|W|[from] ability: A|[of] P: Drizzle, Drought, Sand Stream.
+template <typename L> void weather_ability(L& log, gen3::Weather w, Ability a, ID of) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Weather);
+    log.write_byte(uint8_t(w));
+    log.write_byte(uint8_t(WeatherFrom::Ability));
+    log.write_byte(uint8_t(a));
+    log.write_byte(of.bits);
   }
 }
 
