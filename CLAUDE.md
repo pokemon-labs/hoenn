@@ -1015,12 +1015,21 @@ adapted (see Interface).
     not voluntary switches: Showdown orders the instaswitch actions by the
     fainted Pokémon, whose handlers don't run (not active), so the fainted
     Exeggutor's Chlorophyll didn't count. Fixed (`replacement_order`).
-- **Resume here: group 3**, statuses and volatiles.
-  - Group 3 and later: statuses and volatiles (`-status`, `-curestatus`,
-    `-start`, `-end`, the other `-activate`s, `-boost`/`-unboost` with
-    Showdown's 0 at the cap...), side conditions and
-    weather, items and abilities, then derive the buffer bound
-    (`MAX_LOG_SIZE` is a placeholder 2048).
+- **Group 3, decided (2026-10-08):** four steps, each checked on seeds 7
+  and 8 before the next: 3a the rest of the hit results, 3b major status,
+  3c boosts, 3d volatiles (README "Protocol"). Each writes the item and
+  ability forms of its types too; the reason enums cover the whole gen3
+  inventory; `Boost` carries a direction bit (Showdown prints `-unboost`
+  at -6 even for a raise, `sim/battle.ts:2049`) and an item source.
+- Done (2026-10-08): group 3a (`-crit`, `-supereffective`, `-resisted`,
+  `-hitcount`, `-prepare`, `-anim`). Seed 7 197 of 200, seed 8 992 of
+  1000 (groups 1, 2, 3a and the state guard); every failure is a Beat Up
+  or Rock Blast rare branch.
+- **Resume here: group 3b**, then 3c, 3d. Check in 3c whether marking a
+  +6 raise MISSED (the decomp) changes state Showdown keeps (it prints
+  `-boost|0` and no `-fail`). Then side conditions and weather, items and
+  abilities, then derive the buffer bound (`MAX_LOG_SIZE` is a placeholder
+  2048).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.

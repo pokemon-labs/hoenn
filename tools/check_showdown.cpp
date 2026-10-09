@@ -78,10 +78,13 @@ std::string kind(const std::string& line) {
 }
 
 // The message types written so far, compared on both sides: group 1, the
-// frame, and group 2, the hit results (CLAUDE.md, "Next session").
+// frame, group 2, the hit results, and group 3a, the rest of them (CLAUDE.md,
+// "Next session").
 const std::set<std::string> LOGGED = {
     "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",
+    // Group 3a: the rest of the hit results.
+    "-crit", "-supereffective", "-resisted", "-hitcount", "-prepare", "-anim",
 };
 
 // The -activate effects written so far: those that stop a move (group 2).

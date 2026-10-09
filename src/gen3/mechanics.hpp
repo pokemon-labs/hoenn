@@ -1887,6 +1887,19 @@ constexpr void log_hit(const Battle& battle, Player player, const MoveState& m,
   if (mon.fainted()) protocol::faint(options.log, protocol::ident(battle, target));
 }
 
+// Showdown's gen3 modifyDamage messages for one hit on p's foe, before its
+// damage (data/mods/gen3/scripts.ts:92-106): the type effectiveness, then
+// -crit. Only damage from the formula has them, not fixed damage (Seismic
+// Toss, Counter, Endeavor...), which skips modifyDamage.
+template <typename O>
+constexpr void log_modifiers(const Battle& battle, Player player, const MoveState& m,
+                             bool crit, O& options) {
+  const ID id = protocol::ident(battle, foe(player));
+  protocol::effectiveness(options.log, id, m.result & MoveResult::SUPER_EFFECTIVE,
+                          m.result & MoveResult::NOT_VERY_EFFECTIVE);
+  if (crit) protocol::crit(options.log, id);
+}
+
 // HP restored by datahpupdate with negative damage: capped at max HP.
 constexpr void heal(Pokemon& mon, uint32_t amount) {
   const uint32_t room = uint32_t(mon.stats.hp - mon.hp);
@@ -2764,7 +2777,8 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // clears the lock after the canceler and hits from the accuracy check
   // with no PP. Showdown's gen3 agrees: twoturnmove, PP on the first turn,
   // onMoveAborted (see cancel()). Rain, sand and hail halve the power
-  // (damage.hpp). Log: Prepare, then Move on the second turn.
+  // (damage.hpp). Log: Prepare (and Anim in sun), then Move [from]
+  // lockedmove on the second turn.
   if (effect == Effect::SolarBeam) {
     Volatiles& v = battle.side(player).active.volatiles;
     if (v.multiple_turns) {
@@ -2772,10 +2786,14 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       m.no_pp = true;
     } else if (effective_weather(battle) == Weather::Sun) {
       // Showdown's onTryMove still prepares, then marks the move line
-      // [still] (Log: Prepare, then Anim).
+      // [still] and plays the attack as -anim (data/moves.ts, solarbeam).
+      const ID id = protocol::ident(battle, player);
+      protocol::prepare(options.log, id, m.move);
       protocol::last_still(options.log);
+      protocol::anim(options.log, id, m.move, protocol::ident(battle, foe(player)));
     } else {
       protocol::last_still(options.log);
+      protocol::prepare(options.log, protocol::ident(battle, player), m.move);
       pp_reduce(battle, player, m);
       v.multiple_turns = true;
       battle.side(player).active.locked_move = m.move;
@@ -2938,6 +2956,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     // it. Log: one Damage per hit, then HitCount.
     const uint8_t n = rolls::multi_hit(battle, player, options);
     bool damaged = false;
+    uint8_t hits = 0;
     for (uint8_t i = 0; i < n && !target.fainted() && !user.fainted(); i++) {
       if (i > 0 && user.status.asleep() && m.chosen != Move::SleepTalk) break;
       Hit hi = h;
@@ -2947,15 +2966,18 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       }
       uint32_t d = apply_roll(damage(battle, player, hi),
                               rolls::damage(battle, player, i, options));
+      log_modifiers(battle, player, m, hi.crit, options);
       d = survive(battle, player, m, d, i, options);
       m.damaged = false;
       m.hp_dealt = hp_update(battle, defender, d, m);
       log_hit(battle, player, m, options);
       ability_on_damage(battle, player, m, i, options);
       damaged |= m.damaged;
+      hits++;
     }
     m.damaged = damaged;
     m.multi = true;
+    protocol::hit_count(options.log, protocol::ident(battle, defender), hits);
     // Showdown's faintMessages after the hit loop (sim/battle-actions.ts:969).
     protocol::faints(options.log);
   } else {
@@ -2974,6 +2996,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       }
       d = apply_roll(damage(battle, player, h),
                      rolls::damage(battle, player, 0, options));
+      log_modifiers(battle, player, m, h.crit, options);
     }
     d = survive(battle, player, m, d, 0, options);
     // datahpupdate
@@ -4163,17 +4186,20 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  for (uint8_t i = 0; i < n && !target.fainted(); i++) {
+  uint8_t i = 0;
+  for (; i < n && !target.fainted(); i++) {
     Hit h = Hit::of(m.move);
     h.ally = allies[i];
     if (can_crit(battle, player)) {
       h.crit = rolls::crit(battle, player, i, crit_stage(battle, player, m.move), options);
     }
     uint32_t d = apply_roll(damage(battle, player, h), rolls::damage(battle, player, i, options));
+    log_modifiers(battle, player, m, h.crit, options);
     d = survive(battle, player, m, d, i, options);
     m.hp_dealt = hp_update(battle, defender, d, m);
     log_hit(battle, player, m, options);
   }
+  protocol::hit_count(options.log, protocol::ident(battle, defender), i);
   faint_target(battle, player, options);
   moveend(battle, player, m, options);
 }

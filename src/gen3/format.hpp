@@ -172,8 +172,15 @@ class Formatter {
     }
     case ArgType::LastStill: {
       // Battle.attrLastMove('[still]') (sim/battle.ts:3121): the target is
-      // blanked.
+      // blanked, or an -anim line is removed (and later attributes go
+      // nowhere).
+      if (last_move_ == SIZE_MAX) return;
       assert(last_move_ < out.size());
+      if (out[last_move_].starts_with("|-anim|")) {
+        out.erase(out.begin() + std::ptrdiff_t(last_move_));
+        last_move_ = SIZE_MAX;
+        return;
+      }
       std::string& s = out[last_move_];
       // The target is the fifth '|'-separated part: after the fourth '|'.
       size_t bar = 0;
@@ -184,9 +191,36 @@ class Formatter {
       return;
     }
     case ArgType::LastMiss:
+      if (last_move_ == SIZE_MAX) return;
       assert(last_move_ < out.size());
       out[last_move_] += "|[miss]";
       return;
+    case ArgType::Anim: {
+      const ID source{r.byte()};
+      const Move m = Move(r.u16());
+      last_move_ = out.size();
+      out.push_back("|-anim|" + ident(source) + "|" + move_name(m) + "|" + ident(ID{r.byte()}));
+      return;
+    }
+    case ArgType::Crit:
+      out.push_back("|-crit|" + ident(ID{r.byte()}));
+      return;
+    case ArgType::SuperEffective:
+      out.push_back("|-supereffective|" + ident(ID{r.byte()}));
+      return;
+    case ArgType::Resisted:
+      out.push_back("|-resisted|" + ident(ID{r.byte()}));
+      return;
+    case ArgType::HitCount: {
+      const ID id{r.byte()};
+      out.push_back("|-hitcount|" + ident(id) + "|" + std::to_string(r.byte()));
+      return;
+    }
+    case ArgType::Prepare: {
+      const ID id{r.byte()};
+      out.push_back("|-prepare|" + ident(id) + "|" + move_name(Move(r.u16())));
+      return;
+    }
     case ArgType::Miss: {
       const ID source{r.byte()};
       out.push_back("|-miss|" + ident(source) + "|" + ident(ID{r.byte()}));

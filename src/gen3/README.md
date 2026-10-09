@@ -504,8 +504,17 @@ Decided (2026-10-08):
   `tie`, `-damage`, `-heal`, `-miss`. Group 2, the hit results
   (2026-10-08): `-fail`, `-miss`, `-immune`, the move line's `[still]`
   and `[miss]`, and the `-activate` of what stops a move (Protect,
-  Safeguard, Mist, Suction Cups, Ingrain). Then statuses and volatiles,
-  side conditions, weather, items and abilities.
+  Safeguard, Mist, Suction Cups, Ingrain). Group 3a, the rest of the hit
+  results (2026-10-08): `-crit`, `-supereffective`, `-resisted` (formula
+  damage only, before the damage line), `-hitcount` (before the queued
+  faint), `-prepare` and `-anim` (Solar Beam). Then 3b, major status
+  (`-status`, `-curestatus`, `-cureteam`); 3c, boosts; 3d, volatiles
+  (`-start`, `-end`, the other `-activate`s, `-singleturn`, `-singlemove`,
+  `-sethp`, `-fieldactivate`). Each subgroup writes every form of its
+  types, those from items and abilities too (Synchronize's `-status`,
+  Salac's `-boost`); the `-ability` and `-enditem` lines beside them wait
+  for group 5. Their reason enums cover the whole gen3 inventory above.
+  Then side conditions and weather (group 4), items and abilities (5).
 - **Group 2 follows Showdown's gen3 `tryMoveHit` order** (`try_hit` in
   `mechanics.hpp`): a semi-invulnerable miss, the accuracy roll, TryHit
   (Protect, Soundproof, the absorbing abilities), a natural immunity, then
@@ -515,6 +524,11 @@ Decided (2026-10-08):
   messages and the draws change. A roll whose outcome changes only the log
   (into Protect or Soundproof, or before a failure) is drawn and not
   recorded (CLAUDE.md, "Chance").
+- **`-anim` is the last move line** (Battle.addMove): `[miss]` amends it
+  and `[still]` removes it (Battle.attrLastMove, `sim/battle.ts:3121`), in
+  the formatter. `-ohko`, `-mustrecharge` and `-notarget` have no site yet:
+  no OHKO or recharge move is on `teams/adv/`, and a singles target can't
+  be gone when a move runs.
 - **Faints are queued** (`FaintQueue` in the log, not in `Battle`): Showdown
   queues a faint at 0 HP and writes the queue at fixed points (after each
   action, residual handler, arrival and multi-hit loop), so recoil and

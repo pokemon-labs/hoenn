@@ -23,6 +23,10 @@
 //                Bound: move u16; Ability: ability, of
 //   Heal         ident, HP, Heal, then: Drain: of; Item: item;
 //                Ability: ability, of; Wish: wisher's party position
+//   Crit, SuperEffective, Resisted       ident
+//   HitCount     ident, hits
+//   Prepare      ident, move u16
+//   Anim         source, move u16, target
 //   None         ends the update's messages
 //
 // The species, moves, items and abilities are the engine's enum values.
@@ -292,6 +296,53 @@ template <typename L> void activate(L& log, ID id, Activate effect) {
     log.write(ArgType::Activate);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(effect));
+  }
+}
+
+// A hit's type effectiveness, as Showdown's gen3 modifyDamage reports it
+// (data/mods/gen3/scripts.ts:92): -supereffective or -resisted by the
+// summed type modifier's sign, nothing when it is 0.
+template <typename L> void effectiveness(L& log, ID id, bool super, bool resisted) {
+  if constexpr (L::enabled) {
+    if (!super && !resisted) return;
+    log.write(super ? ArgType::SuperEffective : ArgType::Resisted);
+    log.write_byte(id.bits);
+  }
+}
+
+template <typename L> void crit(L& log, ID id) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Crit);
+    log.write_byte(id.bits);
+  }
+}
+
+// -hitcount|P|N after a multi-hit move's loop.
+template <typename L> void hit_count(L& log, ID id, uint8_t hits) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::HitCount);
+    log.write_byte(id.bits);
+    log.write_byte(hits);
+  }
+}
+
+// -prepare|P|MOVE: a two-turn move's first turn.
+template <typename L> void prepare(L& log, ID id, Move m) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Prepare);
+    log.write_byte(id.bits);
+    detail::move_id(log, m);
+  }
+}
+
+// -anim|SOURCE|MOVE|TARGET (Battle.addMove): it becomes the line LastStill
+// and LastMiss amend.
+template <typename L> void anim(L& log, ID source, Move m, ID target) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Anim);
+    log.write_byte(source.bits);
+    detail::move_id(log, m);
+    log.write_byte(target.bits);
   }
 }
 
