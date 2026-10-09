@@ -2259,16 +2259,21 @@ void check_items() {
     CHECK(m.hp == m.stats.hp / 2 + 30 && m.item == Item::None);
   }
   {
-    // Salac Berry: +1 Speed at end of turn at a quarter or less; not at +6.
+    // Salac Berry: +1 Speed at end of turn at a quarter or less; eaten at
+    // +6 too, as Showdown.
     Battle b = started({holding(plain, Item::SalacBerry)}, {IDLE});
     Pokemon& m = b.sides[0].get(1);
-    m.hp = uint16_t(m.stats.hp / 4);
-    b.sides[0].active.boosts.spe = 6;
+    m.hp = uint16_t(m.stats.hp / 4 + 1);
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(m.item == Item::SalacBerry);
-    b.sides[0].active.boosts.spe = 0;
+    m.hp = uint16_t(m.stats.hp / 4);
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[0].active.boosts.spe == 1 && m.item == Item::None);
+    Battle c = started({holding(plain, Item::SalacBerry)}, {IDLE});
+    c.sides[0].get(1).hp = uint16_t(c.sides[0].get(1).stats.hp / 4);
+    c.sides[0].active.boosts.spe = 6;
+    update(c, Choice::move(1), Choice::move(1), null);
+    CHECK(c.sides[0].active.boosts.spe == 6 && c.sides[0].get(1).item == Item::None);
   }
   {
     // Starf Berry: +2 to the forced stat, recorded with 1/k over the stats

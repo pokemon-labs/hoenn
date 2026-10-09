@@ -28,6 +28,11 @@
 //   CureStatus   ident, status, Cure, bench (1 for a Pokémon not active),
 //                then: Move: move u16
 //   CureTeam     ident ([from] move: Aromatherapy)
+//   Boost        ident, stat | BOOST_DOWN | BOOST_ITEM, stages [, item]
+//   SetBoost     ident (Belly Drum's Attack to 6)
+//   CopyBoost    source, target ([from] move: Psych Up)
+//   ClearAllBoost       -
+//   ClearNegativeBoost  ident ([silent]: White Herb)
 //   Crit, SuperEffective, Resisted       ident
 //   HitCount     ident, hits
 //   Prepare      ident, move u16
@@ -424,6 +429,58 @@ void cure_status(L& log, ID id, gen3::Status st, Cure cure = Cure::Msg,
 template <typename L> void cure_team(L& log, ID id) {
   if constexpr (L::enabled) {
     log.write(ArgType::CureTeam);
+    log.write_byte(id.bits);
+  }
+}
+
+// Boost's stat byte: the stage index (mechanics.hpp's stage(): 0 Atk, 1 Def,
+// 2 Spe, 3 SpA, 4 SpD, 5 accuracy, 6 evasion), with these flags.
+inline constexpr uint8_t BOOST_DOWN = 1 << 6; // -unboost
+inline constexpr uint8_t BOOST_ITEM = 1 << 7; // [from] item: I, + item
+
+// -boost|P|STAT|N or -unboost (Battle.boost, sim/battle.ts:2024): `n` is
+// the stages the stat moved, 0 at the cap. Showdown prints -unboost for a
+// drop and for any change that leaves the stage at -6, which only a drop
+// of 0 can do, so `down` is the direction asked for. A stat berry adds
+// [from] item (`item`), but a 0 is printed plain (the boostBy == 0 branch).
+template <typename L>
+void boost(L& log, ID id, uint8_t stat, int8_t n, bool down, Item item = Item::None) {
+  if constexpr (L::enabled) {
+    assert(stat < 7 && n >= 0 && n <= 12);
+    if (n == 0) item = Item::None;
+    log.write(ArgType::Boost);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(stat | (down ? BOOST_DOWN : 0) |
+                           (item != Item::None ? BOOST_ITEM : 0)));
+    log.write_byte(uint8_t(n));
+    if (item != Item::None) log.write_byte(uint8_t(item));
+  }
+}
+
+// -setboost|P|atk|6|[from] move: Belly Drum: gen3's only -setboost.
+template <typename L> void set_boost(L& log, ID id) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::SetBoost);
+    log.write_byte(id.bits);
+  }
+}
+
+// -copyboost|SOURCE|TARGET|[from] move: Psych Up.
+template <typename L> void copy_boost(L& log, ID source, ID target) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::CopyBoost);
+    log.write_byte(source.bits);
+    log.write_byte(target.bits);
+  }
+}
+
+// -clearallboost: Haze.
+template <typename L> void clear_all_boost(L& log) { log.write(ArgType::ClearAllBoost); }
+
+// -clearnegativeboost|P|[silent]: White Herb.
+template <typename L> void clear_negative_boost(L& log, ID id) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::ClearNegativeBoost);
     log.write_byte(id.bits);
   }
 }

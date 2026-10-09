@@ -223,6 +223,7 @@ is the same and only the messages differ.
 | Sand or hail KOs both last Pokémon | faster faints first and loses | both hit, then a tie |
 | Perish Song KOs both last Pokémon | — | both counts, then a tie |
 | Pursuit on a switching target | final damage ×2; no attack canceler; partial moveend | base power ×2; canceler (paralysis...) and full moveend |
+| Stat berries with nothing to do | kept (stat at +6, Lansat under Focus Energy, Starf at all +6) | eaten anyway |
 
 Not yet compared with Showdown: everything not on `teams/adv/` (Uproar,
 Thrash, Bide, Future Sight, Transform...).
@@ -510,7 +511,15 @@ Decided (2026-10-08):
   faint), `-prepare` and `-anim` (Solar Beam). 3b (done 2026-10-08): a
   sleep names its move and the other statuses their ability (Showdown's
   gen3 `slp` and conditions); every cure is `[msg]` but Heal Bell's
-  `[silent]` (benched Pokémon print `p1: NAME`) and Natural Cure's. Then 3c, boosts; 3d, volatiles
+  `[silent]` (benched Pokémon print `p1: NAME`) and Natural Cure's. 3c
+  (done 2026-10-08), boosts, as Showdown's `Battle.boost`
+  (`sim/battle.ts:2024`): one line per stat in the move's key order; a
+  primary boost or drop at the cap prints its 0 (`-boost|P|atk|0`,
+  `-unboost|P|def|0`) and no `-fail`, as does Intimidate and Rage, while
+  self and secondary boosts print nothing at the cap; a 0 never has
+  `[from] item`. Curse's order is spe, atk, def (the base `onTryHit`
+  overwrites gen4's `self`). Belly Drum's `-damage` comes before its
+  `-setboost`. Then 3d, volatiles
   (`-start`, `-end`, the other `-activate`s, `-singleturn`, `-singlemove`,
   `-sethp`, `-fieldactivate`). Each subgroup writes every form of its
   types, those from items and abilities too (Synchronize's `-status`,

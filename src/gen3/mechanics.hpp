@@ -857,6 +857,8 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
     reset(b.acc), reset(b.eva);
     if (!lowered) return false;
+    // Showdown's onUse, after useItem's -enditem (group 5).
+    protocol::clear_negative_boost(options.log, protocol::ident(battle, player));
     break;
   }
   default:
@@ -964,20 +966,50 @@ constexpr uint8_t droppable(const Battle& battle, Player p, uint8_t mask) {
   return drops(battle, p, mask, log);
 }
 
+// Lowers a stage by up to n, stopping at -6 (no check of who may lower it).
+// Returns the stages lost.
+constexpr int8_t lower(ActivePokemon& a, uint8_t stat, int8_t n) {
+  int8_t& b = stage(a.boosts, stat);
+  const int8_t lost = b - n < -6 ? int8_t(b + 6) : n;
+  b = int8_t(b - lost);
+  return lost;
+}
+
+// A primary drop of n stages from the foe on each stat of `mask` that
+// drops() lets fall, after its messages. Showdown's Battle.boost then
+// prints -unboost per stat in the move's order (which is stage order for
+// every gen3 drop): the stages lost, or 0 for a stat already at -6, which
+// getCappedBoost leaves in the table and no TryBoost handler removes.
+// Returns the stats that fell.
+template <typename L>
+constexpr uint8_t lower_stats(Battle& battle, Player p, uint8_t mask, int8_t n, L& log) {
+  ActivePokemon& t = battle.side(p).active;
+  const uint8_t falls = drops(battle, p, mask, log);
+  const ID id = protocol::ident(battle, p);
+  for (uint8_t i = 0; i < 7; i++) {
+    if (!(mask & (1 << i))) continue;
+    if (falls & (1 << i)) {
+      protocol::boost(log, id, i, lower(t, i, n), true);
+    } else if (stage(t.boosts, i) <= -6) {
+      protocol::boost(log, id, i, 0, true);
+    }
+  }
+  return falls;
+}
+
 // Intimidate (bs1:4024; Showdown's gen3 onStart, data/mods/gen3/abilities.ts:61):
 // -1 Attack to the foe unless it has a Substitute, Clear Body, White Smoke
 // or Hyper Cutter, its side has Mist (Showdown's onTryBoost, drops()), or it
 // is at -6. Showdown's White Herb reacts at once (onUpdate). Log: Ability
-// Intimidate boost, then Unboost (0 at -6) or drops()'s message; nothing
-// into a Substitute (gen3).
+// Intimidate boost (group 5), then lower_stats()'s messages (Showdown's
+// boost is a secondary from an ability, which prints its 0 at -6);
+// nothing into a Substitute (gen3).
 template <typename O>
 constexpr void intimidate(Battle& battle, Player player, O& options) {
   const Player target = foe(player);
   Side& side = battle.side(target);
-  ActivePokemon& t = side.active;
-  if (side.get(1).fainted() || t.volatiles.substitute) return;
-  if (drops(battle, target, 1, options.log) == 0) return;
-  t.boosts.atk--;
+  if (side.get(1).fainted() || side.active.volatiles.substitute) return;
+  if (lower_stats(battle, target, 1, 1, options.log) == 0) return;
   item_cure(battle, target, options);
 }
 
@@ -2026,12 +2058,6 @@ constexpr bool plain_hit(Effect effect) {
   }
 }
 
-// Lowers a stage by up to n, stopping at -6 (no check of who may lower it).
-constexpr void lower(ActivePokemon& a, uint8_t stat, int8_t n) {
-  int8_t& b = stage(a.boosts, stat);
-  b = b - n < -6 ? int8_t(-6) : int8_t(b - n);
-}
-
 // setmoveeffect in each effect's script (bs1). Blaze Kick and Poison Tail
 // share Burn Hit's and Poison Hit's scripts; Thunder sets PARALYSIS.
 constexpr Secondary secondary_of(Effect effect) {
@@ -2206,6 +2232,8 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
       return;
     }
     b++;
+    protocol::boost(options.log, protocol::ident(battle, player),
+                    s == Secondary::AtkUp ? 0 : 1, 1, false);
     return;
   }
 
@@ -2278,9 +2306,12 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   case Secondary::SpeDown:
   case Secondary::SpaDown:
   case Secondary::SpdDown:
-  case Secondary::AccDown:
-    stage(t.boosts, uint8_t(uint8_t(s) - uint8_t(Secondary::AtkDown)))--;
+  case Secondary::AccDown: {
+    const uint8_t stat = uint8_t(uint8_t(s) - uint8_t(Secondary::AtkDown));
+    stage(t.boosts, stat)--;
+    protocol::boost(options.log, protocol::ident(battle, foe(player)), stat, 1, true);
     break;
+  }
   case Secondary::Confusion:
     confuse(battle, foe(player), options);
     break;
@@ -2635,10 +2666,13 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // TODO(plan step 4): the dynamic type (Hidden Power, Weather Ball).
   const Type type = data.type;
 
-  // MOVEEND_RAGE
+  // MOVEEND_RAGE. Showdown's rage condition boosts as a plain effect
+  // (data/moves.ts:14570), so it prints its 0 at +6.
   if (!m.self && t.volatiles.rage && !target.fainted() && !no_effect &&
-      m.damaged && data.bp != 0 && t.boosts.atk < 6) {
-    t.boosts.atk++;
+      m.damaged && data.bp != 0) {
+    const int8_t n = t.boosts.atk < 6 ? 1 : 0;
+    t.boosts.atk = int8_t(t.boosts.atk + n);
+    protocol::boost(options.log, protocol::ident(battle, foe(player)), 0, n, false);
   }
 
   // MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
@@ -3073,15 +3107,19 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // Superpower (MOVE_EFFECT_ATK_DEF_DOWN) and Overheat (SP_ATK_TWO_DOWN),
   // certain and on the user (bs1:2388, 2648; bsc:2839, 2895): after a hit that
   // affected the target, Substitute or not, Mist and the user's own
-  // abilities aside, down to -6. Showdown's self boosts agree. Log:
-  // Unboost.
+  // abilities aside, down to -6. Showdown's self boosts agree, and print
+  // -unboost only for a stat that fell (isSelf).
   if (affects && (effect == Effect::Superpower || effect == Effect::Overheat)) {
     ActivePokemon& a = side.active;
+    const ID id = protocol::ident(battle, player);
+    const auto drop = [&](uint8_t stat, int8_t n) {
+      if (const int8_t lost = lower(a, stat, n)) protocol::boost(options.log, id, stat, lost, true);
+    };
     if (effect == Effect::Superpower) {
-      lower(a, 0, 1);
-      lower(a, 1, 1);
+      drop(0, 1);
+      drop(1, 1);
     } else {
-      lower(a, 3, 2);
+      drop(3, 2);
     }
   }
 
@@ -3409,9 +3447,11 @@ constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
 // ChangeStatBuffs (bsc:6937) raising the user's own stat by n, as the
 // self-targeting moves do (MOVE_EFFECT_AFFECTS_USER | STAT_CHANGE_ALLOW_PTR):
 // only the cap stops it, and a raise at +6 marks the move MISSED
-// (bsc:7097), which moveend reads. Returns the stages gained, which the
-// log's Boost carries: Showdown prints `-boost|...|0` for a primary raise
-// at the cap (sim/battle.ts:2083).
+// (bsc:7097), which moveend reads (only Conversion 2's last-landed fields,
+// which Showdown doesn't keep). Returns the stages gained, which the log's
+// Boost carries: Showdown prints `-boost|...|0` for a primary raise at the
+// cap (sim/battle.ts:2083) and no -fail (Battle.boost returns null, a
+// silent failure).
 constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
   int8_t& b = stage(a.boosts, stat);
   if (b >= 6) {
@@ -3485,7 +3525,8 @@ constexpr void stat_up_move(Battle& battle, Player player, MoveState& m,
                        : effect == Effect::DefenseCurl ? StatChange{1, 1}
                                                        : stat_up(effect);
   assert(c.n != 0);
-  raise(a, c.stat, c.n, m); // Log: Boost
+  protocol::boost(options.log, protocol::ident(battle, player), c.stat,
+                  raise(a, c.stat, c.n, m), false);
   moveend(battle, player, m, options);
 }
 
@@ -3513,7 +3554,7 @@ constexpr StatChange stat_down(Effect effect) {
 // ppreduce and the drop. Every failure is the same state, so the checks
 // and their messages come in Showdown's order: try_hit (Soundproof stops
 // Screech, Metal Sound and Growl), the Substitute (TryPrimaryHit), then
-// drops(). Log: Unboost (0 at -6).
+// lower_stats(). Log: Unboost (0 at -6).
 template <typename O>
 constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
                               StatChange c, O& options) {
@@ -3533,7 +3574,7 @@ constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  if (drops(battle, target, bit, options.log) != 0) lower(t, c.stat, c.n);
+  lower_stats(battle, target, bit, c.n, options.log);
   moveend(battle, player, m, options);
 }
 
@@ -3542,21 +3583,18 @@ constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
 // accuracy check (ButItFailed); then each drop that can happen. Neither the
 // decomp nor Showdown's gen3 (bypasssub, data/mods/gen3/moves.ts:639)
 // checks a Substitute. The order of the messages is Showdown's: try_hit,
-// then drops(). Log: Unboost each (0 at -6).
+// then lower_stats(). Log: Unboost each (0 at -6).
 template <typename O>
 constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   m.attackstring = true;
   pp_reduce(battle, player, m);
   const Player target = foe(player);
-  ActivePokemon& t = battle.side(target).active;
   if (!try_hit(battle, player, m, {.matters = droppable(battle, target, 0b11) != 0},
                options)) {
     return moveend(battle, player, m, options);
   }
-  const uint8_t falls = drops(battle, target, 0b11, options.log);
-  if (falls & 1) lower(t, 0, 1);
-  if (falls & 2) lower(t, 1, 1);
+  lower_stats(battle, target, 0b11, 1, options.log);
   moveend(battle, player, m, options);
 }
 
@@ -3584,9 +3622,7 @@ constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) 
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  const uint8_t falls = drops(battle, target, 1 << 0 | 1 << 3, options.log);
-  if (falls & 1 << 0) lower(t, 0, 2);
-  if (falls & 1 << 3) lower(t, 3, 2);
+  lower_stats(battle, target, 1 << 0 | 1 << 3, 2, options.log);
   battle.side(player).get(1).hp = 0;
   moveend(battle, player, m, options);
   faint(battle, player, options);
@@ -3656,6 +3692,7 @@ constexpr void haze(Battle& battle, Player player, MoveState& m, O& options) {
   m.attackstring = true;
   pp_reduce(battle, player, m);
   for (Side& side : battle.sides) side.active.boosts = Boosts{};
+  protocol::clear_all_boost(options.log);
   moveend(battle, player, m, options);
 }
 
@@ -3664,7 +3701,8 @@ constexpr void haze(Battle& battle, Player player, MoveState& m, O& options) {
 // fails. Showdown's Psych Up also copies Focus Energy (its onHit's
 // volatilesToCopy, which gen3 inherits), and misses a semi-invulnerable
 // target (its target is 'normal', so tryMoveHit's Invulnerability check
-// applies; accuracy true); this follows Showdown. Log: CopyBoost.
+// applies; accuracy true); this follows Showdown. Log: Start Focus Energy
+// if it is copied (group 3d), then CopyBoost.
 template <typename O>
 constexpr void psych_up(Battle& battle, Player player, MoveState& m,
                         O& options) {
@@ -3678,6 +3716,8 @@ constexpr void psych_up(Battle& battle, Player player, MoveState& m,
   const ActivePokemon& f = battle.side(foe(player)).active;
   a.boosts = f.boosts;
   a.volatiles.focus_energy = f.volatiles.focus_energy;
+  protocol::copy_boost(options.log, protocol::ident(battle, player),
+                       protocol::ident(battle, foe(player)));
   moveend(battle, player, m, options);
 }
 
@@ -3693,12 +3733,16 @@ constexpr void stat_pair_move(Battle& battle, Player player, MoveState& m,
   m.attackstring = true;
   pp_reduce(battle, player, m);
   ActivePokemon& a = battle.side(player).active;
+  const ID id = protocol::ident(battle, player);
   if (stage(a.boosts, s.first) >= 6 && stage(a.boosts, s.second) >= 6) {
+    // Showdown prints both 0s and no -fail.
+    protocol::boost(options.log, id, s.first, 0, false);
+    protocol::boost(options.log, id, s.second, 0, false);
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
   }
-  raise(a, s.first, 1, m);  // Log: Boost
-  raise(a, s.second, 1, m); // Log: Boost
+  protocol::boost(options.log, id, s.first, raise(a, s.first, 1, m), false);
+  protocol::boost(options.log, id, s.second, raise(a, s.second, 1, m), false);
   moveend(battle, player, m, options);
 }
 
@@ -3706,7 +3750,8 @@ constexpr void stat_pair_move(Battle& battle, Player player, MoveState& m,
 // it fails unless Attack is below +6 and HP is above half (at least 1);
 // then Attack goes to +6 and the user loses max HP / 2 (at least 1),
 // bypassing its Substitute. Showdown's Belly Drum is the same (data/moves.ts:
-// bellydrum; its directDamage floors the half). Log: SetBoost, then Damage.
+// bellydrum; its directDamage floors the half). Log: Damage, then SetBoost
+// (onHit's order), or Fail.
 template <typename O>
 constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -3724,7 +3769,9 @@ constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
   side.active.boosts.atk = 6;
   // The user can't faint: its HP was above the half it loses.
   passive_damage(battle, player, half, options);
-  protocol::damage(options.log, protocol::ident(battle, player), mon);
+  const ID id = protocol::ident(battle, player);
+  protocol::damage(options.log, id, mon);
+  protocol::set_boost(options.log, id);
   moveend(battle, player, m, options);
 }
 
@@ -3734,8 +3781,10 @@ constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
 // -6 and Attack and Defense at +6; otherwise Speed falls by 1 (Mist and
 // Clear Body don't apply to Curse, bsc:6962) and Attack and Defense rise
 // by 1, each skipped at its cap (Attack or Defense at +6 marks it MISSED,
-// as in raise()). Showdown's gen4 Curse (data/mods/gen4/moves.ts:268) gives
-// the same boosts, spe -1, atk +1, def +1, in that order.
+// as in raise()). Showdown's Curse gives the same self boosts, spe -1,
+// atk +1, def +1 in that order (gen4's onModifyMove sets them, and the base
+// onTryHit it inherits sets them again in this order, data/moves.ts:3287):
+// a line for each stat that moved, and no -fail.
 //
 // A Ghost type (BattleScript_GhostCurse): it fails on the foe's
 // Substitute, a semi-invulnerable foe (accuracycheck with
@@ -3761,9 +3810,14 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
       m.result |= MoveResult::FAILED;
       return moveend(battle, player, m, options);
     }
-    if (b.spe > -6) b.spe--; // Log: Boost (-1)
-    raise(a, 0, 1, m);       // Log: Boost
-    raise(a, 1, 1, m);       // Log: Boost
+    const bool slower = b.spe > -6;
+    if (slower) b.spe--;
+    const int8_t atk = raise(a, 0, 1, m);
+    const int8_t def = raise(a, 1, 1, m);
+    const ID id = protocol::ident(battle, player);
+    if (slower) protocol::boost(options.log, id, 2, 1, true);
+    if (atk != 0) protocol::boost(options.log, id, 0, atk, false);
+    if (def != 0) protocol::boost(options.log, id, 1, def, false);
     return moveend(battle, player, m, options);
   }
 
@@ -4862,30 +4916,40 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
   case HoldEffect::SpAttackUp:
   case HoldEffect::SpDefenseUp: {
     // TRY_EAT_STAT_UP_BERRY (util:3230): +1 at max HP / param (4) or less.
+    // The decomp keeps the berry at +6; Showdown's gen3 eats it anyway
+    // (data/items.ts:3392, onEat's boost prints its 0), and this follows it.
     if (move_turn || mon.hp > mon.stats.hp / item.param) return;
     const uint8_t stat = uint8_t(item.effect) - uint8_t(HoldEffect::AttackUp);
     int8_t& b = stage(a.boosts, stat);
-    if (b >= 6) return;
-    b++;
+    const int8_t n = b < 6 ? 1 : 0;
+    b = int8_t(b + n);
+    // Log: EndItem [eat] first (group 5).
+    protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, mon.item);
     consume_item(side);
     return;
   }
   case HoldEffect::CriticalUp:
-    // Lansat Berry: Focus Energy (util:3441).
-    if (move_turn || mon.hp > mon.stats.hp / item.param ||
-        a.volatiles.focus_energy) {
-      return;
-    }
-    a.volatiles.focus_energy = true;
+    // Lansat Berry: Focus Energy (util:3441). The decomp keeps it under
+    // Focus Energy; Showdown eats it anyway (data/items.ts:3267), as here.
+    if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    a.volatiles.focus_energy = true; // Log: Start Focus Energy (3d)
     consume_item(side);
     return;
   case HoldEffect::RandomStatUp: {
-    // Starf Berry: +2 to a random stat below +6 (util:3450).
+    // Starf Berry: +2 to a random stat below +6 (util:3450). With none,
+    // the decomp keeps it; Showdown eats it with no boost and no draw
+    // (data/items.ts:6003), as here.
     if (move_turn || mon.hp > mon.stats.hp / item.param) return;
     const Boosts& b = a.boosts;
-    if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) return;
-    int8_t& s = stage(a.boosts, uint8_t(rolls::starf(battle, player, options) - 1));
-    s = s + 2 > 6 ? 6 : int8_t(s + 2);
+    if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) {
+      consume_item(side);
+      return;
+    }
+    const uint8_t stat = uint8_t(rolls::starf(battle, player, options) - 1);
+    int8_t& s = stage(a.boosts, stat);
+    const int8_t n = s + 2 > 6 ? int8_t(6 - s) : int8_t(2);
+    s = int8_t(s + n);
+    protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, mon.item);
     consume_item(side);
     return;
   }
@@ -5062,7 +5126,11 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
       break;
     case Ability::SpeedBoost:
       // Not on the turn it came in (isFirstTurn, decision 14).
-      if (a.boosts.spe < 6 && a.first_turn != 2) a.boosts.spe++;
+      // Log: Ability Speed Boost boost (group 5), then this.
+      if (a.boosts.spe < 6 && a.first_turn != 2) {
+        a.boosts.spe++;
+        protocol::boost(options.log, protocol::ident(battle, player), 2, 1, false);
+      }
       break;
     case Ability::Truant:
       a.truant = !a.truant;

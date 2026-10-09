@@ -1031,10 +1031,20 @@ adapted (see Interface).
   the guard). A mutation (`[msg]` broken) fails 29 of 50 games, so the
   comparison sees them. Log markers left for 3d: Shed Skin's and the
   immunity abilities' `-activate`, Nightmare's and Yawn's `-end`.
-- **Resume here: group 3c**, then 3d. Check in 3c whether marking a
-  +6 raise MISSED (the decomp) changes state Showdown keeps (it prints
-  `-boost|0` and no `-fail`). Then side conditions and weather, items and
-  abilities, then derive the buffer bound (`MAX_LOG_SIZE` is a placeholder
+- Done (2026-10-08): group 3c (`-boost`, `-unboost` with 0 at the cap,
+  `-setboost`, `-copyboost`, `-clearallboost`, `-clearnegativeboost`;
+  `lower_stats` for primary drops). Same results: seed 7 197 of 200, seed
+  8 992 of 1000 (groups 1-3c and the guard), every failure a Beat Up or
+  Rock Blast rare branch. The comparison caught Curse's order (spe, atk,
+  def). Checked: the decomp's MISSED on a +6 raise changes only
+  Conversion 2's last-landed fields, which Showdown doesn't keep.
+  Following Showdown (the user, 2026-10-08): the stat berries are eaten
+  at +6, Lansat under Focus Energy, Starf with every stat at +6
+  (`data/items.ts:3392`, 3267, 6003; the decomp keeps them).
+- **Resume here: group 3d** (volatiles). Markers left: Psych Up's and
+  Lansat's Focus Energy `-start`. Then side conditions and weather, items and abilities
+  (White Herb's and the berries' `-enditem` come before their boost
+  lines), then derive the buffer bound (`MAX_LOG_SIZE` is a placeholder
   2048).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like

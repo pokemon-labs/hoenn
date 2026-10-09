@@ -244,6 +244,37 @@ class Formatter {
     case ArgType::CureTeam:
       out.push_back("|-cureteam|" + ident(ID{r.byte()}) + "|[from] move: Aromatherapy");
       return;
+    case ArgType::Boost: {
+      // Showdown's BoostIDs, by the stage index.
+      static constexpr const char* STATS[7] = {"atk", "def", "spe", "spa",
+                                               "spd", "accuracy", "evasion"};
+      const ID id{r.byte()};
+      const uint8_t stat = r.byte();
+      const uint8_t n = r.byte();
+      assert((stat & 7) < 7);
+      std::string s = std::string(stat & protocol::BOOST_DOWN ? "|-unboost|" : "|-boost|") +
+                      ident(id) + "|" + STATS[stat & 7] + "|" + std::to_string(n);
+      if (stat & protocol::BOOST_ITEM) {
+        s += "|[from] item: " + std::string(display::ITEM_NAMES[r.byte()]);
+      }
+      out.push_back(s);
+      return;
+    }
+    case ArgType::SetBoost:
+      out.push_back("|-setboost|" + ident(ID{r.byte()}) + "|atk|6|[from] move: Belly Drum");
+      return;
+    case ArgType::CopyBoost: {
+      const ID source{r.byte()};
+      out.push_back("|-copyboost|" + ident(source) + "|" + ident(ID{r.byte()}) +
+                    "|[from] move: Psych Up");
+      return;
+    }
+    case ArgType::ClearAllBoost:
+      out.push_back("|-clearallboost");
+      return;
+    case ArgType::ClearNegativeBoost:
+      out.push_back("|-clearnegativeboost|" + ident(ID{r.byte()}) + "|[silent]");
+      return;
     case ArgType::Crit:
       out.push_back("|-crit|" + ident(ID{r.byte()}));
       return;

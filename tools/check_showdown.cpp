@@ -87,6 +87,8 @@ const std::set<std::string> LOGGED = {
     "-crit", "-supereffective", "-resisted", "-hitcount", "-prepare", "-anim",
     // Group 3b: major status.
     "-status", "-curestatus", "-cureteam",
+    // Group 3c: boosts.
+    "-boost", "-unboost", "-setboost", "-copyboost", "-clearallboost", "-clearnegativeboost",
 };
 
 // The -activate effects written so far: those that stop a move (group 2),
