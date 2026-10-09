@@ -423,9 +423,12 @@ unchecked claims.
     both proccing is a speed tie. Showdown agrees, and its 1/5 is used.
   - End of turn: the decomp re-runs `GetWhoStrikesFirst` (`ENDTURN_ORDER`,
     util:1209) with the chosen moves' priority and the turn's Quick Claw.
-    Showdown orders residuals by Speed alone, and the code follows it
-    (found by `check_showdown`, 2026-10-08): Speed, then an independent tie
-    draw.
+    Showdown orders residual handlers by order, Speed (with Quick Claw),
+    then subOrder, and the code follows it (found by `check_showdown`,
+    2026-10-08). Every gen3 per-Pokémon residual has order 10, so with
+    unequal Speeds the faster Pokémon takes all of them first (from gen 5
+    the orders differ and it is effect by effect); on a Speed tie they
+    interleave by subOrder with a coin per stage (`end_of_turn`).
   - `DoFieldEndTurnEffects`: screens, Mist, Safeguard, Wish (util:1173),
     weather and so on. `DoBattlerEndTurnEffects`, in speed order: Ingrain,
     Leftovers, Leech Seed, poison, burn, Nightmare, Curse, binding, Uproar,
@@ -797,11 +800,11 @@ adapted (see Interface).
   pass the status back yet; it belongs to `moveend`'s ability dispatcher.
 - Done (2026-10-07): the end of turn as straight-line code (decided over a
   table): `field_residuals` (side timers, Wish, weather and sand/hail
-  damage) and `battler_residuals` per Pokémon in the residual order
+  damage) and `battler_stage` per Pokémon in the residual order
   (Ingrain, Rain Dish, Shed Skin, Speed Boost, Truant's toggle, Leftovers,
   Leech Seed, poison, toxic, burn, Nightmare, Curse, binding, Disable,
-  Encore, Lock-On, Charge, Taunt). The residual tie is drawn only when the
-  order can matter (`residual_order_matters`). `soak` now builds in
+  Encore, Lock-On, Charge, Taunt; ties since reworked, see 2026-10-08).
+  `soak` now builds in
   release. About 3.5% of random soak games reach the turn cap: Struggle
   against Leftovers stalls, once every move is out of PP.
 - Decided (2026-10-07): the dispatchers are one plain function per
@@ -961,49 +964,46 @@ adapted (see Interface).
   regenerate old ones. Result: 184 of 200 games (seed 7) match to the
   end, every failure by the log alone. Run 4 processes at most (the user's
   12 threads are busy): split the trace by game and `xargs -P4`.
-- **Resume here: fix the 16 failures, then group 2.** Decided with the
-  user (2026-10-08), all following Showdown:
-  - **Residual ties, one coin per event.** Showdown sorts residual
-    handlers by order, priority, Speed, then subOrder (`comparePriority`,
-    `sim/battle.ts:408`), so with unequal Speeds it is Pokémon-major (as
-    now), but on an exact Speed tie the two Pokémon's handlers interleave
-    by subOrder, each tied pair with its own coin. gen3 subOrders: Ingrain
-    1, Rain Dish/Shed Skin/Speed Boost 3, Leftovers and berries 4, Leech
-    Seed 5, psn/tox/brn 6, Nightmare 7, Curse 8, binding 9, Uproar 11,
-    Encore 14, Taunt 15, Yawn 19; Truant 27, Perish 12, White Herb 29
-    come after. The comment in `end_of_turn` claiming Pokémon-major always
-    is wrong for ties. Record a coin only when the orders give different
-    states: (a) Leech Seed both ways with a capped heal, a faint mid-slot
-    or Liquid Ooze; (b) both last Pokémon fainting in the same damage
-    event. Compute both exactly before drawing (replacing the
-    over-approximating `residual_order_matters`). Both can happen in one
-    turn, each at most once: two 2-bit fields packed in the existing
-    `Turn::residual_tie` byte (bits 0-1 Leech Seed, 2-3 faint), so
-    `Actions` stays 121 B. Every other tie coin is unrecorded
-    (`log_order`).
-  - **`BeforeMove` in Showdown's order** (priorities from the dex):
-    recharge 11, sleep and freeze 10, Truant 9, flinch 8, Disable 7,
-    confusion 3, Attract 2, paralysis 1, Taunt 0 (Imprison: check). The
-    decomp checks Taunt before paralysis (game 27 of seed 7 shows
-    `cant par` where we print Taunt).
-  - Beat Up's hit order differs (game 8 of seed 7): undiagnosed. Games
-    13, 74 and 115: damage differences, undiagnosed (maybe the same
-    causes).
-  - **Then group 2**, Showdown's gen3 `tryMoveHit` order
-    (`data/mods/gen3/scripts.ts:263`): semi-invulnerable miss; type
-    immunity noted; the accuracy roll (also into Protect: an unrecorded
-    draw where only the log differs); `TryHit` (Protect's `-activate`,
-    absorbing abilities); `-immune` if naturally immune; then
-    `TryPrimaryHit` (Substitute: `-fail` `[still]`), then the status's
-    `setStatus` (`-fail|target|par` for the same status, `-fail|user`
-    `[still]` for another, `-immune` for a type, `-immune [from] ability`,
-    Safeguard's `-activate`). Messages: `-fail` (encoding written, not
-    wired), `-miss` (`protocol::miss` writes `[miss]` too), `-immune`,
-    `[still]`; then set `MOVE_ATTRIBUTES` true. The survey of which moves
-    get `[still]`, from the traces: plain `-fail|user` and heal moves'
-    `-fail|heal` do, Rest's and Endeavor's `-fail` don't, a status the
-    target already has is `-fail|target|par` without it; Counter, Fake
-    Out and Snore fail with no line at all.
+- Done (2026-10-08), the 16 group-1 failures of seed 7, following Showdown:
+  - **Residual ties, one coin per stage** (`Stage`, `battler_stage`,
+    `stage_order_matters`, `rolls::residual_tie`): 11 failures were exact
+    Speed ties. With unequal Speeds the order stays Pokémon-major; on a
+    tie the handlers interleave by Showdown's subOrder, a coin per stage.
+    A coin is recorded only where running the stage both ways on copies
+    gives different states (Leech Seed: bits 0-1 of `Turn::residual_tie`;
+    the damage stages, where it ends the battle: bits 2-3); Wish's, the
+    weather's, Perish Song's and the other stages' coins are unrecorded
+    (`log_order`). `Actions` stays 121 B.
+  - **Quick Claw in the residual order** (`residual_quick_claw`), as
+    Showdown (`updateSpeed`, gen3 `getActionSpeed`: a holder whose roll
+    succeeded has 65535). The turn's one roll; if the move order didn't
+    draw it, it is drawn only if it changes the comparison and recorded
+    only if the two whole passes, run on copies, give different states
+    (decided with the user). Over-approximated when both Pokémon draw in
+    the pass. Wish and the weather still order by plain Speed (log only).
+  - **The canceler in Showdown's `BeforeMove` order** (game 27): recharge,
+    sleep, freeze, Truant, flinch, Disable, Imprison, confusion, Attract,
+    paralysis, Taunt.
+  - Games 8 and 74 (Beat Up) match with a higher cap (10.5M and 14M
+    tries): rare branches, not bugs. Game 13 (a 4-hit Rock Blast with a
+    crit on hit 1, about 2e-7 per try) doesn't match in 20M tries;
+    undiagnosed, bad luck at maybe 2%. This is gap 3 below.
+  - Result: 197 of 200 games (seed 7) match to the end at the 1M cap.
+- **Resume here: group 2**, Showdown's gen3 `tryMoveHit` order
+  (`data/mods/gen3/scripts.ts:263`): semi-invulnerable miss; type
+  immunity noted; the accuracy roll (also into Protect: an unrecorded
+  draw where only the log differs); `TryHit` (Protect's `-activate`,
+  absorbing abilities); `-immune` if naturally immune; then
+  `TryPrimaryHit` (Substitute: `-fail` `[still]`), then the status's
+  `setStatus` (`-fail|target|par` for the same status, `-fail|user`
+  `[still]` for another, `-immune` for a type, `-immune [from] ability`,
+  Safeguard's `-activate`). Messages: `-fail` (encoding written, not
+  wired), `-miss` (`protocol::miss` writes `[miss]` too), `-immune`,
+  `[still]`; then set `MOVE_ATTRIBUTES` true. The survey of which moves
+  get `[still]`, from the traces: plain `-fail|user` and heal moves'
+  `-fail|heal` do, Rest's and Endeavor's `-fail` don't, a status the
+  target already has is `-fail|target|par` without it; Counter, Fake
+  Out and Snore fail with no line at all.
   - Later groups: statuses and volatiles (`-status`, `-curestatus`,
     `-start`, `-end`, `-activate`, `-boost`...), side conditions and
     weather, items and abilities, then derive the buffer bound

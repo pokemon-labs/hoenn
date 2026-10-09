@@ -218,7 +218,8 @@ is the same and only the messages differ.
 | Endure's priority | +3, as Protect and Detect | +4 (the gen4 mod lowers only Protect and Detect) |
 | Thief taking a Choice Band | not locked (item arrives after `MOVEEND_CHOICE_MOVE`) | locked into Thief |
 | Speed | floors per factor; weather ×2 before the stage | stage, then modifiers chained and rounded once (paralysis 147 and 149 both 37) |
-| End-of-turn order | `GetWhoStrikesFirst`: move priority, Quick Claw | Speed alone |
+| End-of-turn order | `GetWhoStrikesFirst`: move priority, Quick Claw; one order for the whole pass | Speed with Quick Claw (one order for all per-Pokémon residuals, onResidualOrder 10); on a Speed tie, each handler pair by subOrder with its own coin |
+| Move-stopping checks | sleep, freeze, Truant before recharge; Taunt before Imprison; paralysis before Attract | `BeforeMove` priorities: recharge first, Attract before paralysis, Taunt last |
 | Sand or hail KOs both last Pokémon | faster faints first and loses | both hit, then a tie |
 | Perish Song KOs both last Pokémon | — | both counts, then a tie |
 | Pursuit on a switching target | final damage ×2; no attack canceler; partial moveend | base power ×2; canceler (paralysis...) and full moveend |

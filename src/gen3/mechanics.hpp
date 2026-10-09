@@ -127,21 +127,40 @@ template <typename O> constexpr bool quick_claw(Battle& battle, O& options) {
 }
 
 // A speed tie: `Random() & 1` in GetWhoStrikesFirst (main:4728, 4745), for
-// the move order (or two switches) or, with `residual`, ENDTURN_ORDER's
-// independent re-roll (util:1209). Returns who goes first.
+// the move order (or two switches). Returns who goes first.
+template <typename O> constexpr Player speed_tie(Battle& battle, O& options) {
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.turn.speed_tie;
+  assert(forced <= 2);
+  const bool p1 = forced != 0 ? forced == 1 : battle.rng.chance(1, 2);
+
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.turn.speed_tie, uint8_t(p1 ? 1 : 2));
+    observe(options, 1, 2);
+  }
+  return p1 ? Player::P1 : Player::P2;
+}
+
+// A residual stage's tie coin, where the order changes the state (Showdown's
+// speedSort among tied handlers; the end of turn, stage_order_matters):
+// Leech Seed's in bits 0-1 of Turn::residual_tie, the damage stages' in bits
+// 2-3, each 1 = P1 first, 2 = P2 first. Leech Seed is one stage, and a
+// damage stage's order matters only when it ends the battle, so each field
+// is drawn at most once per update.
 template <typename O>
-constexpr Player speed_tie(Battle& battle, bool residual, O& options) {
+constexpr Player residual_tie(Battle& battle, bool leech_seed, O& options) {
+  const unsigned shift = leech_seed ? 0 : 2;
   uint8_t forced = 0;
   if constexpr (detail::CALC<O>) {
-    const Turn& t = options.calc.overrides.turn;
-    forced = residual ? t.residual_tie : t.speed_tie;
+    forced = uint8_t((options.calc.overrides.turn.residual_tie >> shift) & 3);
   }
   assert(forced <= 2);
   const bool p1 = forced != 0 ? forced == 1 : battle.rng.chance(1, 2);
 
   if constexpr (detail::CHANCE<O>) {
-    Turn& t = options.chance.actions.turn;
-    record(residual ? t.residual_tie : t.speed_tie, uint8_t(p1 ? 1 : 2));
+    uint8_t& field = options.chance.actions.turn.residual_tie;
+    assert(((field >> shift) & 3) == 0 && "Actions field set twice in one update");
+    field = uint8_t(field | (p1 ? 1 : 2) << shift);
     observe(options, 1, 2);
   }
   return p1 ? Player::P1 : Player::P2;
@@ -521,8 +540,7 @@ constexpr Speeds speeds(const Battle& battle, Move m1, Move m2,
 // would change the comparison (both holders proccing is a tie, as on the
 // cartridge).
 template <typename O>
-constexpr Player first(Battle& battle, const Speeds& s, bool residual,
-                       O& options) {
+constexpr Player first(Battle& battle, const Speeds& s, O& options) {
   if (s.priority[0] != s.priority[1]) {
     return s.priority[0] > s.priority[1] ? Player::P1 : Player::P2;
   }
@@ -538,7 +556,7 @@ constexpr Player first(Battle& battle, const Speeds& s, bool residual,
     }
   }
   if (a != b) return a > b ? Player::P1 : Player::P2;
-  return rolls::speed_tie(battle, residual, options);
+  return rolls::speed_tie(battle, options);
 }
 
 // The order of two events whose order can't change the state, only the
@@ -565,8 +583,7 @@ template <typename O> constexpr void order(Battle& battle, O& options) {
     r.first = s1 ? Player::P1 : Player::P2;
     return;
   }
-  r.first = first(battle, speeds(battle, r.move[0], r.move[1], true), false,
-                  options);
+  r.first = first(battle, speeds(battle, r.move[0], r.move[1], true), options);
 }
 
 // ---------------------------------------------------------------------------
@@ -994,7 +1011,7 @@ constexpr void arrive_both(Battle& battle, bool start, O& options) {
   const Player first =
       arrival_order_matters(battle)
           ? detail::first(battle, speeds(battle, Move::None, Move::None, !start),
-                          false, options)
+                          options)
           : log_order(battle);
   arrive(battle, first, options);
   if (outcome(battle)) return;
@@ -1344,8 +1361,14 @@ constexpr bool soundproof(Battle& battle, Player player, MoveState& m) {
 
 // AtkCanceler_UnableToUseMove (util:1987), then the rest of
 // Cmd_attackcanceler (bsc:915). Returns whether the move goes ahead; if not,
-// the caller goes to moveend, as every canceling script does. The cases run
-// in the decomp's order, and the first that stops the move ends the check.
+// the caller goes to moveend, as every canceling script does. The first case
+// that stops the move ends the check. The cases run in the order of
+// Showdown's BeforeMove handlers (onBeforeMovePriority, gen3 mod and what it
+// inherits): recharge 11, sleep and freeze 10, Truant 9, flinch 8, Disable
+// 7, Imprison 4 (onFoeBeforeMove), confusion 3, Attract 2, paralysis 1,
+// Taunt 0 (gen3 drops gen4's 5). The decomp checks recharge after sleep,
+// freeze and Truant (so a sleeping Pokémon that must recharge ticks its
+// sleep), Taunt before Imprison, and paralysis before Attract.
 template <typename O>
 constexpr bool cancel(Battle& battle, Player player, MoveState& m,
                       O& options) {
@@ -1369,6 +1392,16 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // CANCELER_FLAGS
   v.destiny_bond = false;
   v.grudge = false;
+
+  // CANCELER_RECHARGE
+  if (v.recharge) {
+    cant(protocol::Cant::Recharge);
+    v.recharge = false;
+    a.recharge_timer = 0;
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
 
   // CANCELER_ASLEEP. Uproar wakes it outright (UproarWakeUpCheck, bsc:6801),
   // unless it has Soundproof; that's public, so Durations just resets.
@@ -1439,16 +1472,6 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     return false;
   }
 
-  // CANCELER_RECHARGE
-  if (v.recharge) {
-    cant(protocol::Cant::Recharge);
-    v.recharge = false;
-    a.recharge_timer = 0;
-    a.cancel_multi_turn_moves();
-    m.unable = true;
-    return false;
-  }
-
   // CANCELER_FLINCH
   if (v.flinched) {
     cant(protocol::Cant::Flinch);
@@ -1461,14 +1484,6 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // CANCELER_DISABLED
   if (a.disabled_move != Move::None && a.disabled_move == m.move) {
     cant(protocol::Cant::Disable);
-    a.cancel_multi_turn_moves();
-    m.unable = true;
-    return false;
-  }
-
-  // CANCELER_TAUNTED
-  if (a.taunt != 0 && get(m.move).bp == 0) {
-    cant(protocol::Cant::Taunt);
     a.cancel_multi_turn_moves();
     m.unable = true;
     return false;
@@ -1526,6 +1541,14 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     }
   }
 
+  // CANCELER_IN_LOVE
+  if (v.infatuated && rolls::infatuation(battle, player, options)) {
+    cant(protocol::Cant::Attract);
+    a.cancel_multi_turn_moves();
+    m.unable = true;
+    return false;
+  }
+
   // CANCELER_PARALYZED. The decomp's own CancelMultiTurnMoves is commented
   // out, but the script it jumps to runs cancelmultiturnmoves (bs1:3773).
   if (mon.status.paralyzed() && rolls::paralysis(battle, player, options)) {
@@ -1535,9 +1558,9 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     return false;
   }
 
-  // CANCELER_IN_LOVE
-  if (v.infatuated && rolls::infatuation(battle, player, options)) {
-    cant(protocol::Cant::Attract);
+  // CANCELER_TAUNTED
+  if (a.taunt != 0 && get(m.move).bp == 0) {
+    cant(protocol::Cant::Taunt);
     a.cancel_multi_turn_moves();
     m.unable = true;
     return false;
@@ -3068,7 +3091,7 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
 // true), a status, or a Yawn already pending (Cmd_setyawn). The cartridge
 // also fails it during an Uproar (jumpifcantmakeasleep); Showdown doesn't
 // (Yawn's onTryHit checks only the status and sleep immunity), and this
-// follows Showdown. ENDTURN_YAWN puts the target to sleep (battler_residuals).
+// follows Showdown. ENDTURN_YAWN puts the target to sleep (battler_stage).
 template <typename O>
 constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -3803,7 +3826,7 @@ constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
 // it and nothing is drawn. Showdown checks Grass first (TryImmunity) and
 // the Substitute and the seed after its accuracy draw, so its log can show
 // a miss where this fails; the state is the same, and the status moves
-// share this (settle with the log). The drain is in battler_residuals.
+// share this (settle with the log). The drain is in battler_stage.
 // Log: Start Leech Seed, or Fail, Immune or Miss.
 template <typename O>
 constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
@@ -4453,40 +4476,19 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
 // Song counts run first (a duration's end skips the faint check); so both
 // last Pokémon fainting there is a tie.
 //
-// Showdown runs the per-Pokémon residuals in the same order: they share
-// onResidualOrder 10 and comparePriority sorts by speed before subOrder
-// (sim/battle.ts:408), so it is Pokémon-major as the decomp is.
+// The order follows Showdown, which sorts every residual handler by
+// onResidualOrder, then Speed, then onResidualSubOrder (comparePriority,
+// sim/battle.ts:408), with a random order among exact ties (speedSort).
+// The side timers, Wish (order 7) and the weather (8) come first, then the
+// per-Pokémon handlers (10), then Perish Song (12). With unequal Speeds the
+// per-Pokémon handlers are Pokémon-major, as the decomp's; on an exact
+// Speed tie they interleave by subOrder (Stage), with a coin per stage
+// where both Pokémon have a handler. The decomp re-rolls one order for the
+// whole pass (ENDTURN_ORDER, util:1209). A coin is recorded only where the
+// two orders give different states (stage_order_matters); the others,
+// Wish's, the weather's and Perish Song's coins change only the log
+// (log_order).
 // ---------------------------------------------------------------------------
-
-// Whether some side could lose to the residuals: its only Pokémon left is
-// active and takes residual damage (over-approximated: immunities and
-// amounts are ignored).
-constexpr bool could_lose(const Battle& battle, Player player) {
-  const Side& side = battle.side(player);
-  const Pokemon& mon = side.get(1);
-  if (mon.fainted()) return false;
-  for (uint8_t s = 2; s <= 6; s++) {
-    const Pokemon& p = side.get(s);
-    if (p.species != Species::None && !p.fainted()) return false;
-  }
-  const Volatiles& v = side.active.volatiles;
-  return mon.status.poisoned() || mon.status.burned() || v.leech_seed ||
-         v.nightmare || v.cursed || v.wrapped != 0 || v.perish_song ||
-         battle.field.weather == Weather::Sandstorm ||
-         battle.field.weather == Weather::Hail;
-}
-
-// Whether the residual order (ENDTURN_ORDER, util:1209) can change the
-// result, so that a speed tie needs its draw. The passes touch each side's
-// own Pokémon only, except Leech Seed (it heals or hurts the seeder); so
-// the order matters only through Leech Seed or the battle ending first on
-// one side. Over-approximated: a draw that turns out not to matter costs
-// search a chance node, never correctness.
-constexpr bool residual_order_matters(const Battle& battle) {
-  return battle.sides[0].active.volatiles.leech_seed ||
-         battle.sides[1].active.volatiles.leech_seed ||
-         could_lose(battle, Player::P1) || could_lose(battle, Player::P2);
-}
 
 // ITEMEFFECT_NORMAL (util:3317) for p's active Pokémon, at
 // ENDTURN_ITEMS1 (move_turn false) and ENDTURN_ITEMS2 (true). Leftovers,
@@ -4562,7 +4564,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
 // (BattleScript_DamagingWeatherLoop, bs1:3205) and stop once the battle is
 // over (bs1:3219).
 template <typename O>
-constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
+constexpr Flow field_residuals(Battle& battle, O& options) {
   // ENDTURN_REFLECT, LIGHT_SCREEN, MIST, SAFEGUARD (util:1218-1311): each
   // is one pass over both sides.
   for (Side& side : battle.sides) {
@@ -4580,6 +4582,7 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
 
   // ENDTURN_WISH (util:1312): it lands on whoever is active, healing half of
   // its max HP (trywish, bsc:9311), unless it has fainted.
+  const Player first = log_order(battle);
   for (const Player p : {first, foe(first)}) {
     Side& side = battle.side(p);
     SideConditions& c = side.conditions;
@@ -4616,7 +4619,10 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
       effective_weather(battle) == Weather::None) {
     return std::nullopt;
   }
-  for (const Player p : {first, foe(first)}) {
+  // Showdown's weather hurts the Pokémon in its own Speed order (eachEvent,
+  // sim/battle.ts:470), with a tie coin of its own.
+  const Player order = log_order(battle);
+  for (const Player p : {order, foe(order)}) {
     Side& side = battle.side(p);
     const ActivePokemon& a = side.active;
     if (side.get(1).fainted()) continue;
@@ -4636,30 +4642,69 @@ constexpr Flow field_residuals(Battle& battle, Player first, O& options) {
   return outcome(battle);
 }
 
-// DoBattlerEndTurnEffects (util:1460) for p's active Pokémon: every case for
-// one Pokémon before the next. A Pokémon that faints partway skips the
-// rest, as each case checks its HP. Returns the end of the battle if a
-// residual KO ends it.
+// DoBattlerEndTurnEffects (util:1460), split into Showdown's residual
+// handlers by onResidualSubOrder (the gen4 and gen3 mods, which share
+// onResidualOrder 10), so that a Speed tie can interleave them (end_of_turn).
+// Ingrain 1; Rain Dish, Shed Skin and Speed Boost 3; Leftovers and the
+// berries 4; Leech Seed 5; poison, toxic and burn 6; Nightmare 7; Curse 8;
+// binding 9; then Uproar 11, Encore 14, Taunt 15, Yawn 19, and Disable
+// (gen3 drops gen4's order), Lock-On and Charge later still. Those last
+// only change their own Pokémon, so they share a stage, as does Truant's
+// toggle (27, in the ability stage). The decomp's order is the same up to
+// those own-Pokémon steps.
+enum class Stage : uint8_t {
+  Ingrain,
+  Ability,
+  Item,
+  LeechSeed,
+  Status,
+  Nightmare,
+  Curse,
+  Bind,
+  Timers,
+};
+inline constexpr Stage STAGES[] = {
+    Stage::Ingrain,   Stage::Ability, Stage::Item, Stage::LeechSeed,
+    Stage::Status,    Stage::Nightmare, Stage::Curse, Stage::Bind,
+    Stage::Timers,
+};
+
+// One stage of DoBattlerEndTurnEffects for p's active Pokémon. A Pokémon
+// that has fainted skips it, as each case checks its HP. Returns the end of
+// the battle if a residual KO ends it.
 //
 // TODO(plan step 4): ENDTURN_UPROAR and ENDTURN_THRASH
 // (they read WasUnableToUseMove, README decision 2).
 template <typename O>
-constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
+constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
+                             O& options) {
   Side& side = battle.side(player);
   ActivePokemon& a = side.active;
   Volatiles& v = a.volatiles;
   Pokemon& mon = side.get(1);
   const auto alive = [&] { return !mon.fainted(); };
-
-  // ENDTURN_INGRAIN (util:1476)
   const ID id = protocol::ident(battle, player);
-  if (v.rooted && alive() && mon.hp != mon.stats.hp) {
-    heal(mon, fraction(mon, 16));
-    protocol::heal(options.log, id, mon, protocol::Heal::Ingrain);
-  }
+  // Each damaging residual is its own Showdown handler, with
+  // faintMessages after it (sim/battle.ts:569).
+  const auto hurt = [&](uint32_t n, protocol::Damage reason) {
+    passive_damage(battle, player, n, options);
+    protocol::damage(options.log, id, mon, reason);
+    protocol::faints(options.log);
+    return outcome(battle);
+  };
 
-  // ENDTURN_ABILITIES: ABILITYEFFECT_ENDTURN (util:2587).
-  if (alive()) {
+  switch (stage) {
+  case Stage::Ingrain:
+    // ENDTURN_INGRAIN (util:1476)
+    if (v.rooted && alive() && mon.hp != mon.stats.hp) {
+      heal(mon, fraction(mon, 16));
+      protocol::heal(options.log, id, mon, protocol::Heal::Ingrain);
+    }
+    return std::nullopt;
+
+  case Stage::Ability:
+    // ENDTURN_ABILITIES: ABILITYEFFECT_ENDTURN (util:2587).
+    if (!alive()) return std::nullopt;
     switch (a.ability) {
     case Ability::RainDish:
       if (effective_weather(battle) == Weather::Rain && mon.hp != mon.stats.hp) {
@@ -4686,18 +4731,22 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
     default:
       break;
     }
-  }
+    return std::nullopt;
 
-  // ENDTURN_ITEMS1 (util:1496)
-  item_end_turn(battle, player, false, options);
+  case Stage::Item:
+    // ENDTURN_ITEMS1 (util:1496)
+    item_end_turn(battle, player, false, options);
+    return std::nullopt;
 
-  // ENDTURN_LEECH_SEED (util:1501): max HP / 8 from the seeded Pokémon, then
-  // the seeder (the foe's active Pokémon) gains what was lost, or loses it
-  // to the seeded Pokémon's Liquid Ooze (BattleScript_LeechSeedTurnDrain,
-  // bs1:3265). The seeded Pokémon faints first (bs1:3283).
-  const Player seeder = foe(player);
-  Pokemon& seeder_mon = battle.side(seeder).get(1);
-  if (v.leech_seed && alive() && !seeder_mon.fainted()) {
+  case Stage::LeechSeed: {
+    // ENDTURN_LEECH_SEED (util:1501): max HP / 8 from the seeded Pokémon,
+    // then the seeder (the foe's active Pokémon) gains what was lost, or
+    // loses it to the seeded Pokémon's Liquid Ooze
+    // (BattleScript_LeechSeedTurnDrain, bs1:3265). The seeded Pokémon
+    // faints first (bs1:3283).
+    const Player seeder = foe(player);
+    Pokemon& seeder_mon = battle.side(seeder).get(1);
+    if (!v.leech_seed || !alive() || seeder_mon.fainted()) return std::nullopt;
     const bool ooze = a.ability == Ability::LiquidOoze;
     const uint16_t drained = passive_damage(battle, player, fraction(mon, 8), options);
     const ID seeder_id = protocol::ident(battle, seeder);
@@ -4711,51 +4760,39 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
       protocol::heal(options.log, seeder_id, seeder_mon, protocol::Heal::Silent);
     }
     protocol::faints(options.log);
-    if (Flow over = outcome(battle)) return over;
+    return outcome(battle);
   }
 
-  // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's
-  // counter, at most 15, times 1/16; 1/8.
-  // Each damaging residual is its own Showdown handler, with
-  // faintMessages after it (sim/battle.ts:569).
-  const auto hurt = [&](uint32_t n, protocol::Damage reason) {
-    passive_damage(battle, player, n, options);
-    protocol::damage(options.log, id, mon, reason);
-    protocol::faints(options.log);
-  };
-  if (alive() && mon.status.poisoned() && !mon.status.badly_poisoned()) {
-    hurt(fraction(mon, 8), protocol::Damage::Poison);
-    if (Flow over = outcome(battle)) return over;
-  }
-  if (alive() && mon.status.badly_poisoned()) {
-    if (a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
-    hurt(fraction(mon, 16) * a.toxic, protocol::Damage::Poison);
-    if (Flow over = outcome(battle)) return over;
-  }
-  if (alive() && mon.status.burned()) {
-    hurt(fraction(mon, 8), protocol::Damage::Burn);
-    if (Flow over = outcome(battle)) return over;
-  }
-
-  // ENDTURN_NIGHTMARES (util:1553): 1/4 while asleep, else it ends.
-  if (v.nightmare && alive()) {
-    if (mon.status.asleep()) {
-      hurt(fraction(mon, 4), protocol::Damage::Nightmare);
-      if (Flow over = outcome(battle)) return over;
-    } else {
-      v.nightmare = false;
+  case Stage::Status:
+    // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's
+    // counter, at most 15, times 1/16; 1/8. One status, so one handler.
+    if (!alive()) return std::nullopt;
+    if (mon.status.poisoned() && !mon.status.badly_poisoned()) {
+      return hurt(fraction(mon, 8), protocol::Damage::Poison);
     }
-  }
+    if (mon.status.badly_poisoned()) {
+      if (a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
+      return hurt(fraction(mon, 16) * a.toxic, protocol::Damage::Poison);
+    }
+    if (mon.status.burned()) return hurt(fraction(mon, 8), protocol::Damage::Burn);
+    return std::nullopt;
 
-  // ENDTURN_CURSE (util:1574): 1/4.
-  if (v.cursed && alive()) {
-    hurt(fraction(mon, 4), protocol::Damage::Curse);
-    if (Flow over = outcome(battle)) return over;
-  }
+  case Stage::Nightmare:
+    // ENDTURN_NIGHTMARES (util:1553): 1/4 while asleep, else it ends.
+    if (!v.nightmare || !alive()) return std::nullopt;
+    if (mon.status.asleep()) return hurt(fraction(mon, 4), protocol::Damage::Nightmare);
+    v.nightmare = false;
+    return std::nullopt;
 
-  // ENDTURN_WRAP (util:1585): the hidden counter ticks first; while it
-  // lasts, 1/16, then the Pokémon is freed (chance.hpp, Binding).
-  if (v.wrapped != 0 && alive()) {
+  case Stage::Curse:
+    // ENDTURN_CURSE (util:1574): 1/4.
+    if (!v.cursed || !alive()) return std::nullopt;
+    return hurt(fraction(mon, 4), protocol::Damage::Curse);
+
+  case Stage::Bind: {
+    // ENDTURN_WRAP (util:1585): the hidden counter ticks first; while it
+    // lasts, 1/16, then the Pokémon is freed (chance.hpp, Binding).
+    if (v.wrapped == 0 || !alive()) return std::nullopt;
     v.wrapped--;
     const bool freed = v.wrapped == 0;
     if constexpr (CHANCE<O>) {
@@ -4765,12 +4802,16 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
     }
     if (freed) {
       a.wrapped_move = Move::None;
-    } else {
-      passive_damage(battle, player, fraction(mon, 16), options);
-      protocol::damage_bound(options.log, id, mon, a.wrapped_move);
-      protocol::faints(options.log);
-      if (Flow over = outcome(battle)) return over;
+      return std::nullopt;
     }
+    passive_damage(battle, player, fraction(mon, 16), options);
+    protocol::damage_bound(options.log, id, mon, a.wrapped_move);
+    protocol::faints(options.log);
+    return outcome(battle);
+  }
+
+  case Stage::Timers:
+    break;
   }
 
   // ENDTURN_DISABLE (util:1692): it ends silently if the Pokémon no longer
@@ -4838,6 +4879,86 @@ constexpr Flow battler_residuals(Battle& battle, Player player, O& options) {
   return std::nullopt;
 }
 
+// Whether the order of one stage on a Speed tie changes the state, computed
+// by running it both ways on copies. Only Leech Seed (it heals or hurts the
+// seeder: a capped heal, a faint between the two drains, Liquid Ooze) and
+// the damage stages (both last Pokémon fainting there: the first to faint
+// loses) can; the other stages touch their own Pokémon only. Two ends of
+// the battle with the same Result are the same state, whatever HP the
+// winner is left at (CLAUDE.md, "Chance").
+constexpr bool same_state(const Battle& x, const Flow& fx, const Battle& y,
+                          const Flow& fy) {
+  if (fx || fy) return fx == fy;
+  return x.sides[0] == y.sides[0] && x.sides[1] == y.sides[1];
+}
+
+constexpr bool stage_order_matters(const Battle& battle, Stage stage) {
+  if (stage < Stage::LeechSeed || stage > Stage::Bind) return false;
+  Options<protocol::NullLog, NullChance, NullCalc> null{};
+  Battle x = battle;
+  Battle y = battle;
+  Flow fx = battler_stage(x, Player::P1, stage, null);
+  if (!fx) fx = battler_stage(x, Player::P2, stage, null);
+  Flow fy = battler_stage(y, Player::P2, stage, null);
+  if (!fy) fy = battler_stage(y, Player::P1, stage, null);
+  return !same_state(x, fx, y, fy);
+}
+
+// The per-Pokémon residuals with unequal Speeds: every stage of `first`'s,
+// then every stage of the other's.
+template <typename O>
+constexpr Flow battler_pass(Battle& battle, Player first, O& options) {
+  for (const Player p : {first, foe(first)}) {
+    for (const Stage stage : STAGES) {
+      if (Flow over = battler_stage(battle, p, stage, options)) return over;
+    }
+  }
+  return std::nullopt;
+}
+
+// Quick Claw in the residual order, as Showdown: updateSpeed before the
+// residuals (sim/battle.ts:2818) gives a holder 65535 Speed on a turn its
+// roll succeeded (gen3 getActionSpeed, data/mods/gen3/scripts.ts:18). The
+// decomp's ENDTURN_ORDER uses the turn's draw too (util:1209). `s1` and `s2`
+// are the Speeds before the residuals, raised here if the roll succeeded.
+// The roll is the turn's one draw (rolls::quick_claw); if the move order
+// didn't need it, it is drawn here only if it changes the comparison, and
+// recorded only if the two orders give different states: both passes are
+// run on copies. A Speed tie on either side would need the stage coins
+// too, so it is recorded. Over-approximated: if both Pokémon draw in the
+// pass (Shed Skin, Starf Berry, Yawn's sleep length), the copies take the
+// draws in a different order and can differ only by that.
+template <typename O>
+constexpr void residual_quick_claw(Battle& battle, uint32_t& s1, uint32_t& s2,
+                                   bool q1, bool q2, O& options) {
+  if (!q1 && !q2) return;
+  const uint32_t t1 = q1 ? UINT32_MAX : s1;
+  const uint32_t t2 = q2 ? UINT32_MAX : s2;
+  const auto cmp = [](uint32_t x, uint32_t y) { return (x > y) - (x < y); };
+  if (cmp(s1, s2) == cmp(t1, t2)) return;
+  Optional& drawn = battle.request.quick_claw;
+  if (drawn == Optional::None) {
+    bool matters = s1 == s2 || t1 == t2;
+    if (!matters) {
+      Options<protocol::NullLog, NullChance, NullCalc> null{};
+      Battle x = battle;
+      Battle y = battle;
+      const Flow fx = battler_pass(x, Player::P1, null);
+      const Flow fy = battler_pass(y, Player::P2, null);
+      matters = !same_state(x, fx, y, fy);
+    }
+    if (matters) {
+      rolls::quick_claw(battle, options);
+    } else {
+      drawn = optional(battle.rng.chance(1, 5));
+    }
+  }
+  if (drawn == Optional::True) {
+    s1 = t1;
+    s2 = t2;
+  }
+}
+
 // Perish Song's count for p's active Pokémon, as Showdown (decided
 // 2026-10-07): its gen4 condition (onResidualOrder 12,
 // data/mods/gen4/moves.ts:1017) counts down in the residual pass, after the
@@ -4874,21 +4995,35 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     // inflict()). TODO(plan step 4): check Showdown's lockedmove for
     // Thrash and Uproar when they are written.
   }
-  // ENDTURN_ORDER (util:1209) runs GetWhoStrikesFirst with the chosen
-  // moves' priority and the turn's Quick Claw draw. Showdown sorts its
-  // residual handlers by Speed alone (the handlers have no move priority),
-  // and this follows it: Speed, then its own tie draw, recorded only when
-  // the order can matter (log_order otherwise).
-  const Player first =
-      residual_order_matters(battle)
-          ? detail::first(battle, speeds(battle, Move::None, Move::None, false),
-                          true, options)
-          : log_order(battle);
-  if (Flow over = field_residuals(battle, first, options)) return over;
-  for (const Player p : {first, foe(first)}) {
-    if (Flow over = battler_residuals(battle, p, options)) return over;
+  // The order (see the section comment): ENDTURN_ORDER (util:1209) runs
+  // GetWhoStrikesFirst with the chosen moves' priority; Showdown's residual
+  // handlers have none. Showdown sorts every handler once, by the Speeds
+  // before the residuals (with Quick Claw): a weather that ends or a Speed
+  // Boost doesn't reorder them.
+  uint32_t s1 = speed(battle, Player::P1);
+  uint32_t s2 = speed(battle, Player::P2);
+  const bool q1 = holds(battle.sides[0], HoldEffect::QuickClaw);
+  const bool q2 = holds(battle.sides[1], HoldEffect::QuickClaw);
+  if (Flow over = field_residuals(battle, options)) return over;
+  // Wish and the weather order by plain Speed: their order changes only the
+  // log, and the roll isn't drawn for them.
+  residual_quick_claw(battle, s1, s2, q1, q2, options);
+  const Player faster = s1 > s2 ? Player::P1 : Player::P2;
+  if (s1 != s2) {
+    if (Flow over = battler_pass(battle, faster, options)) return over;
+  } else {
+    for (const Stage stage : STAGES) {
+      const Player first =
+          stage_order_matters(battle, stage)
+              ? rolls::residual_tie(battle, stage == Stage::LeechSeed, options)
+              : log_order(battle);
+      for (const Player p : {first, foe(first)}) {
+        if (Flow over = battler_stage(battle, p, stage, options)) return over;
+      }
+    }
   }
-  for (const Player p : {first, foe(first)}) perish_count(battle, p, options);
+  const Player last = s1 != s2 ? faster : log_order(battle);
+  for (const Player p : {last, foe(last)}) perish_count(battle, p, options);
   protocol::faints(options.log);
   // Showdown's stall expires with the residuals, before a residual faint's
   // replacement: a turn without a successful Protect, Detect or Endure ends

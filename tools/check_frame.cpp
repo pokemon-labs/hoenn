@@ -2124,16 +2124,79 @@ void check_residuals() {
     CHECK(b.sides[0].active.boosts.spe == 1);
   }
   {
-    // A speed tie draws the residual order only when it can matter.
+    // On a speed tie, a residual stage's coin is recorded only when its
+    // order changes the state. One seeded Pokémon: Leech Seed's stage has
+    // one handler, so no coin.
     Battle b = started({plain}, {plain});
     Observed o{};
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(o.chance.actions.turn.residual_tie == 0);
     Battle c = started({plain}, {plain});
     c.sides[0].active.volatiles.leech_seed = true;
+    c.sides[1].get(1).hp = 10;
     Observed q{};
     update(c, Choice::move(1), Choice::move(1), q);
-    CHECK(q.chance.actions.turn.residual_tie != 0);
+    CHECK(q.chance.actions.turn.residual_tie == 0);
+
+    // Both seeded, P1 at full HP: P2's drain heals P1 only if P1's drain
+    // comes first, so the order shows. P1 first: P1 ends one heal short.
+    for (const uint8_t forced : {1, 2}) {
+      Battle d = started({plain}, {plain});
+      for (Side& side : d.sides) side.active.volatiles.leech_seed = true;
+      Observed r{};
+      r.calc.overrides.turn.residual_tie = forced;
+      update(d, Choice::move(1), Choice::move(1), r);
+      CHECK(r.chance.actions.turn.residual_tie == forced);
+      const Pokemon& p1 = d.sides[0].get(1);
+      const Pokemon& p2 = d.sides[1].get(1);
+      const uint16_t eighth = uint16_t(p1.stats.hp / 8);
+      CHECK(p1.hp == (forced == 1 ? p1.stats.hp : p1.stats.hp - eighth));
+      CHECK(p2.hp == (forced == 1 ? p2.stats.hp - eighth : p2.stats.hp));
+    }
+
+    // Both last Pokémon at 1 HP and poisoned: the first to faint loses, a
+    // coin in bits 2-3.
+    for (const uint8_t forced : {1, 2}) {
+      Battle e = started({plain}, {plain});
+      for (Side& side : e.sides) {
+        side.get(1).hp = 1;
+        side.get(1).status = Status::psn();
+      }
+      Observed r{};
+      r.calc.overrides.turn.residual_tie = uint8_t(forced << 2);
+      const Result result = update(e, Choice::move(1), Choice::move(1), r);
+      CHECK(r.chance.actions.turn.residual_tie == uint8_t(forced << 2));
+      CHECK(result.type() == (forced == 1 ? Result::Lose : Result::Win));
+    }
+  }
+  {
+    // Quick Claw in the residual order. Protect against Splash: the move
+    // order goes by priority, so the turn's roll isn't drawn there. A
+    // slower holder's roll can change the residual order: with no effect on
+    // the state it is drawn but not recorded; with both last Pokémon at 1
+    // HP and burned, it decides who faints first and loses.
+    helpers::Pokemon slow = holding(SNORLAX, Item::QuickClaw);
+    slow.moves[0] = Move::Protect;
+    slow.moves[1] = Move::None;
+    helpers::Pokemon fast = JOLTEON;
+    fast.moves[0] = Move::Splash;
+    Battle b = started({slow}, {fast});
+    Observed o{};
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(o.chance.actions == Actions{});
+    for (const Optional forced : {Optional::True, Optional::False}) {
+      Battle c = started({slow}, {fast});
+      for (Side& side : c.sides) {
+        side.get(1).hp = 1;
+        side.get(1).status = Status::brn();
+      }
+      Observed r{};
+      r.calc.overrides.turn.quick_claw = forced;
+      const Result result = update(c, Choice::move(1), Choice::move(1), r);
+      CHECK(r.chance.actions.turn.quick_claw == forced);
+      CHECK(result.type() ==
+            (forced == Optional::True ? Result::Lose : Result::Win));
+    }
   }
 }
 
