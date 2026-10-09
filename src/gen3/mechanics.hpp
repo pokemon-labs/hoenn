@@ -1200,17 +1200,39 @@ constexpr Flow faints(Battle& battle, Phase phase) {
                       f2 ? Choice::Switch : Choice::Pass);
 }
 
+// The order two replacements enter in, which changes only the log: that of
+// Showdown's instaswitch actions, whose Pokémon is the fainted one
+// (sim/side.ts:1012). A fainted Pokémon isn't active, so none of its own
+// handlers run (findEventHandlers needs isActive, sim/battle.ts): its Speed
+// is the stored stat, with no stage (clearVolatile), weather ability, Macho
+// Brace or paralysis. Its Quick Claw still counts with the turn's roll
+// (gen3 getActionSpeed; ignoringItem skips inactive holders only from gen
+// 5); this uses the roll only if the turn already drew it, since a draw
+// kept here unrecorded would be reused unrecorded by a later order that
+// matters. A tie is an unrecorded coin.
+constexpr Player replacement_order(Battle& battle) {
+  uint32_t s[2];
+  for (const Player p : {Player::P1, Player::P2}) {
+    const Side& side = battle.side(p);
+    s[index(p)] = side.get(1).stats.spe;
+    if (battle.request.quick_claw == Optional::True &&
+        holds(side, HoldEffect::QuickClaw)) {
+      s[index(p)] = UINT32_MAX;
+    }
+  }
+  if (s[0] != s[1]) return s[0] > s[1] ? Player::P1 : Player::P2;
+  return battle.rng.chance(1, 2) ? Player::P1 : Player::P2;
+}
+
 // The replacements a faint request asked for: as Showdown's instaswitch
 // actions, every replacement enters before any arrives (instaswitch comes
 // before runSwitch, sim/battle-queue.ts:177), then they arrive in
-// arrive_both's order. Two replacements enter in the fainted Pokémon's
-// speed order, the instaswitch actions' (log_order: it changes only the
-// log).
+// arrive_both's order. Two replacements enter in replacement_order.
 template <typename O>
 constexpr void replace(Battle& battle, Choice c1, Choice c2, O& options) {
   const Choice choices[2] = {c1, c2};
   const Player first = c1.type() == Choice::Switch && c2.type() == Choice::Switch
-                           ? log_order(battle)
+                           ? replacement_order(battle)
                            : Player::P1;
   for (const Player p : {first, foe(first)}) {
     const Choice c = choices[index(p)];

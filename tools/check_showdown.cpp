@@ -33,8 +33,9 @@
 // Usage: check_showdown [--tries N] [--seed N] [--game G] [--quiet] [--why]
 //                       [--no-log] traces.jsonl...
 //
-// --why tallies every try's mismatch at a failing step, to tell a branch we
-// never produce from a rare one.
+// A failing step reports the longest log prefix among the tries whose state
+// matched. --why also tallies every try's mismatch and reports the longest
+// log prefix of any try, to tell a branch we never produce from a rare one.
 
 #include <algorithm>
 #include <array>
@@ -598,7 +599,11 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     std::map<std::string, uint64_t> tally;
     bool matched = false;
     bool state_matched = false;
-    std::string log_why; // the first log mismatch of a try whose state matched
+    std::string log_why; // the log mismatch of the state-matching try that
+                         // matched the longest prefix
+    size_t log_best = 0;
+    std::string any_why; // --why: the longest log prefix of any try
+    size_t any_best = 0;
     const std::vector<Unit> theirs = units([&] {
       std::vector<std::string> v;
       for (const json::Value& l : step["log"].array) v.push_back(l.string);
@@ -614,9 +619,9 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
       o.chance.durations = durations;
       const Result result = update(copy, x, y, o);
       std::string w = mismatch(copy, result, battle.request.phase, step, next);
-      if (w.empty() && config.log) {
-        if (!state_matched) log_why.clear();
-        state_matched = true;
+      // The log lines this try matches before its first difference, and
+      // that difference.
+      const auto compare = [&](std::string& diff) {
         const std::vector<Unit> ours =
             units(formatter.format(std::span<const uint8_t>(buffer.data(), writer.pos)));
         size_t i = 0;
@@ -627,10 +632,29 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
           i++;
         }
         if (i < ours.size() || i < theirs.size()) {
-          w = " log line " + std::to_string(i) + ": ours " +
-              (i < ours.size() ? show(ours[i]) : "(none)") + ", Showdown's " +
-              (i < theirs.size() ? show(theirs[i]) : "(none)") + ";";
-          if (log_why.empty()) log_why = w;
+          diff = " log line " + std::to_string(i) + ": ours " +
+                 (i < ours.size() ? show(ours[i]) : "(none)") + ", Showdown's " +
+                 (i < theirs.size() ? show(theirs[i]) : "(none)") + ";";
+        }
+        return i;
+      };
+      // --why: the longest log prefix over every try, whatever its state.
+      if (config.why && config.log && !w.empty()) {
+        std::string diff;
+        const size_t i = compare(diff);
+        if (any_why.empty() || i > any_best) {
+          any_why = diff + " (" + std::to_string(i) + " lines matched)";
+          any_best = i;
+        }
+      }
+      if (w.empty() && config.log) {
+        state_matched = true;
+        const size_t i = compare(w);
+        if (!w.empty()) {
+          if (log_why.empty() || i > log_best) {
+            log_why = w + " (" + std::to_string(i) + " lines matched)";
+            log_best = i;
+          }
         }
       }
       if (config.why) tally[w]++;
@@ -661,6 +685,7 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
         std::vector<std::pair<uint64_t, std::string>> sorted;
         for (const auto& [w, n] : tally) sorted.emplace_back(n, w);
         std::sort(sorted.rbegin(), sorted.rend());
+        if (!any_why.empty()) std::printf("  longest log prefix of any try:%s\n", any_why.c_str());
         std::printf("  mismatches by count:\n");
         for (size_t i = 0; i < sorted.size() && i < 12; i++) {
           std::printf("    %8llu %s\n", (unsigned long long)sorted[i].first,

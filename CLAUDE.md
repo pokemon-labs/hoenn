@@ -1003,16 +1003,18 @@ adapted (see Interface).
   Look, Psych Up missing Fly/Dig/Dive, Flash Fire's Will-O-Wisp
   exceptions, `[still]` on a sun Solar Beam. Results (state guard plus
   groups 1 and 2, 1M-try cap): seed 7 197 of 200, seed 8 990 of 1000.
-- **Open, found by group 2's runs (mechanics, not messages; undiagnosed):**
-  - Beat Up (seed 7 games 8, 74; seed 8 games 504, 703, 837, 946, 958):
-    the closest try misses the first hit by 1-3 HP, which a single hit
-    shouldn't at 1M tries. Likely Beat Up's damage arithmetic.
-  - Rock Blast (seed 7 game 13; seed 8 games 32, 403, 690), all Armaldo's.
-    Game 403 (turn 2) never reproduces a first-hit crit for 72; likely a
-    multi-hit crit or damage bug. The others may be rare branches (gap 3).
-  - Two voluntary switches in the wrong order (seed 8 games 572, 873):
-    Showdown sends Blissey in before a faster Skarmory or Snorlax. Guess:
-    Showdown orders by the outgoing Pokémon's Speed.
+- **Diagnosed (2026-10-08), group 2's failures:**
+  - Beat Up (seed 7 games 8, 74; seed 8 games 504, 703, 837, 946, 958)
+    and Rock Blast (seed 7 game 13; seed 8 games 32, 403, 690): rare
+    branches, not bugs (gap 3). The old "closest try" was the first
+    state-matching try's log difference, which misled; `check_showdown`
+    now reports the longest matching log prefix, and with `--why` the
+    longest over every try. Every one matches 4-6 hit lines first; game
+    8's six exact rolls are about 4e-8 per try.
+  - Seed 8 games 572 and 873 were double replacements after Explosion,
+    not voluntary switches: Showdown orders the instaswitch actions by the
+    fainted Pokémon, whose handlers don't run (not active), so the fainted
+    Exeggutor's Chlorophyll didn't count. Fixed (`replacement_order`).
 - **Resume here: group 3**, statuses and volatiles.
   - Group 3 and later: statuses and volatiles (`-status`, `-curestatus`,
     `-start`, `-end`, the other `-activate`s, `-boost`/`-unboost` with
