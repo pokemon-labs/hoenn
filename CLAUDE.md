@@ -1100,8 +1100,9 @@ adapted (see Interface).
     branches). `check_showdown` on `tools/teams/group6.txt` seed 761 (200
     games, traces in `scratch/g6/s0-3.jsonl`) was 15/200 before the fixes
     to Ingrain's `[from] Ingrain`, Attract's `-end [silent]` at the
-    source's switch-out or replacement, and Lock-On's representation; a
-    rerun was in progress at the wrap-up (`scratch/g6/c0-3.txt`).
+    source's switch-out or replacement, and Lock-On's representation;
+    173/200 after them. Of the 27 failures, most are Disable's end order
+    (below) and 3 are an attract state mismatch ("attract missing").
   - Next: Disable's end. Gen3 Showdown's disable has no residual order, so
     it ends after every ordered residual (after Leftovers and
     `lock_residuals`), not in `battler_stage`'s Timers. Then diagnose the
