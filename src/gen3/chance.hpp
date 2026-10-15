@@ -32,8 +32,8 @@ namespace pkmn::gen3 {
 //                   residual (util:1758)            reaches CANCELER_ASLEEP
 // Confusion   2-5   SetMoveEffect (bsc:2541)        each move attempt that
 //                                                   reaches CANCELER_CONFUSED
-// Disable     2-5   Cmd_disablelastusedattack       every end of turn,
-//                   (bsc:8007)                      including the turn it's set
+// Disable     2-5   Showdown's gen3 disable, +1 if  every end of turn,
+//                   the target already moved        including the turn it's set
 // Encore      3-6   Cmd_trysetencore (bsc:8039)     every end of turn,
 //                                                   including the turn it's set
 // Binding     3-6   SetMoveEffect (bsc:2618)        every end of turn,
@@ -73,6 +73,8 @@ namespace pkmn::gen3 {
 // - Confusion from the end of Thrash is a fresh 2-5 roll.
 //
 // Disable (util:1706). It also ends if the Pokémon no longer has the move.
+// The count starts at 2 over a 3-6 roll, or at 1 with Showdown's +1 (the
+// target won't move after it, disable()), so one range serves both.
 //
 // Encore (util:1723). It also ends if the encored move's PP hits 0 or the
 // Pokémon no longer has the move.
@@ -398,7 +400,7 @@ struct Durations {
     // Volatiles on the active Pokémon. A switch clears them, except that
     // Baton Pass keeps confusion and binding with their counts.
     uint8_t confusion; // 1-5 (roll 2-5), steps at CANCELER_CONFUSED
-    uint8_t disable;   // 1-5 (roll 2-5), steps every end of turn
+    uint8_t disable;   // 1-6 (roll 3-6, from 1 or 2), steps every end of turn
     uint8_t encore;    // 1-6 (roll 3-6), steps every end of turn
     uint8_t binding;   // 1-6 (roll 3-6), on the victim's side
     uint8_t attacking; // Uproar 1-5 (roll 2-5) or Thrash 1-2 (roll 2-3; 0 once
@@ -510,7 +512,7 @@ constexpr void randomize_hidden(Battle& battle, const Durations& durations) {
       v.confusion = detail::resample(battle.rng, d.confusion, 2, 5);
     }
     if (d.disable != 0 && a.disable_timer != 0) {
-      a.disable_timer = detail::resample(battle.rng, d.disable, 2, 5);
+      a.disable_timer = detail::resample(battle.rng, d.disable, 3, 6);
     }
     if (d.encore != 0 && a.encore_timer != 0) {
       a.encore_timer = detail::resample(battle.rng, d.encore, 3, 6);

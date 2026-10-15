@@ -814,10 +814,12 @@ void check_baton_pass() {
     a.volatiles.confusion = 3;
     a.volatiles.focus_energy = true;
     a.volatiles.escape_prevention = true; // Baton Pass ignores trapping
-    a.volatiles.lock_on = 2;              // the foe's: lost
+    // The passer's lock on the foe passes with its count; the foe's on the
+    // passer stays on the foe but no longer applies.
+    a.volatiles.lock_on = uint8_t(2 | b.sides[1].order[0] << 2);
     a.volatiles.infatuated = true;
     a.toxic = 3;
-    b.sides[1].active.volatiles.lock_on = 1; // the passer's: kept
+    b.sides[1].active.volatiles.lock_on = uint8_t(2 | b.sides[0].order[0] << 2);
     Observed o{};
     o.chance.durations.p1.confusion = 2;
     o.calc.overrides.p1.confusion = Optional::False;
@@ -837,9 +839,10 @@ void check_baton_pass() {
     // Confusion stepped once, on Baton Pass itself.
     CHECK(in.volatiles.confusion == 2 && o.chance.durations.p1.confusion == 3);
     CHECK(in.volatiles.focus_energy && in.volatiles.escape_prevention);
-    CHECK(in.volatiles.lock_on == 0 && !in.volatiles.infatuated);
-    CHECK(in.toxic == 0);
-    CHECK(b.sides[1].active.volatiles.lock_on == 0); // 1, then end of turn
+    CHECK(in.volatiles.lock_on == uint8_t(1 | b.sides[1].order[0] << 2));
+    CHECK(!in.volatiles.infatuated && in.toxic == 0);
+    CHECK(b.sides[1].active.volatiles.lock_on % 4 == 1);
+    CHECK(!detail::locked_on(b, Player::P2));
     // The foe's Splash ran after the switch.
     CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
   }

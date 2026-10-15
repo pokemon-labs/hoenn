@@ -165,7 +165,15 @@ void print_diff(const Value& a, const Value& b) {
       std::printf(" p%d.volatiles", s + 1);
     }
     if (!(x.active.boosts == y.active.boosts)) std::printf(" p%d.boosts", s + 1);
-    if (!(x.active == y.active)) std::printf(" p%d.active", s + 1);
+    if (!(x.active == y.active)) {
+      std::printf(" p%d.active(bytes", s + 1);
+      const auto* xa = reinterpret_cast<const unsigned char*>(&x.active);
+      const auto* ya = reinterpret_cast<const unsigned char*>(&y.active);
+      for (size_t i = 0; i < sizeof(ActivePokemon); i++) {
+        if (xa[i] != ya[i]) std::printf(" %zu:%u/%u", i, xa[i], ya[i]);
+      }
+      std::printf(")");
+    }
     if (!(x.conditions == y.conditions)) std::printf(" p%d.conditions", s + 1);
     if (std::memcmp(x.order, y.order, sizeof(x.order)) != 0) {
       std::printf(" p%d.order", s + 1);

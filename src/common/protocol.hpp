@@ -180,6 +180,11 @@ struct FaintQueue {
   uint8_t n;
   uint16_t written;
   uint16_t bond;
+  // A Grudge's -activate, written after `grudge`'s Faint: its source and
+  // the move whose PP it took (0 for none).
+  ID grudge;
+  ID grudge_source;
+  uint16_t grudge_move;
 };
 
 struct NoFaintQueue {};

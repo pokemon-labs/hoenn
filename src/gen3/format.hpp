@@ -13,6 +13,7 @@
 #pragma once
 
 #include <array>
+#include <cctype>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -394,6 +395,14 @@ class Formatter {
       case A::Trick: s += "move: Trick"; break;
       case A::Bound: s += "move: " + move_name(Move(r.u16())); break;
       case A::Magnitude: s += "move: Magnitude|" + std::to_string(r.byte()); break;
+      case A::Spite: {
+        std::string id;
+        for (const char c : move_name(Move(r.u16()))) {
+          if (std::isalnum(static_cast<unsigned char>(c))) id += char(std::tolower(static_cast<unsigned char>(c)));
+        }
+        s += "move: Spite|" + id + "|" + std::to_string(r.byte());
+        break;
+      }
       }
       if (protocol::activate_of(effect)) s += "|[of] " + ident(ID{r.byte()});
       out.push_back(s);
@@ -427,6 +436,7 @@ class Formatter {
       case S::FutureSight: s += "Future Sight"; break;
       case S::DoomDesire: s += "Doom Desire"; break;
       case S::PerishSilent: s += "perish3|[silent]"; break;
+      case S::Attract: s += "Attract"; break;
       case S::Curse: s += "Curse"; break;
       case S::Yawn: s += "move: Yawn"; break;
       case S::AttractCuteCharm: s += "Attract|[from] ability: Cute Charm"; break;
@@ -679,7 +689,7 @@ class Formatter {
       case H::Wish:
         after = "|[from] move: Wish|[wisher] " + nickname(id.player(), r.byte());
         break;
-      case H::Ingrain: after = "|[from] move: Ingrain"; break;
+      case H::Ingrain: after = "|[from] Ingrain"; break;
       }
       split(out, id.player(), "|-heal|" + ident(id) + "|", hp, max, status, after);
       return;

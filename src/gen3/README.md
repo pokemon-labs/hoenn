@@ -681,11 +681,15 @@ main = `src/battle_main.c`.
    | `STATUS3_LEECHSEED_BATTLER` | dropped; the drain heals the foe's active Pokémon if alive (util:1507) | never |
    | `battlerPreventingEscape` | dropped; `escape_prevention` stays | switches out normally, not on Baton Pass (main:3164) |
    | `wrappedBy` | dropped; `wrapped_move` kept for the log | switches out, Baton Pass included (main:3199) |
-   | `battlerWithSureHit` | dropped; `lock_on` (0–2) on the target | switches out normally; on Baton Pass the decomp resets it to 2 (main:3166, 3178–3186), Showdown keeps the count and this follows it |
-   - Lock-On and Mind Reader set 2 on the target (bsc:8134), end of turn
-     decrements it (util:1734), and while it's nonzero the foe skips the
-     accuracy roll (bsc:1056), OHKO moves included with the level check kept
-     (bsc:7523–7533). It lasts through the user's next turn.
+   | `battlerWithSureHit` | dropped; `lock_on` on the user, as Showdown (below) | — |
+   - Lock-On and Mind Reader follow Showdown's lockon: on the user, with
+     the turns left (2, stepped at the user's residual) and the target's
+     party position. It applies while that Pokémon is the foe in: no
+     accuracy roll and no semi-invulnerability (bsc:1056 skips the roll,
+     OHKO moves included with the level check kept, bsc:7523–7533). A new
+     one fails while it runs, even after the target left. Baton Pass passes
+     it with its count; the decomp keeps it on the target and resets it to
+     2 (main:3166, 3178–3186).
 10. **Write-only fields are dropped:** every `*StartValue` in `DisableStruct`
     and `tauntTimer2` (only written: bsc:8008, 8040, 8524, 8550, 9104, 9161,
     main:3215). `Durations` does that bookkeeping.
@@ -778,11 +782,11 @@ the changes.
 |---|---|---|---|---|
 | `LEECHSEED_BATTLER` | — | | | dropped: the drain heals the foe's active Pokémon (util:1507) |
 | `LEECHSEED` | `leech_seed` | bool | **BP** | |
-| `ALWAYS_HITS` (2 bits) | `lock_on` | u8 0–2 | **BP** | on the target; set 2 (bsc:8137), steps at end of turn (util:1736). Reset to 2 when the Lock-On user Baton Passes |
+| `ALWAYS_HITS` (2 bits) | `lock_on` | u8: turns 0–2, target position 1–6 | **BP** | on the user, as Showdown (decision 9); set 2 (bsc:8137), steps at the user's end of turn (util:1736) |
 | `PERISH_SONG` | `perish_song` | bool | **BP** | with `perish_song_timer` |
 | `ON_AIR`, `UNDERGROUND`, `UNDERWATER` | `on_air`, `underground`, `underwater` | bool | | `semi_invulnerable()` |
 | `MINIMIZED` | `minimized` | bool | | |
-| `CHARGED_UP` | `charged_up` | bool | | with `charge_timer` |
+| `CHARGED_UP` | `charged_up` | bool | | until the user's next move other than Charge (Showdown) |
 | `ROOTED` | `rooted` | bool | **BP** | Ingrain |
 | `YAWN` (2 bits) | `yawn` | u8 0–2 | | set 2 (bsc:9361); steps at end of turn (util:1752) |
 | `IMPRISONED_OTHERS` | `imprisoned_others` | bool | | |
@@ -796,7 +800,7 @@ the changes.
 | Decomp | Field | Type | BP | Hidden | Notes |
 |---|---|---|---|---|---|
 | `transformedMonPersonality` | — | | | | dropped |
-| `disabledMove`, `disableTimer` | `disabled_move`, `disable_timer` | `Move`, u8 0–5 | | yes | set 2–5 (bsc:8007) |
+| `disabledMove`, `disableTimer` | `disabled_move`, `disable_timer` | `Move`, u8 0–6 | | yes | set 2–5, +1 if the target already moved (Showdown's gen3; bsc:8007 has no +1) |
 | `encoredMove`, `encoredMovePos`, `encoreTimer` | `encored_move`, `encored_slot`, `encore_timer` | `Move`, u8 0–3, u8 0–6 | | yes | set 3–6 (bsc:8039) |
 | `protectUses` | `protect_uses` | u8 | | | ++ on success (bsc:6526); reset when `stall` runs out (Showdown), where the decomp resets unless the last resulting move was Protect, Detect or Endure (bsc:6506). Unbounded in the decomp: saturate, and clamp the rate index |
 | — | `stall` | u8 | | | Showdown's stall duration, 0-2: 2 on a success, counted down after the residuals; at 0 the chain ends |
@@ -805,7 +809,7 @@ the changes.
 | `perishSongTimer` | `perish_song_timer` | u8 0–3 | **BP** | | |
 | `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | Showdown's multiplier as log2 + 1; renewed by `renewed` |
 | `rolloutTimer` | `rollout` | u8 0–5 | | | Showdown's `hitCount`, counting up (bsc:8549 counts down from 5) |
-| `chargeTimer` | `charge_timer` | u8 0–2 | | | set 2 (bsc:9103) |
+| `chargeTimer` | `charge_timer` | u8 0–2 | | | unused: Charge follows Showdown, ending after the user's next move (bsc:9103 sets 2) |
 | `tauntTimer` | `taunt` | u8 0–2 | | | set 2 (bsc:9160) |
 | `battlerPreventingEscape`, `battlerWithSureHit` | — | | | | dropped (decision 9) |
 | `isFirstTurn` | `first_turn` | u8 0–2 | | | decision 14 |

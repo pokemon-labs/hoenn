@@ -234,6 +234,8 @@ enum class Activate : uint8_t {
   Bound,
   // + a number: |move: Magnitude|N
   Magnitude,
+  // + a move and a number: |move: Spite|ID|N, the move as its ID
+  Spite,
 };
 
 constexpr bool activate_move(Activate a) {
@@ -269,6 +271,7 @@ enum class Start : uint8_t {
   FutureSight,      // |Future Sight
   DoomDesire,       // |Doom Desire
   PerishSilent,     // |perish3|[silent] (Perish Song itself)
+  Attract,          // |Attract
   // + of.
   Curse,            // |Curse|[of] P
   Yawn,             // |move: Yawn|[of] P
@@ -486,9 +489,26 @@ template <typename L> void faints(L& log) {
         log.write_byte(q.ids[i].bits);
         log.write_byte(uint8_t(Activate::DestinyBond));
       }
+      if (q.grudge_move != 0 && q.grudge == q.ids[i]) {
+        log.write(ArgType::Activate);
+        log.write_byte(q.grudge_source.bits);
+        log.write_byte(uint8_t(Activate::Grudge));
+        log.write_int(q.grudge_move);
+      }
     }
     q.n = 0;
     q.bond = 0;
+    q.grudge_move = 0;
+  }
+}
+
+// Queues Grudge's -activate|SOURCE|move: Grudge|M for after `id`'s Faint.
+template <typename L> void grudge(L& log, ID id, ID source, Move m) {
+  if constexpr (L::enabled) {
+    auto& q = log.faints;
+    q.grudge = id;
+    q.grudge_source = source;
+    q.grudge_move = uint16_t(m);
   }
 }
 
@@ -566,6 +586,18 @@ template <typename L> void activate_magnitude(L& log, ID id, uint8_t n) {
     log.write(ArgType::Activate);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(Activate::Magnitude));
+    log.write_byte(n);
+  }
+}
+
+// -activate|P|move: Spite|ID|N: Showdown's gen3 Spite prints the move's ID
+// and the roll, not the PP it took.
+template <typename L> void activate_spite(L& log, ID id, Move m, uint8_t n) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Activate);
+    log.write_byte(id.bits);
+    log.write_byte(uint8_t(Activate::Spite));
+    detail::move_id(log, m);
     log.write_byte(n);
   }
 }

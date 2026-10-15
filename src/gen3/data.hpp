@@ -431,7 +431,9 @@ struct Volatiles {
   bool defense_curl;      // STATUS2_DEFENSE_CURL
   bool torment;           // STATUS2_TORMENT
   // status3
-  uint8_t lock_on;        // STATUS3_ALWAYS_HITS, 0-2, on the target. Baton Pass keeps.
+  // Showdown's lockon, on the user: the turns left (bits 0-1, 0-2) and the
+  // target's party position (bits 2-4, 1-6). Baton Pass keeps.
+  uint8_t lock_on;
   uint8_t yawn;           // STATUS3_YAWN, 0-2
   bool leech_seed;        // STATUS3_LEECHSEED. Baton Pass keeps.
   bool perish_song;       // STATUS3_PERISH_SONG, with perish_song_timer. Baton Pass keeps.
@@ -459,7 +461,7 @@ struct Volatiles {
 
   constexpr bool valid() const {
     return confusion <= 5 && uproar <= 5 && bide <= 3 && thrash <= 3 &&
-           wrapped <= 6 && (!wrapper_gone || wrapped != 0) && lock_on <= 2 && yawn <= 2 &&
+           wrapped <= 6 && (!wrapper_gone || wrapped != 0) && (lock_on == 0 || (lock_on % 4 != 0 && lock_on % 4 <= 2 && lock_on >> 2 >= 1 && lock_on >> 2 <= 6)) && yawn <= 2 &&
            (on_air + underground + underwater) <= 1;
   }
 
@@ -515,7 +517,7 @@ struct ActivePokemon {
   // DisableStruct and status1's counter
   uint8_t toxic;            // STATUS1_TOXIC_COUNTER, 0-15; resets on switch-in
   uint8_t substitute_hp;    // max HP / 4 fits. Baton Pass keeps.
-  uint8_t disable_timer;    // 0-5. Hidden.
+  uint8_t disable_timer;    // 0-6. Hidden.
   uint8_t encore_timer;     // 0-6. Hidden.
   uint8_t encored_slot;     // 0-3
   uint8_t protect_uses;     // unbounded in the decomp: saturate
@@ -525,7 +527,7 @@ struct ActivePokemon {
   uint8_t fury_cutter;      // Showdown's furycutter: 0 off, else the power
                             // multiplier's log2 + 1, 1-5
   uint8_t rollout;          // Showdown's rollout hitCount, 0-5
-  uint8_t charge_timer;     // 0-2
+  uint8_t charge_timer;     // 0-2; unused: Showdown's Charge has no timer
   uint8_t taunt;            // 0-2
   uint8_t first_turn;       // isFirstTurn, 0-2 (decision 14)
   uint8_t recharge_timer;   // 0-2; also a two-turn move's charge (turn_cleanup)
@@ -565,7 +567,7 @@ struct ActivePokemon {
     }
     return boosts.valid() && volatiles.valid() && toxic <= MAX_TOXIC &&
            sleep_skipped <= Status::MAX_SLEEP - 1 &&
-           disable_timer <= 5 && encore_timer <= 6 && encored_slot <= 3 &&
+           disable_timer <= 6 && encore_timer <= 6 && encored_slot <= 3 &&
            stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
            first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&

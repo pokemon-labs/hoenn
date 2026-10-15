@@ -1,21 +1,3 @@
-// The turn frame: update() and choices(), as libpkmn's gen*/mechanics.zig.
-//
-// Plan steps 2-4 (CLAUDE.md): the frame, the order of actions, switching,
-// the hit backbone, the residuals and the move effects written so far, with
-// the roll helpers, real and null Chance and Calc. Not here yet, and marked
-// TODO where they go: the other move effects (they only use PP).
-//
-// The frame is one switch on request.phase whose cases fall through in turn
-// order (CLAUDE.md, "Turn phases"). A case resumed after a request first
-// does its replacement. Internal steps return a Flow: empty to continue, or
-// the Result to return (a request, or the end of the battle).
-//
-// The caller passes only valid battles and choices from choices(). Debug
-// asserts both; release checks neither (CLAUDE.md, "Safety").
-//
-// Paths: bsc = src/battle_script_commands.c, util = src/battle_util.c,
-// main = src/battle_main.c, bs1 = data/battle_scripts_1.s.
-
 #pragma once
 
 #include <cassert>
@@ -35,7 +17,6 @@
 
 namespace pkmn::gen3 {
 
-// The most choices a player can have: four moves and five switches.
 inline constexpr uint8_t MAX_CHOICES = 9;
 
 namespace detail {
@@ -66,8 +47,6 @@ constexpr bool has_type(const ActivePokemon& active, Type type) {
   return active.types[0] == type || active.types[1] == type;
 }
 
-// The two-turn moves (charge()): Solar Beam, Razor Wind, Skull Bash, Sky
-// Attack, and Fly, Dig, Dive and Bounce.
 constexpr bool two_turn(Effect effect) {
   return effect == Effect::SolarBeam || effect == Effect::RazorWind ||
          effect == Effect::SkullBash || effect == Effect::SkyAttack ||
@@ -212,33 +191,26 @@ constexpr bool protect(Battle& battle, Player p, uint8_t n, O& options) {
   return coin(battle, p, &Action::protect, 1, 1u << n, options);
 }
 
-// Thawing at a move attempt: Random() % 5 == 0 (CANCELER_FROZEN, util:2048).
 template <typename O>
 constexpr bool thaw(Battle& battle, Player p, O& options) {
   return coin(battle, p, &Action::thaw, 1, 5, options);
 }
 
-// Full paralysis: Random() % 4 == 0 (CANCELER_PARALYZED, util:2175).
 template <typename O>
 constexpr bool paralysis(Battle& battle, Player p, O& options) {
   return coin(battle, p, &Action::paralysis, 1, 4, options);
 }
 
-// A confusion self-hit: !(Random() & 1) (CANCELER_CONFUSED, util:2148).
 template <typename O>
 constexpr bool confusion(Battle& battle, Player p, O& options) {
   return coin(battle, p, &Action::confusion, 1, 2, options);
 }
 
-// Immobilized by love: !(Random() & 1) (CANCELER_IN_LOVE, util:2190).
 template <typename O>
 constexpr bool infatuation(Battle& battle, Player p, O& options) {
   return coin(battle, p, &Action::infatuation, 1, 2, options);
 }
 
-// The accuracy check: a hit on `calc` of 100 outcomes, from accuracy()
-// (Showdown's randomChance; the decomp's draw is at bsc:1176). Called only
-// for 0 < calc < 100; outside that the outcome is certain.
 template <typename O>
 constexpr bool hit(Battle& battle, Player p, uint32_t calc, O& options) {
   assert(calc > 0 && calc < 100);
@@ -475,6 +447,20 @@ constexpr uint8_t switch_target(Battle& battle, Player p, uint8_t mask,
     observe(options, 1, n);
   }
   return slot;
+}
+
+// Spite's PP, 2-5 (Showdown's gen3 random(2, 6)). Called only where the
+// roll can change the PP taken: the move has at least 3 left.
+template <typename O> constexpr uint8_t spite(Battle& battle, Player p, O& options) {
+  uint8_t forced = 0;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).spite;
+  assert(forced == 0 || (forced >= 2 && forced <= 5));
+  const uint8_t n = forced != 0 ? forced : uint8_t(2 + battle.rng.range(4));
+  if constexpr (detail::CHANCE<O>) {
+    record(options.chance.actions.get(p).spite, n);
+    observe(options, 1, 4);
+  }
+  return n;
 }
 
 // A 2-5 hit move's count: Cmd_setmultihitcounter (bsc:7139) draws twice
@@ -876,7 +862,8 @@ constexpr void faint(Battle& battle, Player player, O& options) {
 
   ActivePokemon& f = battle.side(foe(player)).active;
   f.volatiles.escape_prevention = false;
-  f.volatiles.infatuated = false;
+  // Showdown keeps the foe's attract until the replacement comes in
+  // (leave()): its onUpdate runs then.
   // Showdown keeps the foe's partiallytrapped until its residual (Stage::Bind).
   if (f.volatiles.wrapped != 0) f.volatiles.wrapper_gone = true;
   f.last_taken_move = Move::None;
@@ -892,6 +879,8 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   }
 }
 
+constexpr void deduct_pp(Battle& battle, Player player, uint8_t slot, uint8_t n);
+
 // tryfaintmon BS_TARGET after p's move hit the foe (bsc:2965): the foe
 // faints if it's at 0 HP, and if it had used Destiny Bond, p faints too
 // unless it already has (BattleScript_DestinyBondTakesLife, bs1:3379). The
@@ -902,12 +891,27 @@ constexpr void faint(Battle& battle, Player player, O& options) {
 //
 // Showdown's onFaint prints the -activate even when the user has already
 // fainted (Explosion, recoil): the queued Faint carries it (protocol::faint).
+//
+// Grudge, as Showdown's onFaint: the user's last move (`used`, Showdown's
+// lastMove: Sleep Talk for a move it called) loses all its PP, unless the
+// user's own faint came first (Explosion).
 template <typename O>
-constexpr void faint_target(Battle& battle, Player player, O& options) {
+constexpr void faint_target(Battle& battle, Player player, Move used, O& options) {
   const Player defender = foe(player);
   if (!battle.side(defender).get(1).fainted()) return;
   const bool bond = battle.side(defender).active.volatiles.destiny_bond;
   if (bond) protocol::faint(options.log, protocol::ident(battle, defender), true);
+  if (battle.side(defender).active.volatiles.grudge &&
+      get(used).effect != Effect::Explosion) {
+    ActivePokemon& a = battle.side(player).active;
+    for (uint8_t s = 0; s < 4; s++) {
+      if (a.moves[s].id != used || a.moves[s].pp == 0) continue;
+      deduct_pp(battle, player, s, a.moves[s].pp);
+      protocol::faint(options.log, protocol::ident(battle, defender));
+      protocol::grudge(options.log, protocol::ident(battle, defender),
+                       protocol::ident(battle, player), used);
+    }
+  }
   faint(battle, defender, options);
   Pokemon& user = battle.side(player).get(1);
   if (bond && !user.fainted()) {
@@ -1395,15 +1399,13 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
     }
   }
   ActivePokemon& f = battle.side(foe(player)).active;
+  const bool infatuated = f.volatiles.infatuated;
   f.volatiles.infatuated = false;
   // The binder leaves: Showdown's partiallytrapped stays on the foe until
   // its residual, no longer trapping it (Stage::Bind). Baton Pass too: the
   // recipient isn't the source.
   if (f.volatiles.wrapped != 0) f.volatiles.wrapper_gone = true;
-  if (!baton) {
-    f.volatiles.escape_prevention = false;
-    f.volatiles.lock_on = 0;
-  }
+  if (!baton) f.volatiles.escape_prevention = false;
 
   std::swap(side.order[0], side.order[slot - 1]);
   if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot, baton);
@@ -1413,6 +1415,10 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
                      protocol::ident(battle, player), side.get(1),
                      baton ? protocol::SwitchFrom::BatonPass
                            : protocol::SwitchFrom::None);
+  // Attract's onUpdate, once its source is gone.
+  if (infatuated) {
+    protocol::end_effect(options.log, protocol::ident(battle, foe(player)), protocol::End::Attract);
+  }
 }
 
 // A switch action: the Pokémon leaves, the new one enters and arrives
@@ -1438,12 +1444,12 @@ constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
 //   binder is still in); the decomp clears STATUS2_WRAPPED.
 // - Lock-On, as Showdown (gen4's lockon drops noCopy): the passer's lock on
 //   the foe keeps its count, where the decomp resets it to 2 (main:3178);
-//   the foe's lock on the passer is lost (its source has left), where the
-//   decomp keeps STATUS3_ALWAYS_HITS on the recipient.
+//   the foe's lock on the passer no longer applies (its target has left),
+//   where the decomp keeps STATUS3_ALWAYS_HITS on the recipient.
 // - Not passed, by either: the toxic counter (decision 1), infatuation,
 //   Disable, Encore, Torment, Nightmare, Yawn, Foresight, Flash Fire. A
 //   Taunted Pokémon can't use Baton Pass, so Showdown passing Taunt can't
-//   show. TODO: Showdown passes Charge (no noCopy); settle with Charge.
+//   show; nor Charge, which ends after the Baton Pass itself (use_move).
 template <typename O>
 constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
                              O& options) {
@@ -1467,6 +1473,7 @@ constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
   n.water_sport = v.water_sport;
   n.wrapped = v.wrapped;
   n.wrapper_gone = v.wrapper_gone;
+  n.lock_on = v.lock_on;
   a.wrapped_move = old.wrapped_move;
   arrive(battle, player, options);
 }
@@ -2079,6 +2086,13 @@ constexpr bool protected_from(const MoveState& m, Player player) {
           m.move == Move::Counter || m.move == Move::MirrorCoat);
 }
 
+// Whether p's Lock-On or Mind Reader is on the foe now in: Showdown's
+// lockon volatile on the user, with its target (Volatiles::lock_on).
+constexpr bool locked_on(const Battle& battle, Player p) {
+  const uint8_t lock = battle.side(p).active.volatiles.lock_on;
+  return lock != 0 && lock >> 2 == battle.side(foe(p)).order[0];
+}
+
 // Showdown's Invulnerability event (gen3 tryMoveHit, before the accuracy
 // roll): a semi-invulnerable target the move can't reach. Lock-On and Mind
 // Reader reach it (the only possible locker in singles is the attacker);
@@ -2089,7 +2103,7 @@ constexpr bool protected_from(const MoveState& m, Player player) {
 constexpr bool invulnerable(const Battle& battle, Player player,
                             const MoveState& m) {
   const Volatiles& v = battle.side(foe(player)).active.volatiles;
-  if (m.pursuing || v.lock_on != 0) return false;
+  if (m.pursuing || locked_on(battle, player)) return false;
   return (v.on_air && !m.ignore_on_air) ||
          (v.underground && !m.ignore_underground) ||
          (v.underwater && m.move != Move::Surf && m.move != Move::Whirlpool);
@@ -2170,7 +2184,7 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   // accuracy true; the decomp's script has no accuracycheck).
   if (m.pursuing) return 100;
   // Lock-On and Mind Reader.
-  if (f.volatiles.lock_on != 0) return 100;
+  if (locked_on(battle, player)) return 100;
   // OHKO moves, as Showdown's gen3 tryMoveHit: 30 plus the level
   // difference (try_hit has stopped a lower-level user), replacing the
   // stages and the accuracy modifiers. The decomp's Cmd_tryKO (bsc:7490)
@@ -4177,7 +4191,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // tryfaintmon
-  faint_target(battle, player, options);
+  faint_target(battle, player, m.chosen, options);
   moveend(battle, player, m, options);
   if (effect == Effect::Explosion) faint(battle, player, options);
 }
@@ -5298,7 +5312,7 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
     m.damaged |= damaged;
   }
   protocol::hit_count(options.log, protocol::ident(battle, defender), i);
-  faint_target(battle, player, options);
+  faint_target(battle, player, m.chosen, options);
   moveend(battle, player, m, options);
 }
 
@@ -5772,6 +5786,288 @@ constexpr void future_sight_move(Battle& battle, Player player, MoveState& m,
   moveend(battle, player, m, options);
 }
 
+// Confusion from a status move, after its own checks (Showdown's
+// addVolatile('confusion')): an existing confusion fails it silently
+// (false), Own Tempo and Safeguard stop it (TryAddVolatile; Safeguard's
+// -activate here, Own Tempo's -immune is the caller's, at onHit), else it
+// takes hold. Returns 1 if it took hold, 0 if stopped, -1 if it failed.
+template <typename O>
+constexpr int8_t add_confusion(Battle& battle, Player player, O& options) {
+  const Player target = foe(player);
+  const Side& foe_side = battle.side(target);
+  const ActivePokemon& t = foe_side.active;
+  if (t.volatiles.confusion != 0) return -1;
+  if (t.ability == Ability::OwnTempo) return 0;
+  if (foe_side.conditions.safeguard != 0) {
+    protocol::activate(options.log, protocol::ident(battle, target),
+                       protocol::Activate::Safeguard);
+    return 0;
+  }
+  confuse(battle, target, options);
+  return 1;
+}
+
+// Swagger and Flatter, as Showdown (boosts, then volatileStatus confusion):
+// try_hit, a Substitute (TryPrimaryHit), the raise (-boost 0 at +6), then
+// add_confusion; Own Tempo's -immune comes last (its onHit). It fails
+// (-fail) only if the raise did nothing and the target was confused
+// already. The decomp fails it first when both hold
+// (jumpifconfusedandstatmaxed, bs1:1559); the state is the same.
+template <typename O>
+constexpr void swagger(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  const StatChange c = get(m.move).effect == Effect::Swagger ? StatChange{0, 2}
+                                                             : StatChange{3, 1};
+  int8_t& b = stage(t.boosts, c.stat);
+  const bool sub = t.volatiles.substitute;
+  const bool confusable = t.volatiles.confusion == 0 && t.ability != Ability::OwnTempo &&
+                          battle.side(target).conditions.safeguard == 0;
+  if (!try_hit(battle, player, m, {.matters = !sub && (b < 6 || confusable)}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  const ID id = protocol::ident(battle, target);
+  if (sub) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  // At +6 the raise marks the move MISSED, as raise() and the decomp.
+  const int8_t gained = b + c.n > 6 ? int8_t(6 - b) : c.n;
+  b = int8_t(b + gained);
+  if (gained == 0) m.result |= MoveResult::MISSED;
+  protocol::boost(options.log, id, c.stat, gained, false);
+  const int8_t confused = add_confusion(battle, player, options);
+  if (t.ability == Ability::OwnTempo) {
+    protocol::immune(options.log, id, protocol::Immune::Confusion, Ability::OwnTempo);
+  }
+  if (gained == 0 && confused < 0) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+  }
+  moveend(battle, player, m, options);
+}
+
+// Attract, as Showdown: a target of the same gender or genderless is
+// immune (onTryImmunity, so -immune after try_hit's checks); an existing
+// infatuation or Oblivious (onImmunity('attract')) fails it. No Substitute
+// check (bypasssub). It ends when the user leaves (leave(), faint()).
+// Mental Herb cures it at moveend. Log: Start Attract.
+template <typename O>
+constexpr void attract(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  const Gender g1 = battle.side(player).get(1).gender;
+  const Gender g2 = battle.side(target).get(1).gender;
+  const bool immune = g1 == Gender::None || g2 == Gender::None || g1 == g2;
+  const bool fails = t.volatiles.infatuated || t.ability == Ability::Oblivious;
+  if (!try_hit(battle, player, m, {.immune = immune, .matters = !fails}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (fails) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  t.volatiles.infatuated = true;
+  protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Attract);
+  moveend(battle, player, m, options);
+}
+
+// Disable, as Showdown's gen3: it fails without a last move or on Struggle
+// (onTryHit), on a target already disabled, or if the last move isn't known
+// or has no PP (gen4's onStart). No Substitute check (bypasssub). Its
+// duration is random(2, 6), plus 1 if the target won't move after this
+// (gen4's onStart: !willMove), so it always covers 2-5 of the target's
+// moves; the decomp's (Random() & 3) + 2 has no +1. The hidden timer
+// counts residuals; its Durations count starts at 2, or at 1 with the +1,
+// over a 3-6 roll (chance.hpp). Log: Start Disable.
+template <typename O>
+constexpr void disable(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  ActivePokemon& t = battle.side(target).active;
+  uint8_t slot = 0;
+  while (slot < 4 && t.moves[slot].id != t.last_move) slot++;
+  const bool fails = t.last_move == Move::None || t.last_move == Move::Struggle ||
+                     t.disabled_move != Move::None || slot == 4 || t.moves[slot].pp == 0;
+  if (!try_hit(battle, player, m, {.matters = !fails}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (fails) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const bool will_move =
+      m.first && battle.request.choice[index(target)].type() == Choice::Move;
+  const uint8_t count = will_move ? 2 : 1;
+  t.disabled_move = t.last_move;
+  t.disable_timer = uint8_t(3 + battle.rng.range(4) - (count - 1));
+  if constexpr (CHANCE<O>) options.chance.durations.get(target).disable = count;
+  protocol::start_disable(options.log, protocol::ident(battle, target), t.last_move);
+  moveend(battle, player, m, options);
+}
+
+// Torment, as Showdown (bypasssub): it fails on a target already tormented;
+// the selection then leaves out the last move (usable_moves). It ends when
+// the target leaves. Log: Start Torment.
+template <typename O>
+constexpr void torment(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  Volatiles& v = battle.side(target).active.volatiles;
+  if (!try_hit(battle, player, m, {.matters = !v.torment}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (v.torment) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  v.torment = true;
+  protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Torment);
+  moveend(battle, player, m, options);
+}
+
+// Spite, as Showdown's gen3 (bypasssub): the target's last move loses 2-5
+// PP (at most what it has); it fails if the target has no last move, doesn't
+// know it or it has no PP. The roll is drawn only when it can change the PP
+// taken (rolls::spite); below 3 PP it changes only the log, which prints
+// the roll. Log: Activate Spite.
+template <typename O>
+constexpr void spite(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  const ActivePokemon& t = battle.side(target).active;
+  uint8_t slot = 0;
+  while (slot < 4 && t.moves[slot].id != t.last_move) slot++;
+  const bool fails = t.last_move == Move::None || slot == 4 || t.moves[slot].pp == 0;
+  if (!try_hit(battle, player, m, {.matters = !fails}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (fails) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  const uint8_t n = t.moves[slot].pp >= 3 ? rolls::spite(battle, player, options)
+                                          : uint8_t(2 + battle.rng.range(4));
+  deduct_pp(battle, target, slot, n);
+  protocol::activate_spite(options.log, protocol::ident(battle, target), t.last_move, n);
+  moveend(battle, player, m, options);
+}
+
+// Foresight and Odor Sleuth, as Showdown's gen3 (accuracy 100, so evasion
+// can make it miss; bypasssub): it fails on a target already identified.
+// The target's evasion above 0 counts as 0 against it and a Ghost loses its
+// Normal and Fighting immunity (accuracy(), damage.hpp) until it leaves.
+// Log: Start Foresight.
+template <typename O>
+constexpr void foresight(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  Volatiles& v = battle.side(target).active.volatiles;
+  if (!try_hit(battle, player, m, {.matters = !v.foresight}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (v.foresight) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  v.foresight = true;
+  protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Foresight);
+  moveend(battle, player, m, options);
+}
+
+// Lock-On and Mind Reader, as Showdown's gen3 (accuracy 100, no bypasssub):
+// a lock already on (onTryHit), even on a target that has left, or a
+// Substitute (TryPrimaryHit) fails it; otherwise the user's moves hit the
+// target until the end of the next turn (lock_on, locked_on()). Log:
+// Activate Lock-On or Mind Reader [of] the target.
+template <typename O>
+constexpr void lock_on(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  const Player target = foe(player);
+  Volatiles& v = battle.side(player).active.volatiles;
+  const bool fails = v.lock_on != 0 || battle.side(target).active.volatiles.substitute;
+  if (!try_hit(battle, player, m, {.matters = !fails}, options)) {
+    return moveend(battle, player, m, options);
+  }
+  if (fails) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  v.lock_on = uint8_t(2 | battle.side(target).order[0] << 2);
+  protocol::activate_with(options.log, protocol::ident(battle, player),
+                          m.move == Move::MindReader ? protocol::Activate::MindReader
+                                                     : protocol::Activate::LockOn,
+                          Move::None, protocol::ident(battle, target));
+  moveend(battle, player, m, options);
+}
+
+// Focus Energy, Ingrain and Charge: a volatile on the user. Focus Energy
+// and Ingrain fail if it's on already (addVolatile); Charge restarts, as
+// Showdown's onRestart, and its gen3 version raises no Special Defense.
+// Showdown's Charge (gen8 mod, which gen3 inherits) has no duration: it
+// ends after the user's next move other than Charge, or that move's abort
+// (use_move); the decomp's lasts to the next turn's end, Electric or not.
+// Log: Start Focus Energy, Ingrain or Charge.
+template <typename O>
+constexpr void self_volatile(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  Volatiles& v = battle.side(player).active.volatiles;
+  const Effect effect = get(m.move).effect;
+  bool& on = effect == Effect::FocusEnergy ? v.focus_energy
+             : effect == Effect::Ingrain   ? v.rooted
+                                           : v.charged_up;
+  if (on && effect != Effect::Charge) {
+    protocol::failed(options.log, protocol::ident(battle, player));
+    m.result |= MoveResult::FAILED;
+    return moveend(battle, player, m, options);
+  }
+  on = true;
+  protocol::start(options.log, protocol::ident(battle, player),
+                  effect == Effect::FocusEnergy ? protocol::Start::FocusEnergy
+                  : effect == Effect::Ingrain   ? protocol::Start::Ingrain
+                                                : protocol::Start::Charge);
+  moveend(battle, player, m, options);
+}
+
+// Grudge, as Showdown: it never fails; the canceler clears it at the user's
+// next move attempt. If the user faints to a foe's move first, that move
+// loses its PP (faint_target). Log: SingleMove Grudge.
+template <typename O>
+constexpr void grudge(Battle& battle, Player player, MoveState& m, O& options) {
+  if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
+  m.attackstring = true;
+  pp_reduce(battle, player, m);
+  battle.side(player).active.volatiles.grudge = true;
+  protocol::single_move(options.log, protocol::ident(battle, player),
+                        protocol::SingleMove::Grudge);
+  moveend(battle, player, m, options);
+}
+
 // Whether use_move runs the effect's script (tools/coverage counts these);
 // every other effect only uses PP for now.
 constexpr bool handled(Effect effect) {
@@ -5797,7 +6093,13 @@ constexpr bool handled(Effect effect) {
          effect == Effect::Memento || effect == Effect::Imprison ||
          effect == Effect::Nightmare || effect == Effect::Bide ||
          effect == Effect::Stockpile || effect == Effect::Swallow ||
-         effect == Effect::FutureSight;
+         effect == Effect::FutureSight || effect == Effect::Swagger ||
+         effect == Effect::Flatter || effect == Effect::TeeterDance ||
+         effect == Effect::Attract || effect == Effect::Disable ||
+         effect == Effect::Torment || effect == Effect::Spite ||
+         effect == Effect::Foresight || effect == Effect::LockOn ||
+         effect == Effect::FocusEnergy || effect == Effect::Ingrain ||
+         effect == Effect::Charge || effect == Effect::Grudge;
 }
 
 // The move's script, by effect: m.move set, m.chosen and the hit markers
@@ -5816,7 +6118,9 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   m.ignore_underground = effect == Effect::Earthquake || effect == Effect::Magnitude;
 
   if (plain_hit(effect)) return hit(battle, player, m, options);
-  if (effect == Effect::Confuse) return confuse_move(battle, player, m, options);
+  if (effect == Effect::Confuse || effect == Effect::TeeterDance) {
+    return confuse_move(battle, player, m, options);
+  }
   if (const Secondary s = primary_status(effect); s != Secondary::None) {
     return status_move(battle, player, m, s, options);
   }
@@ -5868,6 +6172,20 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Stockpile) return stockpile(battle, player, m, options);
   if (effect == Effect::Swallow) return swallow(battle, player, m, options);
   if (effect == Effect::FutureSight) return future_sight_move(battle, player, m, options);
+  if (effect == Effect::Swagger || effect == Effect::Flatter) {
+    return swagger(battle, player, m, options);
+  }
+  if (effect == Effect::Attract) return attract(battle, player, m, options);
+  if (effect == Effect::Disable) return disable(battle, player, m, options);
+  if (effect == Effect::Torment) return torment(battle, player, m, options);
+  if (effect == Effect::Spite) return spite(battle, player, m, options);
+  if (effect == Effect::Foresight) return foresight(battle, player, m, options);
+  if (effect == Effect::LockOn) return lock_on(battle, player, m, options);
+  if (effect == Effect::FocusEnergy || effect == Effect::Ingrain ||
+      effect == Effect::Charge) {
+    return self_volatile(battle, player, m, options);
+  }
+  if (effect == Effect::Grudge) return grudge(battle, player, m, options);
   if (const Weather w = move_weather(effect); w != Weather::None) {
     return weather_move(battle, player, m, w, options);
   }
@@ -5942,7 +6260,14 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   m.first = first;
   m.turn = &turn;
   m.pursuing = pursuing;
+  const bool charged = a.volatiles.charged_up;
   execute(battle, player, m, options);
+  // Charge's onAfterMove and onMoveAborted (self_volatile); not after
+  // Pursuit on a switching target, which Showdown runs with useMove.
+  if (charged && !pursuing && m.move != Move::Charge) {
+    a.volatiles.charged_up = false;
+    protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
+  }
   // Spit Up's onAfterMove (Showdown's runMove, sim/battle-actions.ts:311):
   // once the move ran, hit or not, the layers go. Not after Sleep Talk's
   // call, which runs no AfterMove of the called move.
@@ -6477,7 +6802,7 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
       }
       if constexpr (CHANCE<O>) {
         rolls::tick(options.chance.actions.get(player).disable,
-                    options.chance.durations.get(player).disable, ended, 2, 5,
+                    options.chance.durations.get(player).disable, ended, 3, 6,
                     1, options);
       }
     }
@@ -6505,11 +6830,9 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     }
   }
 
-  // ENDTURN_LOCK_ON, CHARGE, TAUNT (util:1734-1748). Lock-On lives on the
-  // target here (README decision 9), so it ticks in the target's pass; in
-  // singles the order can't matter.
-  if (v.lock_on != 0) v.lock_on--;
-  if (a.charge_timer != 0 && --a.charge_timer == 0) v.charged_up = false;
+  // ENDTURN_LOCK_ON, TAUNT (util:1734-1748). Lock-On is on its user, as
+  // Showdown; Charge ends in use_move.
+  if (v.lock_on != 0 && --v.lock_on % 4 == 0) v.lock_on = 0;
   if (a.taunt != 0 && --a.taunt == 0) {
     protocol::end_effect(options.log, id, protocol::End::Taunt);
   }
@@ -6687,7 +7010,7 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   protocol::end_effect(options.log, id, protocol::End::FutureMove, move);
   const ActivePokemon& t = side.active;
   bool lands = !t.volatiles.semi_invulnerable();
-  if (lands && !(in && t.volatiles.lock_on != 0)) {
+  if (lands && !(in && locked_on(battle, user))) {
     const uint32_t calc = staged_accuracy(
         battle, player, get(move).accuracy, in ? user_side.active.boosts.acc : int8_t(0),
         user_side.pokemon[position - 1].ability, move == Move::DoomDesire);
@@ -6955,8 +7278,6 @@ constexpr bool legal(const Battle& battle, Player player, Choice choice) {
 }
 } // namespace detail
 
-// Runs one turn, or the rest of one after a mid-turn request (libpkmn's
-// update). At turn 0 both players pass and the battle starts.
 template <typename O>
 constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
   using namespace detail;

@@ -299,6 +299,7 @@ constexpr VolatileName VOLATILES[] = {
     {"foresight", [](const ActivePokemon& a) { return a.volatiles.foresight; }},
     {"torment", [](const ActivePokemon& a) { return a.volatiles.torment; }},
     {"charge", [](const ActivePokemon& a) { return a.volatiles.charged_up; }},
+    {"grudge", [](const ActivePokemon& a) { return a.volatiles.grudge; }},
     {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.recharge; }},
     // Step 5 group 4: the locked moves and Rage.
     {"lockedmove", [](const ActivePokemon& a) {
