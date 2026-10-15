@@ -1084,11 +1084,26 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-- **Resume here:** plan step 5, group 7 (Safeguard, Mist, Mud Sport,
-  Water Sport, Magic Coat, Snatch): not started. Trace each in the decomp,
-  check Showdown's gen3, build `tools/teams/group7.txt`, then check it as
-  group 6 (4-way sharded `check_showdown`, soak, check_chance, the
-  teams/adv baseline in `scratch/g6b/b0-2.jsonl`).
+- **Resume here:** plan step 5, group 8 (copying, calling, swapping): not
+  started. Trace each in the decomp, check Showdown's gen3, build
+  `tools/teams/group8.txt`, then check it as group 7 (4-way sharded
+  `check_showdown`, soak, check_chance, the teams/adv baseline in
+  `scratch/g6b/b0-2.jsonl`).
+  Group 7 done (2026-10-15), as Showdown's gen3: Mist and Safeguard
+  (`screen`), Mud Sport and Water Sport (gen4 volatiles on the user, in
+  `self_volatile`), Magic Coat (bounces in `try_hit` after the roll and
+  Protect) and Snatch (`snatched`, right after the PP), both per-turn flags
+  in `Turn`, the moved move run as Sleep Talk's call (`call_back`,
+  `[from]`); neither fails when used last, and only the steal takes
+  Pressure's PP (gen4 Snatch drops mustpressure). Also fixed, as Showdown:
+  Safeguard's -activate when it blocks Synchronize; Pursuit on a switching
+  target skips the canceler (useMove runs no BeforeMove); a stat drop's
+  roll is recorded even when Mist, an ability or -6 blocks it (the hit
+  still lands in `last_taken_move`; check_chance found it).
+  - Results (`tools/teams/group7.txt`): `check_showdown` 200/200 on seeds
+    771-774 and 200/200 on 781-784; teams/adv 597/600 (the known rare
+    branches); check_chance 0 collisions; 1000-game debug soak clean. Not
+    done: the 10k run, `check_frame` scenarios.
   Group 6 done (2026-10-15), all 15 moves, as Showdown's gen3:
   Swagger and Flatter (`swagger`), Teeter Dance (`confuse_move`), Attract,
   Disable (+1 turn if the target already moved; Durations count starts at

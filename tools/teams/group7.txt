@@ -1,0 +1,223 @@
+=== [gen3ou] group7 coaters ===
+
+Grumpig @ Leftovers
+Ability: Thick Fat
+EVs: 252 HP / 4 Def / 252 SpA
+Modest Nature
+- Magic Coat
+- Snatch
+- Calm Mind
+- Psychic
+
+Girafarig @ Leftovers
+Ability: Early Bird
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Magic Coat
+- Thunder Wave
+- Psychic
+- Baton Pass
+
+Salamence @ Leftovers
+Ability: Intimidate
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Dragon Dance
+- Earthquake
+- Rock Slide
+- Fire Blast
+
+Milotic @ Leftovers
+Ability: Marvel Scale
+EVs: 252 HP / 252 Def / 4 SpA
+Bold Nature
+- Water Sport
+- Safeguard
+- Surf
+- Recover
+
+Suicune @ Leftovers
+Ability: Pressure
+EVs: 252 HP / 252 Def / 4 SpA
+Bold Nature
+- Mist
+- Calm Mind
+- Surf
+- Rest
+
+Zapdos @ Leftovers
+Ability: Pressure
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Thunderbolt
+- Thunder Wave
+- Agility
+- Hidden Power [Ice]
+
+=== [gen3ou] group7 snatchers ===
+
+Umbreon @ Leftovers
+Ability: Synchronize
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Snatch
+- Toxic
+- Moonlight
+- Pursuit
+
+Blissey @ Leftovers
+Ability: Natural Cure
+EVs: 252 HP / 252 Def / 4 SpD
+Bold Nature
+- Snatch
+- Safeguard
+- Soft-Boiled
+- Seismic Toss
+
+Gengar @ Leftovers
+Ability: Levitate
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Snatch
+- Will-O-Wisp
+- Thunderbolt
+- Ice Punch
+
+Breloom @ Leftovers
+Ability: Effect Spore
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Spore
+- Leech Seed
+- Swords Dance
+- Sky Uppercut
+
+Altaria @ Leftovers
+Ability: Natural Cure
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Dragon Dance
+- Mist
+- Earthquake
+- Rest
+
+Dusclops @ Leftovers
+Ability: Pressure
+EVs: 252 HP / 252 Def / 4 SpD
+Impish Nature
+- Snatch
+- Will-O-Wisp
+- Night Shade
+- Rest
+
+=== [gen3ou] group7 boosters ===
+
+Celebi @ Leftovers
+Ability: Natural Cure
+EVs: 252 HP / 4 Def / 252 SpA
+Modest Nature
+- Calm Mind
+- Recover
+- Leech Seed
+- Psychic
+
+Gardevoir @ Leftovers
+Ability: Trace
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Calm Mind
+- Psychic
+- Hypnosis
+- Snatch
+
+Skarmory @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 252 Def / 4 Spe
+Impish Nature
+- Toxic
+- Spikes
+- Whirlwind
+- Thief
+
+Jirachi @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 4 SpA / 252 SpD
+Calm Nature
+- Wish
+- Calm Mind
+- Psychic
+- Safeguard
+
+Tyranitar @ Leftovers
+Ability: Sand Stream
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Dragon Dance
+- Rock Slide
+- Earthquake
+- Screech
+
+Golduck @ Leftovers
+Ability: Cloud Nine
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Water Sport
+- Screech
+- Surf
+- Ice Beam
+
+=== [gen3ou] group7 mixed ===
+
+Grumpig @ Leftovers
+Ability: Own Tempo
+EVs: 252 HP / 4 Def / 252 SpA
+Modest Nature
+- Snatch
+- Psychic
+- Calm Mind
+- Rest
+
+Girafarig @ Leftovers
+Ability: Inner Focus
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Magic Coat
+- Baton Pass
+- Calm Mind
+- Psychic
+
+Lapras @ Leftovers
+Ability: Water Absorb
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Mist
+- Safeguard
+- Ice Beam
+- Confuse Ray
+
+Crobat @ Leftovers
+Ability: Inner Focus
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Snatch
+- Toxic
+- Confuse Ray
+- Sludge Bomb
+
+Houndoom @ Leftovers
+Ability: Flash Fire
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Will-O-Wisp
+- Flamethrower
+- Crunch
+- Snatch
+
+Armaldo @ Leftovers
+Ability: Battle Armor
+EVs: 252 HP / 252 Atk / 4 Def
+Adamant Nature
+- Mud Sport
+- Swords Dance
+- Rock Slide
+- Earthquake

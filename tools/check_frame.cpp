@@ -1777,7 +1777,8 @@ void check_stat_changes() {
     Observed none{};
     update(b, Choice::move(1), Choice::move(1), none);
     CHECK(b.sides[1].active.boosts.def == 0);
-    CHECK(none.chance.actions.p1.hit == Optional::None); // not recorded
+    // Recorded: a blocked drop still lands (last_taken_move).
+    CHECK(none.chance.actions.p1.hit != Optional::None);
   }
   {
     // Tickle goes through a Substitute (neither the decomp nor Showdown's
