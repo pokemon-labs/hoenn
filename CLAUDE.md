@@ -1084,30 +1084,28 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-- **Resume here:** plan step 5, group 6 written, not yet passing
-  (committed as WIP, 2026-10-15). All 15 moves, as Showdown's gen3:
+- **Resume here:** plan step 5, group 7 (Safeguard, Mist, Mud Sport,
+  Water Sport, Magic Coat, Snatch): not started. Trace each in the decomp,
+  check Showdown's gen3, build `tools/teams/group7.txt`, then check it as
+  group 6 (4-way sharded `check_showdown`, soak, check_chance, the
+  teams/adv baseline in `scratch/g6b/b0-2.jsonl`).
+  Group 6 done (2026-10-15), all 15 moves, as Showdown's gen3:
   Swagger and Flatter (`swagger`), Teeter Dance (`confuse_move`), Attract,
   Disable (+1 turn if the target already moved; Durations count starts at
-  2, or 1, over a 3-6 roll), Torment, Spite (`rolls::spite`, logs the
-  roll), Foresight and Odor Sleuth, Lock-On and Mind Reader (now on the
-  user with the target's position, README decision 9), Focus Energy,
-  Ingrain and Charge (`self_volatile`; Charge ends after the next move,
-  in `use_move`), Grudge (`faint_target`, logged via the faint queue).
-  Swagger is banned in Showdown's gen3ou: only in
-  `tools/teams/group6_swagger.txt` (soak, check_chance).
-  - Results so far: soak 600 debug games clean; check_chance 0 collisions
-    on both team files; teams/adv seed 8 597/600 (the known rare
-    branches). `check_showdown` on `tools/teams/group6.txt` seed 761 (200
-    games, traces in `scratch/g6/s0-3.jsonl`) was 15/200 before the fixes
-    to Ingrain's `[from] Ingrain`, Attract's `-end [silent]` at the
-    source's switch-out or replacement, and Lock-On's representation;
-    173/200 after them. Of the 27 failures, most are Disable's end order
-    (below) and 3 are an attract state mismatch ("attract missing").
-  - Next: Disable's end. Gen3 Showdown's disable has no residual order, so
-    it ends after every ordered residual (after Leftovers and
-    `lock_residuals`), not in `battler_stage`'s Timers. Then diagnose the
-    rest (2 games with "requests 1/1, Showdown 2/0"), the 10k run (ask
-    first), `check_frame` scenarios.
+  2, or 1, over a 3-6 roll; it ends in `disable_residual`, after Perish
+  Song, since gen3 drops its residual order), Torment, Spite
+  (`rolls::spite`, logs the roll), Foresight and Odor Sleuth, Lock-On and
+  Mind Reader (on the user with the target's position, README decision
+  9), Focus Energy, Ingrain and Charge (`self_volatile`; Charge ends after
+  the next move, in `use_move`), Grudge (`faint_target`, logged via the
+  faint queue). Also fixed: Cute Charm attracts even when its holder
+  faints to the hit (Showdown). Swagger is banned in Showdown's gen3ou:
+  only in `tools/teams/group6_swagger.txt` (soak, check_chance).
+  - Results: `check_showdown` on `tools/teams/group6.txt` seed 761 (traces
+    `scratch/g6/s0-3.jsonl`) 198/200 at the 1M cap; the 2 failures (Speed
+    tie plus two crits) match at 1.1M and 3.4M tries. teams/adv seed 8
+    597/600 (the known rare branches). Debug ctest and a 500-game soak
+    clean. Not done: the 10k run, `check_frame` scenarios.
   - Group 5, as Showdown: binding (`Effect::Trap` in `hit()`, 3-6 turns;
     a binder leaving sets `Volatiles::wrapper_gone`: the victim is no
     longer trapped and the binding ends at its next residual, silently

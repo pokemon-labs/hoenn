@@ -3152,9 +3152,9 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
     ActivePokemon& a = side.active;
     const Gender g1 = user.gender;
     const Gender g2 = target_mon.gender;
-    if (target_mon.fainted() || a.ability == Ability::Oblivious ||
-        a.volatiles.infatuated || g1 == Gender::None || g2 == Gender::None ||
-        g1 == g2) {
+    // As Showdown, a holder that faints to the hit still attracts.
+    if (a.ability == Ability::Oblivious || a.volatiles.infatuated ||
+        g1 == Gender::None || g2 == Gender::None || g1 == g2) {
       return;
     }
     if (rolls::contact(battle, player, i, 3, options)) {
@@ -6567,8 +6567,8 @@ constexpr Flow field_residuals(Battle& battle, O& options) {
 // onResidualOrder 10), so that a Speed tie can interleave them (end_of_turn).
 // Ingrain 1; Rain Dish, Shed Skin and Speed Boost 3; Leftovers and the
 // berries 4; Leech Seed 5; poison, toxic and burn 6; Nightmare 7; Curse 8;
-// binding 9; then Uproar 11, Encore 14, Taunt 15, Yawn 19, and Disable
-// (gen3 drops gen4's order), Lock-On and Charge later still. Those last
+// binding 9; then Uproar 11, Encore 14, Taunt 15, Yawn 19, Lock-On and
+// Charge later still (Disable has no order in gen3: lock_residuals). Those last
 // only change their own Pokémon, so they share a stage, as does Truant's
 // toggle (27, in the ability stage). The decomp's order is the same up to
 // those own-Pokémon steps.
@@ -6783,29 +6783,6 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
 
   case Stage::Timers:
     break;
-  }
-
-  // ENDTURN_DISABLE (util:1692): it ends silently if the Pokémon no longer
-  // knows the move (public), else the hidden timer ticks.
-  if (a.disable_timer != 0) {
-    bool known = false;
-    for (const MoveSlot& ms : a.moves) known |= ms.id == a.disabled_move;
-    if (!known) {
-      a.disabled_move = Move::None;
-      a.disable_timer = 0;
-      if constexpr (CHANCE<O>) options.chance.durations.get(player).disable = 0;
-    } else {
-      const bool ended = --a.disable_timer == 0;
-      if (ended) {
-        a.disabled_move = Move::None;
-        protocol::end_effect(options.log, id, protocol::End::Disable);
-      }
-      if constexpr (CHANCE<O>) {
-        rolls::tick(options.chance.actions.get(player).disable,
-                    options.chance.durations.get(player).disable, ended, 3, 6,
-                    1, options);
-      }
-    }
   }
 
   // ENDTURN_ENCORE (util:1713): it ends if the move was overwritten or its
@@ -7104,6 +7081,37 @@ constexpr void lock_residuals(Battle& battle, Player player, O& options) {
   if (v.bide != 0 && --v.bide == 0) end_bide(battle, player, options);
 }
 
+// Disable's end, as Showdown's gen3 condition, which drops gen4's residual
+// order (data/mods/gen3/moves.ts:210), so it runs with the unordered
+// durations, after Perish Song (lock_residuals). The decomp's
+// ENDTURN_DISABLE (util:1692) runs among the battler's other timers. It
+// ends silently if the Pokémon no longer knows the move (public), else the
+// hidden timer ticks. Log: End Disable.
+template <typename O>
+constexpr void disable_residual(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  if (a.disable_timer == 0 || battle.side(player).get(1).fainted()) return;
+  const ID id = protocol::ident(battle, player);
+  bool known = false;
+  for (const MoveSlot& ms : a.moves) known |= ms.id == a.disabled_move;
+  if (!known) {
+    a.disabled_move = Move::None;
+    a.disable_timer = 0;
+    if constexpr (CHANCE<O>) options.chance.durations.get(player).disable = 0;
+  } else {
+    const bool ended = --a.disable_timer == 0;
+    if (ended) {
+      a.disabled_move = Move::None;
+      protocol::end_effect(options.log, id, protocol::End::Disable);
+    }
+    if constexpr (CHANCE<O>) {
+      rolls::tick(options.chance.actions.get(player).disable,
+                  options.chance.durations.get(player).disable, ended, 3, 6,
+                  1, options);
+    }
+  }
+}
+
 // HandleEndTurn_ContinueBattle (main:3932), then BattleTurnPassed's residuals
 // (main:3956), the future attacks, Perish Song's count and
 // HandleFaintedMonActions.
@@ -7157,7 +7165,10 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   }
   const Player last = s1 != s2 ? faster : log_order(battle);
   for (const Player p : {last, foe(last)}) perish_count(battle, p, options);
-  for (const Player p : {last, foe(last)}) lock_residuals(battle, p, options);
+  for (const Player p : {last, foe(last)}) {
+    lock_residuals(battle, p, options);
+    disable_residual(battle, p, options);
+  }
   protocol::faints(options.log);
   // Showdown's stall expires with the residuals, before a residual faint's
   // replacement: a turn without a successful Protect, Detect or Endure ends
