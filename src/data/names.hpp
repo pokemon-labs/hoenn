@@ -13,7 +13,7 @@
 // Showdown-style IDs (lowercase letters and digits) of the decomp's names, for
 // parsing teams. Not for the engine. Where Showdown names a thing differently,
 // the parser keeps an alias table; these are the decomp's names.
-namespace pkmn::gen3::names {
+namespace hoenn::names {
 
 // Indexed by enum value; None is "".
 inline constexpr std::string_view SPECIES_IDS[SPECIES] = {
@@ -1204,4 +1204,4 @@ inline constexpr ItemName ITEM_IDS[309] = {
     {"oldseamap", Item::Other},
 };
 
-} // namespace pkmn::gen3::names
+} // namespace hoenn::names

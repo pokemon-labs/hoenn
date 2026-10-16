@@ -24,27 +24,26 @@
 
 // Only when ASan is on: the header can exist without the runtime linked.
 #if defined(__SANITIZE_ADDRESS__)
-#define PKMN_SOAK_ASAN 1
+#define HOENN_SOAK_ASAN 1
 #elif defined(__has_feature)
 #if __has_feature(address_sanitizer)
-#define PKMN_SOAK_ASAN 1
+#define HOENN_SOAK_ASAN 1
 #endif
 #endif
-#if defined(PKMN_SOAK_ASAN) && defined(__has_include)
+#if defined(HOENN_SOAK_ASAN) && defined(__has_include)
 #if __has_include(<sanitizer/common_interface_defs.h>)
 #include <sanitizer/common_interface_defs.h>
-#define PKMN_SOAK_SANITIZER 1
+#define HOENN_SOAK_SANITIZER 1
 #endif
 #endif
 
-#include "common/options.hpp"
-#include "common/protocol.hpp"
-#include "gen3/helpers.hpp"
-#include "gen3/mechanics.hpp"
-#include "gen3/showdown.hpp"
+#include "options.hpp"
+#include "log.hpp"
+#include "helpers.hpp"
+#include "mechanics.hpp"
+#include "showdown.hpp"
 
-using namespace pkmn;
-using namespace pkmn::gen3;
+using namespace hoenn;
 
 namespace {
 
@@ -166,10 +165,10 @@ int main(int argc, char** argv) {
   }
 
   std::signal(SIGABRT, on_abort);
-#ifndef PKMN_SOAK_SANITIZER
+#ifndef HOENN_SOAK_SANITIZER
   std::signal(SIGSEGV, on_segv);
 #endif
-#ifdef PKMN_SOAK_SANITIZER
+#ifdef HOENN_SOAK_SANITIZER
   __sanitizer_set_death_callback(report);
 #endif
 

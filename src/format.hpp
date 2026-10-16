@@ -1,4 +1,4 @@
-// Turns the binary log of gen3/protocol.hpp into Showdown's text protocol,
+// Turns the binary log of protocol.hpp into Showdown's text protocol,
 // line for line, as libpkmn's src/pkg/protocol.ts. Not part of update: it
 // allocates, and search never calls it.
 //
@@ -25,9 +25,9 @@
 #include "data/display.hpp"
 #include "protocol.hpp"
 
-namespace pkmn::gen3::format {
+namespace hoenn::format {
 
-namespace protocol = pkmn::protocol;
+namespace protocol = hoenn::protocol;
 using protocol::ArgType;
 
 // What the log needs and Battle doesn't hold: the players' names and each
@@ -483,9 +483,9 @@ class Formatter {
     case ArgType::FormeChange: {
       const ID id{r.byte()};
       const uint8_t t = r.byte();
-      const char* forme = t == uint8_t(gen3::Type::Fire)    ? "Castform-Sunny"
-                          : t == uint8_t(gen3::Type::Water) ? "Castform-Rainy"
-                          : t == uint8_t(gen3::Type::Ice)   ? "Castform-Snowy"
+      const char* forme = t == uint8_t(hoenn::Type::Fire)    ? "Castform-Sunny"
+                          : t == uint8_t(hoenn::Type::Water) ? "Castform-Rainy"
+                          : t == uint8_t(hoenn::Type::Ice)   ? "Castform-Snowy"
                                                             : "Castform";
       out.push_back("|-formechange|" + ident(id) + "|" + forme +
                     "|[msg]|[from] ability: Forecast");
@@ -785,4 +785,4 @@ class Formatter {
   }
 };
 
-} // namespace pkmn::gen3::format
+} // namespace hoenn::format

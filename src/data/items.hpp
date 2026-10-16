@@ -4,14 +4,14 @@
 
 #include <cstdint>
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // Items with a hold effect (src/data/items.h) plus the Enigma Berry, in
 // cartridge order, then two stand-ins and a sentinel. Mail is any of the 12
 // Mail items, which Trick, Thief and Covet can't move (nor the Enigma Berry).
 // Other is any other holdable item without a battle effect (balls, evolution
 // stones and so on). Those only matter to Trick, Knock Off, Thief and Covet.
-// KnockedOff is what Knock Off leaves (src/gen3/README.md, decision 8): no
+// KnockedOff is what Knock Off leaves (src/README.md, decision 8): no
 // hold effect, and the Pokémon can never gain an item.
 enum class Item : uint8_t {
   None,
@@ -253,4 +253,4 @@ inline constexpr ItemData ITEM_DATA[ITEMS - 1] = {
 
 constexpr const ItemData &get(Item item) { return detail::ITEM_DATA[uint8_t(item) - 1]; }
 
-} // namespace pkmn::gen3
+} // namespace hoenn

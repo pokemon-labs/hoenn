@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace pkmn {
+namespace hoenn {
 
 struct RNG {
   uint64_t seed;
@@ -71,4 +71,4 @@ static_assert([] {
   return true;
 }());
 
-} // namespace pkmn
+} // namespace hoenn

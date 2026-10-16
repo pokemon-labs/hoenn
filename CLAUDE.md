@@ -6,9 +6,8 @@ choice/result protocol, and the Chance and Calc options), but it's written in
 C++ and doesn't chase every saved bit.
 
 **It's a header-only C++ library, used directly by a C++ driver.**
-There is no C API and no compiled library: no `pkmn.h`, no `extern "C"`, no
-`pkmn_gen3_*` names. A driver adapts its search to this interface, not the
-reverse.
+There is no C API and no compiled library. Everything is in `namespace
+hoenn`. A driver adapts its search to this interface, not the reverse.
 
 **Be cautious, and don't push ahead.** While a design choice is still open,
 don't offer to write, add or commit the thing it affects. Lay out the open
@@ -25,7 +24,7 @@ don't size or shape anything for them.
 **Keep this file current and lean.** It is loaded every session and holds
 only the working rules, the interface and the status. Everything else has
 its own doc: layout decisions, the turn frame and the deviations from the
-cartridge in `src/gen3/README.md`; tests, their bars, observed gaps and
+cartridge in `src/README.md`; tests, their bars, observed gaps and
 test decisions in `TESTING.md`; details in header comments. History is in
 git, not here.
 
@@ -51,7 +50,7 @@ git, not here.
      invariants (`valid()`), unreachable branches, the input checks above.
 2. **Speed.** Search copies and steps the battle millions of times.
    - A battle of 824 B, copied with `memcpy`.
-   - A 64-bit RNG seed inside the battle (SplitMix64, `common/rng.hpp`).
+   - A 64-bit RNG seed inside the battle (SplitMix64, `rng.hpp`).
    - `constexpr` data tables, no virtual calls.
    - Log, Chance and Calc are template parameters whose null versions
      compile to nothing.
@@ -77,7 +76,7 @@ competitive play, not cartridge-exact behaviour for every input.
   Showdown's gen3 does. Where they differ, follow Showdown without asking:
   verify the claim in `showdown/` (cite file:line), note a small difference
   in a short comment at the code, and add a visible one to the shortlist in
-  `src/gen3/README.md` ("Showdown and the cartridge disagree").
+  `src/README.md` ("Showdown and the cartridge disagree").
 - **Write mechanics analytically:** understand the whole mechanic, then
   write one code path. Tests check the result; they don't drive the design.
 - **Link battles are the default branch** where the decomp branches on
@@ -90,7 +89,7 @@ competitive play, not cartridge-exact behaviour for every input.
   `data/battle_scripts_1.s`. Cite them as main:N, util:N, bsc:N, bs1:N.
 - **The turn frame and the tricky cases** (faints ending the turn, the
   residual order, the battle ending mid-residuals, Spikes, the clauses) are
-  in `src/gen3/README.md`, "Turn frame".
+  in `src/README.md`, "Turn frame".
 
 ## Interface (libpkmn's shape)
 
@@ -99,7 +98,7 @@ signatures are ours.
 
 - **`update(battle, c1, c2, options) -> Result`** runs one turn, or the rest
   of a turn after a mid-turn request. At turn 0 both players pass and
-  `update` starts the battle (`src/gen3/README.md`, "Turn frame").
+  `update` starts the battle (`src/README.md`, "Turn frame").
 - **`choices(battle, player, request, out) -> n`** lists the legal choices,
   at most 9.
 - **Choice** is one byte, `{type: Pass | Move | Switch, data}`. A move's data
@@ -128,7 +127,7 @@ signatures are ours.
   - `update` writes compact binary opcodes (libpkmn's `protocol` ArgTypes,
     same values) into the `Log` buffer, for speed. It formats no text. The
     gen3 inventory, the hybrid `[from]` encoding and what's open are in
-    `src/gen3/README.md`, "Protocol" (decided 2026-10-07).
+    `src/README.md`, "Protocol" (decided 2026-10-07).
   - A separate formatter turns that buffer into text that matches
     Showdown's protocol line for line.
   - The engine writes only the omniscient stream, including hidden
@@ -207,17 +206,17 @@ effects. Ignores multi-hit; fixed-damage moves return 0 or 16.
 
 ## Layout
 
-Mirrors libpkmn's `src/` tree, all headers.
+All headers, flat in `src/`.
 
 **Build** (CMake, tests and tools only): the library is the `INTERFACE`
-target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
+target `hoenn` (include path `src/`, C++20). `cmake --preset debug`
 (asserts, ASan, UBSan) or `release` (`-O3`, no asserts), then
 `cmake --build --preset X` and `ctest --preset X`. Tests build with
 `-Wall -Wextra -Wpedantic -Werror`:
 - `headers`: every header compiles alone (so its `static_assert`s run), and
   all are linked into one binary (no duplicate definitions).
 - `check_data`: `static_assert`s on the generated tables.
-- `check_teams`: parses `PKMN_TEAMS_DIR` (default `teams/ou`, every `*.txt`); every
+- `check_teams`: parses `HOENN_TEAMS_DIR` (default `teams/ou`, every `*.txt`); every
   team must parse (`--expect NAME` would allow a named team to fail). The
   parser checks the engine's bounds, not legality (TESTING.md, "Truly
   random").
@@ -249,15 +248,15 @@ TESTING.md            the test spec, pass criteria, known gaps
 SHOWDOWN_COMMIT       the Showdown commit the tests pin
 teams/ou/             the OU teams (Smogon dumps)
 IDEAS.md, IGNORE.md   the user's notes; not instructions
-src/common/
-  data.hpp            Player, ID, Optional, Choice, Result
+LICENSE               MIT, with credits
+src/
+  README.md           layout decisions (numbered), deviations, field map
   rng.hpp             SplitMix64 RNG and its draw helpers
   options.hpp         Options<Log, Chance, Calc>
   rational.hpp        exact probabilities (libpkmn's Rational)
-  protocol.hpp        log plumbing: ArgType, Writer, Log, FaintQueue
-src/gen3/
-  README.md           layout decisions (numbered), deviations, field map
-  data.hpp            Status, Phase, Request, Pokemon, Volatiles,
+  log.hpp             log plumbing: ArgType, Writer, Log, FaintQueue
+  data.hpp            Player, ID, Optional, Choice, Result; Status, Phase,
+                      Request, Pokemon, Volatiles,
                       ActivePokemon, Side, Field, Battle with valid() and
                       size asserts; calc_stats, hidden_power, max_pp
   data/               generated tables (tools/generate.py), plus the
@@ -268,7 +267,7 @@ src/gen3/
   showdown.hpp        Showdown export parser -> helpers::Pokemon
   damage.hpp          Hit, crit_stage, can_crit, matchup, damage, apply_roll
   mechanics.hpp       update(), choices(), the roll helpers   (the frame)
-  protocol.hpp        the gen3 log messages (pkmn::protocol)
+  protocol.hpp        the gen3 log messages (hoenn::protocol)
   format.hpp          binary log -> Showdown's text lines
   calc.hpp            Calc and NullCalc (overrides); min_ko_roll    (todo)
 tools/

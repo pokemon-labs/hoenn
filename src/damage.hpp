@@ -2,7 +2,7 @@
 // stage through the damage roll.
 //
 // It follows Pokémon Showdown 0.11.11's gen3 arithmetic, not the decomp's
-// (decided 2026-10-07; src/gen3/README.md, "Damage", has the decomp trace and
+// (decided 2026-10-07; src/README.md, "Damage", has the decomp trace and
 // every place the two differ). Showdown applies stat stages first, then
 // chains each event's modifiers into one 4096ths fixed-point multiplier
 // rounded once, where the decomp floors after every step. Paths:
@@ -23,11 +23,10 @@
 #include <cassert>
 #include <cstdint>
 
-#include "../common/data.hpp"
 #include "data.hpp"
 #include "data/tables.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // The dynamic inputs of one hit. The hit backbone's per-action State holds
 // one. Power and type are resolved by the caller: the table's, or a base
@@ -485,4 +484,4 @@ static_assert(apply_roll(100, 0) == 85 && apply_roll(100, 15) == 100);
 static_assert(apply_roll(1, 0) == 1 && apply_roll(0, 15) == 1);
 static_assert(apply_roll(UINT32_MAX, 15) == UINT32_MAX);
 
-} // namespace pkmn::gen3
+} // namespace hoenn

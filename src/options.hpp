@@ -6,14 +6,14 @@
 // Options. Search runs with all three null, and the null types are empty, so
 // they take no space and their calls compile to nothing. The log's types are
 // in protocol.hpp. Chance and Calc are generation-specific, so their real and
-// null types belong in gen3/chance.hpp and gen3/calc.hpp. The roll helpers
-// in gen3/mechanics.hpp use them directly behind `if constexpr
+// null types belong in chance.hpp and calc.hpp. The roll helpers
+// in mechanics.hpp use them directly behind `if constexpr
 // (T::enabled)`; the null types are only `enabled = false` (CLAUDE.md,
 // "Chance", Hooks).
 
 #pragma once
 
-namespace pkmn {
+namespace hoenn {
 
 template <typename Log, typename Chance, typename Calc> struct Options {
   using LogType = Log;
@@ -33,4 +33,4 @@ constexpr Options<Log, Chance, Calc> options(Log log, Chance chance,
   return {log, chance, calc};
 }
 
-} // namespace pkmn
+} // namespace hoenn

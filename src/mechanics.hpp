@@ -7,15 +7,14 @@
 #include <type_traits>
 #include <utility>
 
-#include "../common/data.hpp"
-#include "../common/options.hpp"
+#include "data.hpp"
+#include "options.hpp"
 #include "calc.hpp"
 #include "chance.hpp"
 #include "damage.hpp"
-#include "data.hpp"
 #include "protocol.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 inline constexpr uint8_t MAX_CHOICES = 9;
 
@@ -8398,4 +8397,4 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
   return Result::error();
 }
 
-} // namespace pkmn::gen3
+} // namespace hoenn

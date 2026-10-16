@@ -10,7 +10,7 @@
 #include "moves.hpp"
 #include "types.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // A ratio applied as x * num / den, floored.
 struct Fraction {
@@ -148,4 +148,4 @@ static_assert(type_boost(HoldEffect::FirePower).type == Type::Fire);
 static_assert(!type_boost(HoldEffect::Leftovers).boosts);
 static_assert(is_sound(Move::HyperVoice) && !is_sound(Move::PerishSong));
 
-} // namespace pkmn::gen3
+} // namespace hoenn

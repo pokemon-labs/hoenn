@@ -11,12 +11,11 @@
 #include <span>
 #include <string_view>
 
-#include "gen3/damage.hpp"
-#include "gen3/helpers.hpp"
-#include "gen3/showdown.hpp"
+#include "damage.hpp"
+#include "helpers.hpp"
+#include "showdown.hpp"
 
-using namespace pkmn;
-using namespace pkmn::gen3;
+using namespace hoenn;
 
 namespace {
 

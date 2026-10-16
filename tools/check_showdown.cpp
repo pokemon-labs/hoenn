@@ -21,7 +21,7 @@
 // written (TESTING.md). A game stops at its first failure, since
 // we can't stay in step with Showdown after it.
 //
-// The log: our binary log through gen3/format.hpp against the step's raw
+// The log: our binary log through format.hpp against the step's raw
 // Showdown lines, |split| triplets included, after dropping what
 // Showdown's FILTER drops. Messages are written in groups (README,
 // "Protocol"), so only the message types in LOGGED are compared, on both
@@ -50,18 +50,17 @@
 #include <string>
 #include <vector>
 
-#include "common/options.hpp"
-#include "common/protocol.hpp"
-#include "gen3/data/names.hpp"
-#include "gen3/format.hpp"
-#include "gen3/helpers.hpp"
-#include "gen3/mechanics.hpp"
-#include "gen3/showdown.hpp"
+#include "options.hpp"
+#include "log.hpp"
+#include "data/names.hpp"
+#include "format.hpp"
+#include "helpers.hpp"
+#include "mechanics.hpp"
+#include "showdown.hpp"
 #include "json.hpp"
 
-using namespace pkmn;
-using namespace pkmn::gen3;
-using namespace pkmn::gen3::names;
+using namespace hoenn;
+using namespace hoenn::names;
 
 namespace {
 
@@ -125,7 +124,7 @@ std::string kind(const std::string& line) {
 }
 
 // The message types written so far, compared on both sides: group 1, the
-// frame, group 2, the hit results, groups 3 to 5 (src/gen3/README.md, "Protocol").
+// frame, group 2, the hit results, groups 3 to 5 (src/README.md, "Protocol").
 const std::set<std::string> LOGGED = {
     "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",

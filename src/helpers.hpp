@@ -18,7 +18,7 @@
 
 #include "data.hpp"
 
-namespace pkmn::gen3::helpers {
+namespace hoenn::helpers {
 
 // One Pokémon to build: everything the cartridge keeps on a party Pokémon that
 // the battle reads. Personality isn't here; what it decides (nature, gender,
@@ -98,10 +98,10 @@ constexpr const char* check_pokemon(const Pokemon& p) {
 }
 
 // libpkmn: Pokemon.init.
-constexpr std::optional<gen3::Pokemon> init_pokemon(const Pokemon& p) {
+constexpr std::optional<hoenn::Pokemon> init_pokemon(const Pokemon& p) {
   if (check_pokemon(p)) return std::nullopt;
   const SpeciesData& s = get(p.species);
-  gen3::Pokemon out{};
+  hoenn::Pokemon out{};
   out.stats = calc_stats(p.species, p.nature, p.ivs, p.evs, p.level);
   const HiddenPower hp = hidden_power(p.ivs);
   for (size_t i = 0; i < 4 && p.moves[i] != Move::None; i++) {
@@ -139,21 +139,21 @@ constexpr const char* check_side(std::span<const Pokemon> team) {
 // libpkmn: Side.init. `order` is the identity, and every unused party position
 // is an empty Pokemon (Species::None), so `order` stays a permutation of 1-6.
 // The active Pokémon and everything else stay zero.
-constexpr std::optional<gen3::Side> init_side(std::span<const Pokemon> team) {
+constexpr std::optional<hoenn::Side> init_side(std::span<const Pokemon> team) {
   if (check_side(team)) return std::nullopt;
-  gen3::Side side{};
+  hoenn::Side side{};
   for (uint8_t i = 0; i < 6; i++) side.order[i] = uint8_t(i + 1);
   for (size_t i = 0; i < team.size(); i++) side.pokemon[i] = *init_pokemon(team[i]);
   return side;
 }
 
 // libpkmn: Battle.init. The battle's RNG starts at `seed` (any value works).
-constexpr std::optional<gen3::Battle> init_battle(
+constexpr std::optional<hoenn::Battle> init_battle(
     uint64_t seed, std::span<const Pokemon> p1, std::span<const Pokemon> p2) {
-  const std::optional<gen3::Side> s1 = init_side(p1);
-  const std::optional<gen3::Side> s2 = init_side(p2);
+  const std::optional<hoenn::Side> s1 = init_side(p1);
+  const std::optional<hoenn::Side> s2 = init_side(p2);
   if (!s1 || !s2) return std::nullopt;
-  gen3::Battle b{};
+  hoenn::Battle b{};
   b.sides[0] = *s1;
   b.sides[1] = *s2;
   b.rng = RNG{seed};
@@ -187,7 +187,7 @@ inline constexpr Pokemon TYRANITAR = {
 } // namespace detail
 
 static_assert([] {
-  const gen3::Pokemon p = *init_pokemon(detail::SKARMORY);
+  const hoenn::Pokemon p = *init_pokemon(detail::SKARMORY);
   // HP: (2 * 65 + 31 + 63) + 110; SpD: (2 * 70 + 31 + 62) + 5, then x1.1.
   return p.stats.hp == 334 && p.hp == 334 && p.stats.atk == 165 &&
          p.stats.spd == 261 && p.moves[0].pp == 32 && p.moves[0].pp_ups == 3 &&
@@ -196,13 +196,13 @@ static_assert([] {
          p.hidden_power >= 30 && p.happiness == 255;
 }());
 static_assert([] {
-  const gen3::Pokemon p = *init_pokemon(detail::TYRANITAR);
+  const hoenn::Pokemon p = *init_pokemon(detail::TYRANITAR);
   return p.moves[2].id == Move::HiddenPowerBug && p.moves[2].pp == 24 &&
          p.hidden_power == 70 && p.moves[3].id == Move::None;
 }());
 static_assert([] {
   const Pokemon team[] = {detail::TYRANITAR, detail::SKARMORY};
-  const std::optional<gen3::Battle> b = init_battle(7, team, team);
+  const std::optional<hoenn::Battle> b = init_battle(7, team, team);
   return b && b->turn == 0 && b->rng.seed == 7 &&
          b->sides[1].get(2).species == Species::Skarmory &&
          b->sides[0].pokemon[2].species == Species::None &&
@@ -239,4 +239,4 @@ static_assert([] {
   return init_pokemon(p).has_value();
 }());
 
-} // namespace pkmn::gen3::helpers
+} // namespace hoenn::helpers

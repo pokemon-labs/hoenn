@@ -86,7 +86,7 @@ function parseArgs(argv) {
 }
 
 // gen3customgame without Smogon's clauses, which the engine always applies
-// (src/gen3/README.md, "Turn frame").
+// (src/README.md, "Turn frame").
 const CUSTOM = 'gen3customgame@@@Sleep Clause Mod,Freeze Clause Mod';
 
 function loadTeams(files, format, Dex, Teams, TeamValidator) {

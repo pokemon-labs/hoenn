@@ -5,12 +5,11 @@
 #include <iterator>
 #include <type_traits>
 
-#include "../common/data.hpp"
-#include "../common/rational.hpp"
-#include "../common/rng.hpp"
 #include "data.hpp"
+#include "rational.hpp"
+#include "rng.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // Durations. These are findings from the decomp (pokeemerald, branch
 // battle-only); the struct follows the Actions catalogue below.
@@ -605,4 +604,4 @@ static_assert([] {
          d.p2.binding == 4;
 }());
 
-} // namespace pkmn::gen3
+} // namespace hoenn

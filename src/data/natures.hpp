@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // Cartridge order (NATURE_* in include/constants/pokemon.h), which is also
 // personality % 25.
@@ -109,4 +109,4 @@ static_assert(!dislikes(Nature::Hardy, Flavor::Spicy));
 static_assert(apply_nature(Nature::Adamant, 0, 100) == 110);
 static_assert(apply_nature(Nature::Adamant, 3, 101) == 90);
 
-} // namespace pkmn::gen3
+} // namespace hoenn

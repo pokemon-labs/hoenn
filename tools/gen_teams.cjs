@@ -52,7 +52,7 @@ function usage() {
 // The engine's items with an effect: names.hpp maps every other decomp item
 // to Mail or Other, which the log can't name yet. `all` keeps those too.
 function engineItems(all = false) {
-  const text = fs.readFileSync(path.join(__dirname, '../src/gen3/data/names.hpp'), 'utf8');
+  const text = fs.readFileSync(path.join(__dirname, '../src/data/names.hpp'), 'utf8');
   const ids = new Set();
   for (const [, id, item] of text.matchAll(/\{"([a-z0-9]+)", Item::(\w+)\}/g)) {
     if (item !== 'None' && (all || !['Mail', 'Other'].includes(item))) ids.add(id);
@@ -63,7 +63,7 @@ function engineItems(all = false) {
 
 // The ids in one of names.hpp's string arrays (SPECIES_IDS, MOVE_IDS...).
 function engineIds(table) {
-  const text = fs.readFileSync(path.join(__dirname, '../src/gen3/data/names.hpp'), 'utf8');
+  const text = fs.readFileSync(path.join(__dirname, '../src/data/names.hpp'), 'utf8');
   const start = text.indexOf(`${table}[`);
   const body = text.slice(start, text.indexOf('};', start));
   const ids = new Set([...body.matchAll(/"([a-z0-9]+)",/g)].map(m => m[1]));

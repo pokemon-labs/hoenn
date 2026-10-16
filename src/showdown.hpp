@@ -28,11 +28,11 @@
 #include <utility>
 #include <vector>
 
-#include "../common/rng.hpp"
+#include "rng.hpp"
 #include "data/names.hpp"
 #include "helpers.hpp"
 
-namespace pkmn::gen3::showdown {
+namespace hoenn::showdown {
 
 // Showdown's toID: lowercase ASCII letters and digits, everything else dropped
 // (so "Farfetch’d" -> "farfetchd").
@@ -98,7 +98,7 @@ inline constexpr HPivs HP_IVS[] = {
 static_assert([] {
   for (const HPivs& h : HP_IVS) {
     const HiddenPower hp = hidden_power(h.ivs);
-    if (hp.move != gen3::hidden_power(h.type) || hp.power != 70) return false;
+    if (hp.move != hoenn::hidden_power(h.type) || hp.power != 70) return false;
   }
   return true;
 }());
@@ -288,7 +288,7 @@ inline Parsed<helpers::Pokemon> parse_set(std::string_view text, RNG& rng) {
     }
     if (p.ivs.hp <= 31 && p.ivs.atk <= 31 && p.ivs.def <= 31 &&
         p.ivs.spe <= 31 && p.ivs.spa <= 31 && p.ivs.spd <= 31 &&
-        hidden_power(p.ivs).move != gen3::hidden_power(*hp_type)) {
+        hidden_power(p.ivs).move != hoenn::hidden_power(*hp_type)) {
       return fail("Hidden Power [" + std::string(names::TYPE_IDS[uint8_t(*hp_type)]) +
                   "] doesn't match the IVs");
     }
@@ -391,4 +391,4 @@ inline std::vector<Parsed<Team>> parse_teams(std::string_view text, RNG& rng) {
   return out;
 }
 
-} // namespace pkmn::gen3::showdown
+} // namespace hoenn::showdown

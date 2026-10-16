@@ -30,7 +30,7 @@
 #include <optional>
 #include <type_traits>
 
-namespace pkmn {
+namespace hoenn {
 
 namespace rational {
 
@@ -377,4 +377,4 @@ static_assert(run<double>());
 
 } // namespace rational::test
 
-} // namespace pkmn
+} // namespace hoenn

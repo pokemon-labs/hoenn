@@ -1,9 +1,9 @@
 // Compile-time spot checks of the generated tables:
 // Built and run by the `check_data` test (CMakeLists.txt).
-#include "gen3/data/moves.hpp"
-#include "gen3/data/species.hpp"
-#include "gen3/data/items.hpp"
-using namespace pkmn::gen3;
+#include "data/moves.hpp"
+#include "data/species.hpp"
+#include "data/items.hpp"
+using namespace hoenn;
 static_assert(get(Move::Tackle).bp == 35);
 static_assert(get(Move::HiddenPowerFire).type == Type::Fire);
 static_assert(hidden_power(Type::Fire) == Move::HiddenPowerFire);

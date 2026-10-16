@@ -1,10 +1,10 @@
 // The gen3 protocol messages, as the Log methods of libpkmn's
 // src/lib/common/protocol.zig: each writes an ArgType, then its fields.
-// gen3/format.hpp turns them into Showdown's text; src/gen3/README.md,
+// format.hpp turns them into Showdown's text; src/README.md,
 // "Protocol", has the decisions and the inventory of Showdown's forms.
 //
 // Every function returns at once for the null log, so search pays nothing.
-// The encodings, after the ArgType byte (IDs are common/data.hpp's ID; an ID
+// The encodings, after the ArgType byte (IDs are data.hpp's ID; an ID
 // of 0 means none; u16s are native order; HP is hp, max HP, Status bits):
 //
 //   Move         source, move u16, target, MoveFrom [, move u16 if From]
@@ -51,7 +51,7 @@
 //   Anim         source, move u16, target
 //   SideStart    player, SideCondition
 //   SideEnd      player, SideCondition [, of for SpikesRapidSpin]
-//   Weather      weather (gen3::Weather), WeatherFrom [, ability, of for
+//   Weather      weather (hoenn::Weather), WeatherFrom [, ability, of for
 //                Ability]
 //   Item         ident, item, ItemFrom [, of for Thief and Covet]
 //   EndItem      ident, item, EndItemFrom [, of for KnockOff and Thief]
@@ -68,20 +68,19 @@
 #include <cstdint>
 #include <utility>
 
-#include "../common/data.hpp"
-#include "../common/protocol.hpp"
 #include "data.hpp"
+#include "log.hpp"
 
 // In libpkmn's one protocol namespace, with the plumbing (the engine is
 // gen3 only).
-namespace pkmn::protocol {
+namespace hoenn::protocol {
 
-using gen3::Ability;
-using gen3::Battle;
-using gen3::Item;
-using gen3::Move;
-using gen3::Pokemon;
-using gen3::Species;
+using hoenn::Ability;
+using hoenn::Battle;
+using hoenn::Item;
+using hoenn::Move;
+using hoenn::Pokemon;
+using hoenn::Species;
 
 // The most bytes one update writes. A placeholder until the bound is
 // derived (decided 2026-10-08): the debug Writer asserts it.
@@ -530,7 +529,7 @@ template <typename L> void faints(L& log) {
 // A Forecast -formechange (forme_change) that waits for `after`'s queued
 // Faint: Showdown's faintMessages runs the fainted Pokémon's ability End
 // (Cloud Nine's, Air Lock's) after its faint line.
-template <typename L> void forme_change_after(L& log, ID after, ID id, gen3::Type t) {
+template <typename L> void forme_change_after(L& log, ID after, ID id, hoenn::Type t) {
   if constexpr (L::enabled) {
     auto& q = log.faints;
     assert(q.forme_after.bits == 0);
@@ -687,7 +686,7 @@ template <typename L> void start_disable(L& log, ID id, Move m) {
 }
 
 // -start|P|typechange|T, plain or from Color Change.
-template <typename L> void start_type(L& log, ID id, gen3::Type t, bool color_change) {
+template <typename L> void start_type(L& log, ID id, hoenn::Type t, bool color_change) {
   if constexpr (L::enabled) {
     log.write(ArgType::Start);
     log.write_byte(id.bits);
@@ -699,10 +698,10 @@ template <typename L> void start_type(L& log, ID id, gen3::Type t, bool color_ch
 // -formechange|P|FORME|[msg]|[from] ability: Forecast: Castform's form,
 // written as the type it takes (Normal for Castform, Fire, Water or Ice for
 // Castform-Sunny, -Rainy, -Snowy).
-template <typename L> void forme_change(L& log, ID id, gen3::Type t) {
+template <typename L> void forme_change(L& log, ID id, hoenn::Type t) {
   if constexpr (L::enabled) {
-    assert(t == gen3::Type::Normal || t == gen3::Type::Fire || t == gen3::Type::Water ||
-           t == gen3::Type::Ice);
+    assert(t == hoenn::Type::Normal || t == hoenn::Type::Fire || t == hoenn::Type::Water ||
+           t == hoenn::Type::Ice);
     log.write(ArgType::FormeChange);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(t));
@@ -827,7 +826,7 @@ template <typename L> void anim(L& log, ID source, Move m, ID target) {
 }
 
 template <typename L>
-void status(L& log, ID id, gen3::Status st, StatusSource src = StatusSource::none()) {
+void status(L& log, ID id, hoenn::Status st, StatusSource src = StatusSource::none()) {
   if constexpr (L::enabled) {
     assert(st.any());
     StatusFrom from = src.from;
@@ -848,7 +847,7 @@ void status(L& log, ID id, gen3::Status st, StatusSource src = StatusSource::non
 // -curestatus of the status `st` a Pokémon had. `bench` prints Showdown's
 // ident of a Pokémon that isn't active (p1: NAME).
 template <typename L>
-void cure_status(L& log, ID id, gen3::Status st, Cure cure = Cure::Msg,
+void cure_status(L& log, ID id, hoenn::Status st, Cure cure = Cure::Msg,
                  bool bench = false, Move m = Move::None) {
   if constexpr (L::enabled) {
     assert(st.any());
@@ -945,10 +944,10 @@ void side_end(L& log, Player p, SideCondition c, ID of = NO_ID) {
 // -weather: a move's (plain), the end of the weather (Weather::None), or
 // its residual (Upkeep).
 template <typename L>
-void weather(L& log, gen3::Weather w, WeatherFrom from = WeatherFrom::None) {
+void weather(L& log, hoenn::Weather w, WeatherFrom from = WeatherFrom::None) {
   if constexpr (L::enabled) {
     assert(from != WeatherFrom::Ability);
-    assert((w == gen3::Weather::None) <= (from == WeatherFrom::None));
+    assert((w == hoenn::Weather::None) <= (from == WeatherFrom::None));
     log.write(ArgType::Weather);
     log.write_byte(uint8_t(w));
     log.write_byte(uint8_t(from));
@@ -956,7 +955,7 @@ void weather(L& log, gen3::Weather w, WeatherFrom from = WeatherFrom::None) {
 }
 
 // -weather|W|[from] ability: A|[of] P: Drizzle, Drought, Sand Stream.
-template <typename L> void weather_ability(L& log, gen3::Weather w, Ability a, ID of) {
+template <typename L> void weather_ability(L& log, hoenn::Weather w, Ability a, ID of) {
   if constexpr (L::enabled) {
     log.write(ArgType::Weather);
     log.write_byte(uint8_t(w));
@@ -1161,4 +1160,4 @@ void heal_wish(L& log, ID id, const Pokemon& mon, uint8_t wisher) {
   }
 }
 
-} // namespace pkmn::protocol
+} // namespace hoenn::protocol

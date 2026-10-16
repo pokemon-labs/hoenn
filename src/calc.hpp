@@ -13,7 +13,7 @@
 
 #include "chance.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 struct Calc {
   static constexpr bool enabled = true;
@@ -28,4 +28,4 @@ struct NullCalc {
 
 static_assert(std::is_empty_v<NullCalc>);
 
-} // namespace pkmn::gen3
+} // namespace hoenn

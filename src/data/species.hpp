@@ -7,7 +7,7 @@
 #include "abilities.hpp"
 #include "types.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // National Dex order (include/constants/pokedex.h), then the three Deoxys
 // forms. This is not the cartridge's internal species order, which puts Hoenn
@@ -822,4 +822,4 @@ constexpr const SpeciesData &get(Species species) {
   return detail::SPECIES_DATA[uint16_t(species) - 1];
 }
 
-} // namespace pkmn::gen3
+} // namespace hoenn

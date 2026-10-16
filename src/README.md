@@ -453,8 +453,8 @@ bs1:3394), and the frame raises another request in the same phase.
 
 ## Protocol
 
-The binary log: plumbing and opcodes in `common/protocol.hpp`, the gen3
-messages in `gen3/protocol.hpp`, the text formatter in `gen3/format.hpp`.
+The binary log: plumbing and opcodes in `log.hpp`, the gen3
+messages in `protocol.hpp`, the text formatter in `format.hpp`.
 Written by groups of messages (see the end of this section).
 It comes from a survey of Showdown 0.11.10,
 redone on `showdown/` 0.11.11 (see below):
@@ -553,7 +553,7 @@ Decided (2026-10-08):
 
 - **`Nothing`, `NoTarget` and `Anim` are 73, 74 and 75**, after libpkmn's
   last value (`Terastallize`), so every libpkmn value stays.
-- **The formatter is a library header** (`gen3/format.hpp`) that `update`
+- **The formatter is a library header** (`format.hpp`) that `update`
   never includes. It takes a `Names` (player names, nicknames, shininess
   by party position) and writes Showdown's raw lines, `|split|` triplets
   included. Display names come from Showdown's dex
@@ -645,7 +645,7 @@ Decided (2026-10-08):
   queues a faint at 0 HP and writes the queue at fixed points (after each
   action, residual handler, arrival and multi-hit loop), so recoil and
   drain lines come between a KO and its `faint`.
-- **The gen3 messages live in `pkmn::protocol`**, with the plumbing, as
+- **The gen3 messages live in `hoenn::protocol`**, with the plumbing, as
   libpkmn's single protocol namespace.
 - `update` ends its messages with `None` (0), libpkmn's terminator.
 

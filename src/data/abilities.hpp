@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // Cartridge order (include/constants/abilities.h).
 enum class Ability : uint8_t {
@@ -92,4 +92,4 @@ inline constexpr uint8_t ABILITIES = 78;
 
 static_assert(sizeof(Ability) == 1);
 
-} // namespace pkmn::gen3
+} // namespace hoenn

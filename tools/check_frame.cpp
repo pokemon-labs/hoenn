@@ -15,14 +15,13 @@
 #include <tuple>
 #include <vector>
 
-#include "common/options.hpp"
-#include "common/protocol.hpp"
-#include "gen3/helpers.hpp"
-#include "gen3/mechanics.hpp"
-#include "gen3/showdown.hpp"
+#include "options.hpp"
+#include "log.hpp"
+#include "helpers.hpp"
+#include "mechanics.hpp"
+#include "showdown.hpp"
 
-using namespace pkmn;
-using namespace pkmn::gen3;
+using namespace hoenn;
 
 namespace {
 

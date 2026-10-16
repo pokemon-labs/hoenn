@@ -1,6 +1,6 @@
 // Parses every team in the given Showdown export files and builds a battle
 // from each one, reporting the teams that fail. Run by the `check_teams` test
-// on PKMN_TEAMS_DIR, or by hand: check_teams teams/ou/*.txt
+// on HOENN_TEAMS_DIR, or by hand: check_teams teams/ou/*.txt
 //
 // `--expect NAME` (repeatable) names a team that should fail. The exit status
 // is 0 only if exactly the expected teams fail.
@@ -12,13 +12,13 @@
 #include <string>
 #include <string_view>
 
-#include "gen3/showdown.hpp"
+#include "showdown.hpp"
 
-using namespace pkmn::gen3;
+using namespace hoenn;
 
 int main(int argc, char** argv) {
   std::set<std::string> expected, failed;
-  pkmn::RNG rng{0};
+  hoenn::RNG rng{0};
   size_t ok = 0;
   for (int i = 1; i < argc; i++) {
     if (std::string_view(argv[i]) == "--expect" && i + 1 < argc) {

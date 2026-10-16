@@ -6,7 +6,7 @@
 
 #include "types.hpp"
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // Cartridge order (include/constants/moves.h) for None through PsychoBoost, so
 // uint16_t(move) is the decomp's move ID. The 16 typed Hidden Powers follow.
@@ -1045,4 +1045,4 @@ constexpr Move hidden_power(Type type) {
   return Move(uint16_t(Move::HiddenPowerFighting) + t - (t > uint8_t(Type::Mystery) ? 2 : 1));
 }
 
-} // namespace pkmn::gen3
+} // namespace hoenn

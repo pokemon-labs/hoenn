@@ -1,8 +1,8 @@
 // The binary protocol log, as libpkmn's src/lib/common/protocol.zig: the
 // opcodes (ArgType), the fixed-buffer Writer, the null writer, and the Log
 // that wraps one of them. The gen3 messages and their reasons are in
-// gen3/protocol.hpp, the text formatter in gen3/format.hpp; the encoding
-// decisions are in src/gen3/README.md, "Protocol".
+// protocol.hpp, the text formatter in format.hpp; the encoding
+// decisions are in src/README.md, "Protocol".
 //
 // The driver owns the buffer. A Writer only points into it, so it lives in
 // Options, never in Battle (which holds no pointers). Search runs with the
@@ -18,7 +18,7 @@
 
 #include "data.hpp"
 
-namespace pkmn::protocol {
+namespace hoenn::protocol {
 
 // libpkmn's ArgType, values unchanged (protocol.zig), then three of ours
 // after its last (decided 2026-10-08): Showdown's -nothing, -notarget and
@@ -130,7 +130,7 @@ static_assert(uint8_t(ArgType::Anim) == 75);
 
 // Writes protocol bytes into a fixed buffer owned by the caller, as libpkmn's
 // protocol.Writer. The buffer is sized for the most one update can write
-// (protocol::MAX_LOG_SIZE in gen3/protocol.hpp), so a write always fits: debug asserts it
+// (protocol::MAX_LOG_SIZE in protocol.hpp), so a write always fits: debug asserts it
 // and release doesn't check (decided 2026-10-08; "don't hold it wrong").
 // Integers are written in native byte order, as libpkmn's are.
 struct Writer {
@@ -197,7 +197,7 @@ struct NoFaintQueue {};
 
 // Logs protocol messages to its writer, as libpkmn's Log(WriterT). W is
 // Writer* (FixedLog) or NullWriter (null_log). The messages are free
-// functions in gen3/protocol.hpp.
+// functions in protocol.hpp.
 template <typename W> struct Log {
   static_assert(std::is_same_v<W, Writer*> || std::is_same_v<W, NullWriter>);
 
@@ -232,4 +232,4 @@ inline constexpr NullLog null_log{};
 static_assert(std::is_empty_v<NullLog>);
 static_assert(std::is_trivially_copyable_v<FixedLog>);
 
-} // namespace pkmn::protocol
+} // namespace hoenn::protocol

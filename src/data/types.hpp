@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace pkmn::gen3 {
+namespace hoenn {
 
 // Cartridge order (include/constants/pokemon.h). Mystery is the ??? type: only
 // Curse has it, and it splits physical (below) from special (above).
@@ -104,4 +104,4 @@ constexpr uint8_t order(Type attacking, Type defending) {
 
 static_assert(sizeof(Type) == 1);
 
-} // namespace pkmn::gen3
+} // namespace hoenn
