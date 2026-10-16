@@ -1742,7 +1742,7 @@ void check_perish_song() {
 }
 
 // The stat-change batch: Screech, Metal Sound, Tickle (and Clear Body),
-// Superpower and Overheat on the user, Haze, Psych Up with Focus Energy.
+// Superpower and Overheat on the user, Haze, Psych Up (stages only).
 void check_stat_changes() {
   helpers::Pokemon user = JOLTEON;
   user.moves[0] = Move::Screech;
@@ -1761,7 +1761,7 @@ void check_stat_changes() {
     b.sides[1].active.volatiles.focus_energy = true;
     update(b, Choice::move(4), Choice::move(1), o);
     CHECK(b.sides[0].active.boosts.def == -3 && b.sides[0].active.boosts.spa == 2);
-    CHECK(b.sides[0].active.volatiles.focus_energy);
+    CHECK(!b.sides[0].active.volatiles.focus_energy);
     update(b, Choice::move(3), Choice::move(1), o);
     CHECK(b.sides[0].active.boosts.def == 0 && b.sides[1].active.boosts.def == 0);
   }

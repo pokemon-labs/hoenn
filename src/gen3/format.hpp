@@ -456,7 +456,6 @@ class Formatter {
       case S::Bide: s += "move: Bide"; break;
       case S::FlashFire: s += "ability: Flash Fire"; break;
       case S::FocusEnergy: s += "move: Focus Energy"; break;
-      case S::FocusEnergySilent: s += "move: Focus Energy|[silent]"; break;
       case S::FutureSight: s += "Future Sight"; break;
       case S::DoomDesire: s += "Doom Desire"; break;
       case S::PerishSilent: s += "perish3|[silent]"; break;

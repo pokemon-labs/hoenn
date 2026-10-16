@@ -594,7 +594,7 @@ Decided (2026-10-08):
   Nightmare with `-end|[silent]` after the `-curestatus` (`wake()`);
   Perish Song prints `perish3|[silent]` per Pokémon, then
   `-fieldactivate`, and each count prints the timer before its step;
-  Psych Up's copied Focus Energy is `[silent]`; Oblivious and Mental Herb
+  Oblivious and Mental Herb
   print Attract's silent `-end`, then their own; Beat Up prints no
   `-activate` (Beat Up Nicknames Mod is on). Forms whose moves aren't
   written (binding, Lock-On, Spite, Snatch, Uproar...) have reasons but

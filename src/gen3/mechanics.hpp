@@ -1365,7 +1365,9 @@ constexpr uint8_t lower_stats(Battle& battle, Player p, uint8_t mask, int8_t n, 
 // Intimidate (bs1:4024; Showdown's gen3 onStart, data/mods/gen3/abilities.ts:61):
 // -1 Attack to the foe unless it has a Substitute, Clear Body, White Smoke
 // or Hyper Cutter, its side has Mist (Showdown's onTryBoost, drops()), or it
-// is at -6. Showdown's White Herb reacts at once (onUpdate). It prints
+// is at -6. White Herb doesn't react at once: Showdown's gen3 checks it in
+// the SwitchIn event, before the switcher's ability Start, then only after
+// a move, at a switch-in or at the residuals (data/items.ts:7679). It prints
 // -ability|P|Intimidate|boost, then lower_stats()'s messages (Showdown's
 // boost is a secondary from an ability, which prints its 0 at -6);
 // nothing into a Substitute (gen3).
@@ -1376,8 +1378,7 @@ constexpr void intimidate(Battle& battle, Player player, O& options) {
   if (side.get(1).fainted() || side.active.volatiles.substitute) return;
   protocol::ability(options.log, protocol::ident(battle, player), Ability::Intimidate,
                     protocol::AbilityFrom::Boost);
-  if (lower_stats(battle, target, 1, 1, options.log) == 0) return;
-  item_cure(battle, target, options);
+  lower_stats(battle, target, 1, 1, options.log);
 }
 
 template <typename O> constexpr void ability_immunity(Battle& battle, O& options);
@@ -1462,6 +1463,17 @@ constexpr void arrive(Battle& battle, Player player, O& options) {
   // an immunity ability cures a status it got while it had another ability.
   ability_immunity(battle, options);
   if (spikes(battle, player, options)) return protocol::faints(options.log);
+  // Showdown's gen3 runSwitch (data/mods/gen4/scripts.ts:18): Spikes, then
+  // the SwitchIn event, where every White Herb on the field checks
+  // (onAnySwitchIn), then the ability's Start, then the item's
+  // (item_switch_in).
+  const bool h1 = holds(battle.sides[0], HoldEffect::RestoreStats) && !battle.sides[0].get(1).fainted();
+  const bool h2 = holds(battle.sides[1], HoldEffect::RestoreStats) && !battle.sides[1].get(1).fainted();
+  if (h1 || h2) {
+    const Player herb = h1 && h2 ? log_order(battle) : h1 ? Player::P1 : Player::P2;
+    item_cure(battle, herb, options);
+    if (h1 && h2) item_cure(battle, foe(herb), options);
+  }
   ActivePokemon& a = battle.side(player).active;
   // bsc:5258. The battle start doesn't run switchineffects, so a Truant
   // Pokémon that starts the battle acts on turn 1 (Showdown's gen3
@@ -5059,11 +5071,11 @@ constexpr void haze(Battle& battle, Player player, MoveState& m, O& options) {
 
 // BattleScript_EffectPsychUp (bs1:1790), Cmd_copyfoestats (bsc:8809): the
 // user takes the foe's stages, through a Substitute and Protect; it never
-// fails. Showdown's Psych Up also copies Focus Energy (its onHit's
-// volatilesToCopy, which gen3 inherits), and misses a semi-invulnerable
-// target (its target is 'normal', so tryMoveHit's Invulnerability check
-// applies; accuracy true); this follows Showdown. Log: Start Focus Energy
-// [silent] if it is copied, then CopyBoost.
+// fails. As in the decomp, Focus Energy isn't copied: gen3 inherits the
+// gen5 mod's onHit (data/mods/gen5/moves.ts:641), stages only, not the
+// base one's volatilesToCopy. Showdown's misses a semi-invulnerable target
+// (its target is 'normal', so tryMoveHit's Invulnerability check applies;
+// accuracy true); this follows Showdown. Log: CopyBoost.
 template <typename O>
 constexpr void psych_up(Battle& battle, Player player, MoveState& m,
                         O& options) {
@@ -5077,13 +5089,6 @@ constexpr void psych_up(Battle& battle, Player player, MoveState& m,
   ActivePokemon& a = battle.side(player).active;
   const ActivePokemon& f = battle.side(foe(player)).active;
   a.boosts = f.boosts;
-  a.volatiles.focus_energy = f.volatiles.focus_energy;
-  // Showdown removes the user's Focus Energy silently and adds the foe's
-  // with focusenergy's onStart from Psych Up: [silent].
-  if (f.volatiles.focus_energy) {
-    protocol::start(options.log, protocol::ident(battle, player),
-                    protocol::Start::FocusEnergySilent);
-  }
   protocol::copy_boost(options.log, protocol::ident(battle, player),
                        protocol::ident(battle, foe(player)));
   moveend(battle, player, m, options);

@@ -532,7 +532,10 @@ turn, each measured before its bars are fixed.
    Helping Hand's log written, the same seed matches 967 of 988 (97.9%):
    21 unmatched (6 by the log alone), White Herb 9, Focus Energy 6, 6
    single (an HP difference twice, a PP one, a drain heal, boosts, a
-   request).
+   request). Psych Up (it copied Focus Energy; gen3 inherits the gen5
+   mod's stages-only onHit) and White Herb (it acted on Intimidate's drop;
+   Showdown's gen3 checks it before the ability's Start) fixed: 987 of 989
+   (99.80%), and OU at the 6's seed, 1,000 games, 996 of 996.
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.
 9. CI, later: a gating workflow, then the reporting one.

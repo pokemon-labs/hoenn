@@ -271,7 +271,6 @@ enum class Start : uint8_t {
   Bide,             // |move: Bide
   FlashFire,        // |ability: Flash Fire
   FocusEnergy,      // |move: Focus Energy
-  FocusEnergySilent,// |move: Focus Energy|[silent] (Psych Up)
   FutureSight,      // |Future Sight
   DoomDesire,       // |Doom Desire
   PerishSilent,     // |perish3|[silent] (Perish Song itself)
