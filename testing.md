@@ -230,7 +230,7 @@ multi-hit bug past the first hit would hide here, so `soak` and
 |---|---|---|---|
 | `check_showdown` games | 10,000 | 10,000 | 10,000 |
 | try cap | 1M | 1M | 1M |
-| matched | ≥ 98.5% | ≥ 97% | ≥ 90% |
+| matched | ≥ 99.9% | ≥ 97% | ≥ 90% |
 | log-only mismatches | count | reported, not counted | reported, not counted |
 | choice-set mismatches | 0 | 0 | 0 |
 | `soak` (debug) games | 100,000 | 100,000 | 100,000 |
@@ -241,12 +241,9 @@ multi-hit bug past the first hit would hide here, so `soak` and
 
 Rationale:
 
-- **OU at 98.5%.** Measured: 99.2% on 1,000 games (seed 8, 2026-10-08),
-  too few to place a bar 4 standard deviations below (±0.28). Every
-  failure there is a rare branch the random search missed (Beat Up, Rock
-  Blast), not a known engine bug, and multi-hit failures now leave the
-  count, so the measured rate should rise. Re-set the bar from a
-  10,000-game baseline.
+- **OU at 99.9%** (the user, 2026-10-16). Measured: 9943 of 9946
+  counted games (99.97%, seed 8981393492580689921, 2026-10-16); the bar
+  is about 4 standard deviations (±0.017) below it. Not rerun at 99.9%.
 - **Random OU-legal at 97%, state only.** Unmeasured. The group files ran
   98.9% to 99.98% (10,000 games each), but they're hand-built around a few
   moves; uniform random sets will reach more rare-branch moves and
@@ -475,7 +472,7 @@ turn, each measured before its bars are fixed.
    the probabilities fail (Beat Up, Known engine gaps). An earlier run
    (14 of 16 shards, the rest OOM-killed) matched 8709 of 8714. The
    unmatched: Fake Out against Focus Punch (2), the toxic stage across a
-   double replacement (1), 5 undiagnosed. Bar not reset yet.
+   double replacement (1), 5 undiagnosed. Bar set to 99.9% (2026-10-16).
 7. Random OU-legal: the generator, a measured run, its bar.
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.

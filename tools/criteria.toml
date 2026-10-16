@@ -10,7 +10,7 @@ teams = "teams/ou"      # every *.txt in it
 [ou.showdown]
 games = 10000
 tries = 1000000
-matched = 0.985         # of the games left after multi-hit ones leave
+matched = 0.999         # of the games left after multi-hit ones leave
 log_only_counts = true  # a log-only mismatch is a failure
 choices = 0             # choice-set mismatches allowed
 
