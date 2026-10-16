@@ -145,11 +145,31 @@ each bar sits at least 4 standard deviations below the measured rate:
 a run that fails is a regression, or a new case worth a look, not bad
 luck. A failing game found this way becomes a committed fixture.
 
+### The fixture
+
+`tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
+the step 6-7 runs (34 games, 2026-10-16), replayed by ctest's
+`check_showdown_fixture` at `--seed 1`. Each game is cut one step after
+the step that failed (the next step gives the request check), and its
+header's `fixture` field names the bug, the commit that fixed it and the
+run it came from. Replayed at the commit before its fix, each game fails,
+and the games for later fixes fail with it. Games are renumbered within
+the file, and the search seed depends on the game number, so a renumbered
+game must be checked again. The worst step needs about 15,000 of the
+1,000,000 tries.
+
+Adding one: take the failing game from the run's traces, keep the header
+(drop `p1.file` and `p2.file`, add `fixture`) and the steps through one
+past the failing step, renumber it, and check that it fails before the fix
+and passes after. Truant games stay out while Truant is a known gap. The
+8 failures of the two early OU runs are left out: their traces were
+deleted.
+
 ## Suites
 
 Built and in ctest (both presets): `headers`, `check_data`, `check_teams`,
-`check_damage`, `check_frame`, a 100-game `soak`, `check_chance` and
-`check_chance_unmasked` (must fail). These are the fast suites; they run
+`check_damage`, `check_frame`, a 100-game `soak`, `check_chance`,
+`check_chance_unmasked` (must fail) and `check_showdown_fixture`. These are the fast suites; they run
 on every change.
 
 The three below are the environment suites. Their run times on this

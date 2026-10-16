@@ -466,7 +466,7 @@ play reaches what's common, not everything; Lock-On, Uproar, Thrash, Bide,
 Future Sight, Hail and Disable come from the static scan only.
 
 Redone (2026-10-08) on `showdown/` (0.11.11, `c046106`), which the
-realizability test pins (`testing.md`): the static scan, and 3,000
+realizability test pins (`TESTING.md`): the static scan, and 3,000
 gen3 OU games over the OU teams on each version with the same seed. The
 table below follows 0.11.11, which differs from 0.11.10 in:
 

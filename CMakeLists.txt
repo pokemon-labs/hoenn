@@ -66,10 +66,13 @@ add_executable(check_chance tools/check_chance.cpp)
 target_link_libraries(check_chance PRIVATE pkmn_gen3 pkmn_warnings)
 
 # The realizability test against Showdown's traces (tools/check_showdown.cpp,
-# traces from tools/showdown_traces.cjs). Run by hand: the traces aren't
-# committed.
+# traces from tools/showdown_traces.cjs). Run by hand on fresh traces; in
+# ctest only on the committed fixture, one game per fixed failure.
 add_executable(check_showdown tools/check_showdown.cpp)
 target_link_libraries(check_showdown PRIVATE pkmn_gen3 pkmn_warnings)
+add_test(NAME check_showdown_fixture
+         COMMAND check_showdown --quiet --tries 1000000 --seed 1
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/fixtures/showdown.jsonl)
 
 # Which moves on the teams have a written mechanic (tools/coverage.cpp).
 add_executable(coverage tools/coverage.cpp)

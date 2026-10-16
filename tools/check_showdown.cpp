@@ -1,4 +1,4 @@
-// The realizability test (testing.md): replays Showdown games
+// The realizability test (TESTING.md): replays Showdown games
 // from tools/showdown_traces.cjs and checks that some branch of ours
 // produces each step.
 //
@@ -18,7 +18,7 @@
 // volatiles in VOLATILES, each side's Spikes and screens, the weather, and a replacement request comes before or after
 // the residuals as Showdown's (its |upkeep). Without the log, state the guard leaves out can drift: a
 // failure can come from an earlier step that matched the wrong branch. The log comparison replaces the guard as the messages are
-// written (testing.md). A game stops at its first failure, since
+// written (TESTING.md). A game stops at its first failure, since
 // we can't stay in step with Showdown after it.
 //
 // The log: our binary log through gen3/format.hpp against the step's raw
@@ -91,7 +91,7 @@ void force_metronome(const json::Value& log, Calc& calc) {
 // Whether Showdown's log of a step uses a multi-hit move, called ones
 // (Metronome, Sleep Talk, Mirror Move, Assist) included: each gets its own
 // |move| line. A game whose first failure is such a step leaves the count
-// (testing.md, "Pass criteria"): its rolls and crits are too many for the
+// (TESTING.md, "Pass criteria"): its rolls and crits are too many for the
 // random search.
 bool multi_hit(const json::Value& log) {
   for (const json::Value& l : log.array) {

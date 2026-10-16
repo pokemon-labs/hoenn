@@ -1,4 +1,4 @@
-// The chance-key test (testing.md): the choices and Chance's
+// The chance-key test (TESTING.md): the choices and Chance's
 // Actions must determine the resulting state exactly, as search keys its
 // chance nodes by them.
 //
@@ -69,7 +69,7 @@ struct Value {
   double probability;
 
   // Search never expands a terminal state, so two ends must agree only on
-  // the Result and the probability (testing.md, "Terminal states"): the
+  // the Result and the probability (TESTING.md, "Terminal states"): the
   // winner's HP may differ.
   friend bool operator==(const Value& a, const Value& b) {
     if (a.result.over() || b.result.over()) {
@@ -370,7 +370,7 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
         if (e.total == 1) stats.untested++;
         // A key expected less than once isn't tested alone: Beat Up has
         // about 3e7 keys, so some unlikely key turns up, even twice, by
-        // chance (testing.md, "Probability calibration"). The pooled
+        // chance (TESTING.md, "Probability calibration"). The pooled
         // calibration bins still test such keys.
         const bool rare = samples * e.value.probability < 1;
         if (!rare && tail(e.free, samples, e.value.probability) < ALPHA) {
