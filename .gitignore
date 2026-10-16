@@ -1,5 +1,6 @@
 pokeemerald/
 __pycache__/
 build/
-showdown/
+showdown
+.showdown/
 scratch/

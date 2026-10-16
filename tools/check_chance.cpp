@@ -515,7 +515,9 @@ int main(int argc, char** argv) {
   // mean. With ~40 bins, |z| > 6 by chance is about 1e-7 per run.
   constexpr double Z = 6;
   int calibration = 0;
-  std::printf("  calibration of held-out draws (bin: observed / expected, z):\n");
+  // The variance lets a runner pool bins over shards.
+  std::printf("  calibration of held-out draws (bin: observed / expected, z; "
+              "exact expected and variance):\n");
   for (int b = 0; b < Totals::BINS; b++) {
     const double o = stats.observed[b], e = stats.expected[b];
     const double v = stats.variance[b];
@@ -524,11 +526,11 @@ int main(int argc, char** argv) {
     const bool bad = std::fabs(z) > Z;
     calibration += bad;
     if (b == Totals::UNSEEN) {
-      std::printf("    unseen        %10.0f / %12.1f  z %+6.2f%s\n", o, e, z,
-                  bad ? "  FAIL" : "");
+      std::printf("    unseen        %10.0f / %12.1f  z %+6.2f  [%.17g %.17g]%s\n",
+                  o, e, z, e, v, bad ? "  FAIL" : "");
     } else {
-      std::printf("    2^-%-2d..2^-%-2d %10.0f / %12.1f  z %+6.2f%s\n", b + 1,
-                  b, o, e, z, bad ? "  FAIL" : "");
+      std::printf("    2^-%-2d..2^-%-2d %10.0f / %12.1f  z %+6.2f  [%.17g %.17g]%s\n",
+                  b + 1, b, o, e, z, e, v, bad ? "  FAIL" : "");
     }
   }
   return stats.collisions || stats.mass || stats.frequency || calibration

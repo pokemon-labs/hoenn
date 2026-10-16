@@ -54,7 +54,7 @@ const path = require('path');
 function parseArgs(argv) {
   const opts = {
     games: 100,
-    seed: 1,
+    seed: '1',
     showdown: path.join(__dirname, '../showdown'),
     files: [],
   };
@@ -68,7 +68,8 @@ function parseArgs(argv) {
       console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--showdown PATH] [TEAM_FILE...]');
       process.exit(1);
     }
-    opts[key] = typeof opts[key] === 'number' ? +argv[++i] : argv[++i];
+    // The seed stays a string: a u64 doesn't fit a double.
+    opts[key] = key === 'games' ? +argv[++i] : argv[++i];
   }
   if (!opts.files.length) {
     const dir = path.join(__dirname, '../teams/ou');
@@ -167,7 +168,9 @@ function main() {
   const {Battle, Dex, PRNG, Teams, TeamValidator} = require(path.resolve(opts.showdown));
   const teams = loadTeams(opts.files, Dex, Teams, TeamValidator);
   console.error({teams: teams.length});
-  const master = new PRNG([0, 0, opts.seed >>> 16 & 0xffff, opts.seed & 0xffff]);
+  // A 64-bit seed, one u16 per PRNG seed word (below 2^32, the old [0, 0, hi, lo]).
+  const seed64 = BigInt.asUintN(64, BigInt(opts.seed));
+  const master = new PRNG([48n, 32n, 16n, 0n].map(k => Number(seed64 >> k & 0xffffn)));
   const newSeed = () => [0, 0, 0, 0].map(() => master.random(65536));
   const out = [];
   const flush = () => { if (out.length) process.stdout.write(out.join('\n') + '\n'); out.length = 0; };

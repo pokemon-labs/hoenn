@@ -298,6 +298,7 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 ```
 CMakeLists.txt, CMakePresets.json
 testing.md            the test spec, pass criteria, known gaps
+SHOWDOWN_COMMIT       the Showdown commit the tests pin
 teams/ou/             the OU teams (Smogon dumps, copied from birch)
 src/common/
   data.hpp            Player, ID, Optional, Choice, Result
@@ -327,6 +328,8 @@ tools/
   check_teams.cpp     parses teams/ou/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
   check_chance.cpp    (c1, c2, Actions) determines the result; calibration
+  run_env.py          one test environment's suites against its bars
+  criteria.toml       the bars per environment (run_env.py)
   check_frame.cpp     the turn frame and step 3, plus a self-play soak
   soak.cpp            long random self-play runs, replayable by seed
   bench.cpp           updates/s, null log, Chance on (release)
@@ -340,8 +343,10 @@ tools/
 `pokeemerald/` is a depth-1 clone of pret/pokeemerald on the local branch
 `battle-only` (`a23e37a`), stripped to battle code, not pushed, ignored by
 this repo.
-`showdown/` is a depth-1 clone of smogon/pokemon-showdown master (`c046106`,
-0.11.11), ignored by this repo; cite it by path. `check_damage` still uses
+`showdown/` is a symlink to the pinned Showdown checkout
+(`SHOWDOWN_COMMIT`, `c046106`, 0.11.11), which `tools/run_env.py` keeps
+fetched and built in `.showdown/<hash>/`; both are ignored. Cite it by
+path. `check_damage` still uses
 ADV-Simulator's pinned 0.11.10.
 
 ## Turn phases

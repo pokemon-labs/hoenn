@@ -77,8 +77,9 @@ whatever its name, so a file can be added or renamed without touching
 them. Fixed in the copy, so Showdown's gen3ou validator accepts them: 13
 Pokémon with no EVs line got `EVs: 1 HP` (Showdown's own advice for 0 EVs;
 no stat changes), and the nickname `(snowlight nxc)`, which Showdown's
-importer read as a species, lost its parentheses. Open: 7 teams break
-today's gen3ou rules (Quick Claw, Soundproof, the Baton Pass clauses).
+importer read as a species, lost its parentheses. The 7 teams that break
+today's gen3ou rules (Quick Claw, Soundproof, the Baton Pass clauses)
+were removed (the user, 2026-10-15): 320 teams, all valid.
 
 Proposed:
 
@@ -283,10 +284,11 @@ pushes yet.
 smogon/pokemon-showdown at a pinned commit; reporting uses master. The pin
 is a file in the repo holding the full commit hash (now
 `c046106cbe075931b1ff8d8b800ff5be47a85f96`, 0.11.11), which the runner
-reads to check out and build Showdown. Today the pin is only prose in
-CLAUDE.md and the commit of the ignored local clone `showdown/`, so a
-fresh checkout can't know which Showdown to test against. Bumping
-Showdown is then a one-line commit.
+reads to check out and build Showdown. Bumping Showdown is a one-line
+commit. Built (2026-10-15): `SHOWDOWN_COMMIT`. The runner keeps each
+commit it tests fetched and built in `.showdown/<hash>/` (ignored), and
+points the `showdown` symlink at the pinned one, so the scripts' default
+and the `showdown/...` citations follow the pin.
 
 For comparison, libpkmn (`~/oak/cpp/extern/engine/.github/workflows/`):
 `test.yml` gates on push and pull request against a pinned `@pkmn/sim`
@@ -355,6 +357,17 @@ suite for everything a forced one covers.
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
+- **Beat Up's probabilities** (the first OU 10,000-game run, 2026-10-16,
+  undiagnosed): a five-hit key reported at 4.6e-8 came up in 2 of 128 free
+  samples (`check_chance --samples 128 --replay 7066941967204212297
+  teams/ou/*.txt`, turn 9), and the 2^-22 calibration bin had z 7.0.
+  Either the hits' draws aren't independent or what is recorded isn't
+  what is drawn.
+- **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
+  2026-10-16). Showdown runs Focus Punch's lost focus before the flinch:
+  `|move|...|Focus Punch||[still]`, then `|cant|...|Focus Punch|Focus
+  Punch`, and the PP is spent. We stop at the flinch and keep the PP.
+
 - **Encore on a lock Metronome called** (about 30 of 10,000 group 8
   games). Showdown's Encore swaps the locked move for Metronome, runs it
   as `[from] lockedmove` without PP, and the lock's handlers keep going.
@@ -363,7 +376,8 @@ Showdown change closes gets crossed off here.
   save the target (no `Turn` at the residuals; Showdown's would).
 - **Toxic stage across a double replacement:** Showdown keeps the
   survivor's old toxic stage (it lives on the status); ours resets in
-  `enter()`. Needs a per-Pokémon counter (layout). 2 group 2 games.
+  `enter()`. Needs a per-Pokémon counter (layout). 2 group 2 games, 1
+  of the first OU 10,000-game run.
 - **Recycle after Knock Off:** Showdown's `itemKnockedOff` still blocks
   Trick and Thief after the recycled item comes back; ours doesn't.
 - **Leftovers order on an exact Speed tie** (7 group 8 games). The coin is
@@ -437,15 +451,31 @@ turn, each measured before its bars are fixed.
 1. Team input as a pooled list of files in every tool. Done (2026-10-15).
 2. `check_chance`'s terminal-state comparison. Done (2026-10-15).
 3. `check_showdown`'s multi-hit classification. Done (2026-10-15).
-4. The criteria file: per environment, the game counts, try cap, bars
-   and which mismatches count, read by the runner, so tightening a bar is
-   a one-line diff. The Showdown pin file.
-5. The runner: one committed command per environment, running the suites
-   in parallel shards, fresh seeds unless given, printing seeds and
-   commits, exit nonzero on any failed bar. Replaces
-   `scratch/run_all16.sh`.
+4. The criteria file (`tools/criteria.toml`) and the Showdown pin file
+   (`SHOWDOWN_COMMIT`). Done (2026-10-15), OU only.
+5. The runner, `python3 tools/run_env.py ENV` (`--seed`, `--jobs`,
+   `--scale` for a smoke run, `--master` or `--showdown-commit` for the
+   reporting run). Done (2026-10-15). It builds both presets, shards each
+   suite over `--jobs` (all cores), derives every shard's seed from the
+   run seed, pools the shards' counts (check_chance's calibration bins
+   included) and checks them against the bars. Output, a summary with
+   replay commands and the failing shards' traces, goes to
+   `build/runs/ENV-TIME-SEED/`. A 1% smoke run takes about 15 s. Node
+   trace processes run at most one per GB free at the start
+   (`--trace-jobs`): each grows past 350 MB, and 16 at once exhausted this
+   7 GB machine (the OOM killer took the user's browser, 2026-10-15).
+   Open: the calibration bar's |z| is a normal approximation, wrong for
+   the deepest bins, whose expected counts are far below 1 (one hit
+   against 0.007 expected gave z 11.8 in a smoke run, a 0.7% event).
 6. OU: a 10,000-game run to measure the real match rate (98.5% is a guess
-   from 1,000 games), then set the bar a safe margin under it.
+   from 1,000 games), then set the bar a safe margin under it. Measured
+   (2026-10-16, seed 8981393492580689921, 11.5 minutes): 9943 of 9946
+   counted games (99.97%), 54 multi-hit games left out, 0 choice-set
+   mismatches; soak 100,000 games clean; check_chance 0 collisions, but
+   the probabilities fail (Beat Up, Known engine gaps). An earlier run
+   (14 of 16 shards, the rest OOM-killed) matched 8709 of 8714. The
+   unmatched: Fake Out against Focus Punch (2), the toxic stage across a
+   double replacement (1), 5 undiagnosed. Bar not reset yet.
 7. Random OU-legal: the generator, a measured run, its bar.
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.
@@ -464,4 +494,3 @@ Open:
 
 1. **Where the jobs run, and how often** (deferred by the user).
 2. **Re-setting the bars** from measured 10,000-game baselines.
-3. **The 7 OU teams that break gen3ou's rules** (Team input).

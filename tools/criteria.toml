@@ -1,0 +1,23 @@
+# The pass criteria per environment (testing.md, "Pass criteria"), read by
+# tools/run_env.py. Tightening a bar is a one-line diff here.
+#
+# Safety and chance bars are the same everywhere (zero failures); only the
+# Showdown match rate relaxes from one environment to the next.
+
+[ou]
+teams = "teams/ou"      # every *.txt in it
+
+[ou.showdown]
+games = 10000
+tries = 1000000
+matched = 0.985         # of the games left after multi-hit ones leave
+log_only_counts = true  # a log-only mismatch is a failure
+choices = 0             # choice-set mismatches allowed
+
+[ou.soak]
+games = 100000          # debug: ASan, UBSan, asserts
+
+[ou.chance]
+games = 1000
+samples = 128
+z = 6                   # every calibration bin |z| below this
