@@ -30,9 +30,10 @@ namespace pkmn::gen3::helpers {
 //
 // `ivs` and `evs` are in Stats order: HP, Atk, Def, Spe, SpA, SpD.
 //
-// `ability` and `gender` have no usable default: the ability must be one of
-// the species' own and the gender must fit its gender ratio. `hp` defaults to
-// full; `hp` and `status` are for scenario tests.
+// Only the engine's bounds are checked, not legality (TESTING.md, "Truly
+// random"): any ability, any gender, EVs 0-255 with no total. `ability` has
+// no usable default. `hp` defaults to full; `hp` and `status` are for
+// scenario tests.
 struct Pokemon {
   Species species = Species::None;
   Move moves[4] = {};
@@ -55,7 +56,6 @@ constexpr const char* check_pokemon(const Pokemon& p) {
   }
   if (p.level < 1 || p.level > 100) return "level must be 1-100";
   if (uint8_t(p.nature) >= NATURES) return "invalid nature";
-  unsigned total = 0;
   for (uint16_t iv : {p.ivs.hp, p.ivs.atk, p.ivs.def, p.ivs.spe, p.ivs.spa,
                       p.ivs.spd}) {
     if (iv > 31) return "IVs must be 0-31";
@@ -63,33 +63,10 @@ constexpr const char* check_pokemon(const Pokemon& p) {
   for (uint16_t ev : {p.evs.hp, p.evs.atk, p.evs.def, p.evs.spe, p.evs.spa,
                       p.evs.spd}) {
     if (ev > 255) return "EVs must be 0-255";
-    total += ev;
   }
-  if (total > 510) return "EVs must total at most 510";
-
-  const SpeciesData& s = get(p.species);
-  if (p.ability == Ability::None ||
-      (p.ability != s.abilities[0] && p.ability != s.abilities[1])) {
-    return "the ability isn't one of the species'";
-  }
+  if (p.ability == Ability::None || !detail::valid(p.ability)) return "invalid ability";
   if (!detail::valid(p.item)) return "invalid item";
-
-  // genderRatio: 0 always male, 254 always female, 255 genderless.
-  switch (s.gender_ratio) {
-    case 0:
-      if (p.gender != Gender::Male) return "the species is always male";
-      break;
-    case 254:
-      if (p.gender != Gender::Female) return "the species is always female";
-      break;
-    case 255:
-      if (p.gender != Gender::None) return "the species is genderless";
-      break;
-    default:
-      if (p.gender != Gender::Male && p.gender != Gender::Female) {
-        return "the species needs a gender";
-      }
-  }
+  if (uint8_t(p.gender) > uint8_t(Gender::Female)) return "invalid gender";
 
   if (p.moves[0] == Move::None) return "a Pokémon needs a move";
   for (size_t i = 0; i < 4; i++) {
@@ -233,10 +210,7 @@ static_assert([] {
 }());
 static_assert([] {
   Pokemon p = detail::SKARMORY;
-  p.ability = Ability::Levitate;
-  if (init_pokemon(p)) return false;
-  p = detail::SKARMORY;
-  p.gender = Gender::None;
+  p.ability = Ability::None;
   if (init_pokemon(p)) return false;
   p = detail::SKARMORY;
   p.moves[1] = Move::None;
@@ -248,13 +222,21 @@ static_assert([] {
   p.moves[1] = Move::HiddenPowerFire;
   if (init_pokemon(p)) return false;
   p = detail::SKARMORY;
-  p.evs.atk = 12;  // 512 total
+  p.evs.atk = 256;
   if (init_pokemon(p)) return false;
   p = detail::SKARMORY;
   p.hp = 0;
   const Pokemon fainted_lead[] = {p, detail::SKARMORY};
   const Pokemon fainted_bench[] = {detail::SKARMORY, p};
   return !init_side(fainted_lead) && init_side(fainted_bench);
+}());
+// No legality: a foreign ability, an unfitting gender, EVs past 510 in total.
+static_assert([] {
+  Pokemon p = detail::SKARMORY;
+  p.ability = Ability::Levitate;
+  p.gender = Gender::None;
+  p.evs = {255, 255, 255, 255, 255, 255};
+  return init_pokemon(p).has_value();
 }());
 
 } // namespace pkmn::gen3::helpers

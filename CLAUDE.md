@@ -218,7 +218,9 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
   all are linked into one binary (no duplicate definitions).
 - `check_data`: `static_assert`s on the generated tables.
 - `check_teams`: parses `PKMN_TEAMS_DIR` (default `teams/ou`, every `*.txt`); every
-  team must parse (`--expect NAME` would allow a named team to fail).
+  team must parse (`--expect NAME` would allow a named team to fail). The
+  parser checks the engine's bounds, not legality (TESTING.md, "Truly
+  random").
 - `check_damage`: `damage.hpp` against the pinned Showdown, from the
   committed `tools/damage_cases.inc`. Regenerate it with `node
   tools/damage_oracle.cjs > tools/damage_cases.inc` (uses `showdown/`, or
@@ -308,14 +310,12 @@ the log (opcodes, the formatter, Showdown's omniscient stream; README
 "Protocol"). Work now is the test framework (`TESTING.md`, "Implementation"),
 then fixing what it finds; there is no further plan.
 
-**Next** (agreed 2026-10-16, in order). Steps 1-7 are done: random
-OU-legal's bar is 99.8% (`tools/criteria.toml`), and the failures fixed
-since step 6 are a committed fixture (TESTING.md, "The fixture"); the
-Truant gap is all that fails there.
-1. Step 8, truly random (TESTING.md, "Implementation" step 8): the audit
-   and the generator, a measured run, its bars as TESTING.md's "Pass
-   criteria" (check_showdown at 90%, state only).
-2. Run `bench` (release) for drift, then `min_ko_roll`, Calc's
+**Next** (agreed 2026-10-16). Steps 1-7 are done; step 8 (truly random)
+has its generator, runner and a 1,000-game exploratory run, and testing is
+paused there by the user (TESTING.md, "Implementation" step 8): open are
+its four chance collisions and one sum failure (TESTING.md, "Known engine
+gaps"), the log-only mismatches, and the 10,000-game run.
+1. Run `bench` (release) for drift, then `min_ko_roll`, Calc's
    `Summaries` and the search adaptation.
 `build/runs/classify.py`'s KNOWN list is out of date.
 
@@ -329,8 +329,6 @@ Truant gap is all that fails there.
   `bide_damage` and `future_sight_damage` (u32 for now).
 - Skipping the damage roll when every roll KOs (fewer chance nodes, but it
   changes the `Actions` key); decide with the search adaptation.
-- Team parsing enforces only Species Clause; the other Smogon ADV clauses
-  are left to Showdown's validator.
 
 **Caveats:**
 - Deoxys-Attack and -Defense stats are hard-coded in the generator from

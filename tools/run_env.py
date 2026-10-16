@@ -126,7 +126,8 @@ def showdown_shard(i, seed, games, crit, files, sd, out, keep):
     trace = os.path.join(out, f'traces{i}.jsonl')
     with traces_running, open(trace, 'w') as f:
         t = subprocess.run(['node', 'tools/showdown_traces.cjs', '--games',
-                            str(games), '--seed', str(seed), '--showdown', sd,
+                            str(games), '--seed', str(seed), '--format',
+                            crit.get('format', 'gen3ou'), '--showdown', sd,
                             *files], cwd=ROOT, stdout=f, stderr=subprocess.PIPE,
                            text=True)
     if t.returncode:

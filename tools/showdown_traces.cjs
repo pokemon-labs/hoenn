@@ -4,16 +4,17 @@
 // "check_showdown"). Showdown picks every choice, so nothing here needs the engine;
 // check_showdown replays the traces against it.
 //
-//   node tools/showdown_traces.cjs [--games N] [--seed N]
+//   node tools/showdown_traces.cjs [--games N] [--seed N] [--format gen3ou|custom]
 //       [--showdown PATH] [TEAM_FILE...] > traces.jsonl
 //
 // The teams in every TEAM_FILE are pooled, duplicates included. Defaults:
-// 100 games, seed 1, every teams/ou/*.txt, showdown/ (0.11.11;
-// build it first with `node build` there). Each team goes through Showdown's
-// gen3ou validator, as in real play: it sets the IVs a Hidden Power type
+// 100 games, seed 1, gen3ou, every teams/ou/*.txt, showdown/ (0.11.11;
+// build it first with `node build` there). In gen3ou each team goes through
+// Showdown's validator, as in real play: it sets the IVs a Hidden Power type
 // needs. Teams it rejects are skipped (9 of 327 on 0.11.11, Quick Claw among
 // them, which Showdown's gen3 doesn't log), and so are teams whose
-// nicknames Showdown's importer reads as species.
+// nicknames Showdown's importer reads as species. `--format custom` (the truly
+// random environment) plays CUSTOM and takes teams of 1-6 as given.
 //
 // Each game is a "game" line, then one "step" line per update:
 //
@@ -55,6 +56,7 @@ function parseArgs(argv) {
   const opts = {
     games: 100,
     seed: '1',
+    format: 'gen3ou',
     showdown: path.join(__dirname, '../showdown'),
     files: [],
   };
@@ -65,11 +67,15 @@ function parseArgs(argv) {
     }
     const key = argv[i].slice(2);
     if (!(key in opts) || key === 'files' || i + 1 >= argv.length) {
-      console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--showdown PATH] [TEAM_FILE...]');
+      console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--format gen3ou|custom] [--showdown PATH] [TEAM_FILE...]');
       process.exit(1);
     }
     // The seed stays a string: a u64 doesn't fit a double.
     opts[key] = key === 'games' ? +argv[++i] : argv[++i];
+  }
+  if (opts.format !== 'gen3ou' && opts.format !== 'custom') {
+    console.error(`showdown_traces.cjs: unknown format ${opts.format}`);
+    process.exit(1);
   }
   if (!opts.files.length) {
     const dir = path.join(__dirname, '../teams/ou');
@@ -79,9 +85,13 @@ function parseArgs(argv) {
   return opts;
 }
 
-function loadTeams(files, Dex, Teams, TeamValidator) {
+// gen3customgame without Smogon's clauses, which the engine always applies
+// (src/gen3/README.md, "Turn frame").
+const CUSTOM = 'gen3customgame@@@Sleep Clause Mod,Freeze Clause Mod';
+
+function loadTeams(files, format, Dex, Teams, TeamValidator) {
   const species = Dex.mod('gen3').species;
-  const validator = TeamValidator.get('gen3ou');
+  const validator = format === 'gen3ou' ? TeamValidator.get(format) : null;
   const teams = [];
   for (const file of files) {
     // Text before the first header (gen_teams.cjs's comment) isn't a team.
@@ -89,8 +99,9 @@ function loadTeams(files, Dex, Teams, TeamValidator) {
       .map(s => s.trim()).filter(Boolean);
     blocks.forEach((text, index) => {
       const team = Teams.import(text);
-      if (!team || team.length !== 6 || !team.every(p => species.get(p.species).exists)) return;
-      if (validator.validateTeam(team)) return;
+      if (!team || !team.length || team.length > 6 ||
+        !team.every(p => species.get(p.species).exists)) return;
+      if (validator && validator.validateTeam(team)) return;
       teams.push({file, index, text, packed: Teams.pack(team)});
     });
   }
@@ -167,7 +178,7 @@ function result(battle) {
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const {Battle, Dex, PRNG, Teams, TeamValidator} = require(path.resolve(opts.showdown));
-  const teams = loadTeams(opts.files, Dex, Teams, TeamValidator);
+  const teams = loadTeams(opts.files, opts.format, Dex, Teams, TeamValidator);
   console.error({teams: teams.length});
   // A 64-bit seed, one u16 per PRNG seed word (below 2^32, the old [0, 0, hi, lo]).
   const seed64 = BigInt.asUintN(64, BigInt(opts.seed));
@@ -183,7 +194,7 @@ function main() {
     const prng = new PRNG(choiceSeed);
     const t1 = prng.sample(teams);
     const t2 = prng.sample(teams);
-    const battle = new Battle({formatid: 'gen3ou', seed});
+    const battle = new Battle({formatid: opts.format === 'custom' ? CUSTOM : 'gen3ou', seed});
     battle.setPlayer('p1', {name: 'p1', team: t1.packed});
     battle.setPlayer('p2', {name: 'p2', team: t2.packed});
     out.push(JSON.stringify({

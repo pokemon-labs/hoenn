@@ -2,12 +2,12 @@
 // Writes seeded random teams as Showdown export text, for the random test
 // environments (TESTING.md, "Generators").
 //
-//   node tools/gen_teams.cjs --mode ou-legal [--teams N] [--seed N]
+//   node tools/gen_teams.cjs --mode ou-legal|random [--teams N] [--seed N]
 //       [--showdown PATH] > teams.txt
 //
 // Defaults: 2000 teams, seed 1, showdown/. The file starts with a comment
 // (mode, seed, Showdown commit), which both team parsers skip, then one
-// "=== [gen3ou] Random N ===" block per team.
+// "=== [FORMAT] Random N ===" block per team (gen3ou, or gen3customgame).
 //
 // ou-legal: per slot, a species uniform over those gen3ou allows (distinct
 // within the team); an ability uniform over its allowed ones; up to 4
@@ -18,6 +18,12 @@
 // set gen3ou's validateSet still rejects (egg and event combinations, the
 // OHKO clause) redraws its moves, then the team goes through validateTeam
 // (the Baton Pass clauses) and is redrawn if rejected.
+//
+// random: no legality at all, only what both sims can name. 1-6 Pokémon,
+// each drawn independently: a species (repeats allowed), an ability, 1-4
+// distinct moves and an item (or none 10% of the time), each uniform over
+// every gen 3 one the engine names; level 1-100; IVs 0-31, EVs 0-255 with
+// no total; a nature; happiness 0-255; a gender of M, F or unstated.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -34,26 +40,41 @@ function parseArgs(argv) {
     if (!(key in opts) || i + 1 >= argv.length) usage();
     opts[key] = key === 'teams' ? +argv[++i] : argv[++i];
   }
-  if (opts.mode !== 'ou-legal') usage();
+  if (opts.mode !== 'ou-legal' && opts.mode !== 'random') usage();
   return opts;
 }
 
 function usage() {
-  console.error('usage: gen_teams.cjs --mode ou-legal [--teams N] [--seed N] [--showdown PATH]');
+  console.error('usage: gen_teams.cjs --mode ou-legal|random [--teams N] [--seed N] [--showdown PATH]');
   process.exit(1);
 }
 
 // The engine's items with an effect: names.hpp maps every other decomp item
-// to Mail or Other, which the log can't name yet.
-function engineItems() {
+// to Mail or Other, which the log can't name yet. `all` keeps those too.
+function engineItems(all = false) {
   const text = fs.readFileSync(path.join(__dirname, '../src/gen3/data/names.hpp'), 'utf8');
   const ids = new Set();
   for (const [, id, item] of text.matchAll(/\{"([a-z0-9]+)", Item::(\w+)\}/g)) {
-    if (!['None', 'Mail', 'Other'].includes(item)) ids.add(id);
+    if (item !== 'None' && (all || !['Mail', 'Other'].includes(item))) ids.add(id);
   }
   if (!ids.size) throw new Error('no items found in names.hpp');
   return ids;
 }
+
+// The ids in one of names.hpp's string arrays (SPECIES_IDS, MOVE_IDS...).
+function engineIds(table) {
+  const text = fs.readFileSync(path.join(__dirname, '../src/gen3/data/names.hpp'), 'utf8');
+  const start = text.indexOf(`${table}[`);
+  const body = text.slice(start, text.indexOf('};', start));
+  const ids = new Set([...body.matchAll(/"([a-z0-9]+)",/g)].map(m => m[1]));
+  if (!ids.size) throw new Error(`no ${table} found in names.hpp`);
+  return ids;
+}
+
+// Showdown spells four moves differently from the decomp (showdown.hpp's
+// MOVE_ALIASES).
+const MOVE_ALIASES = {highjumpkick: 'hijumpkick', feintattack: 'faintattack',
+  smellingsalts: 'smellingsalt', visegrip: 'vicegrip'};
 
 function commitOf(dir) {
   try {
@@ -66,13 +87,69 @@ function commitOf(dir) {
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const sd = path.resolve(opts.showdown);
-  const {PRNG, Teams, TeamValidator} = require(sd);
+  const {PRNG} = require(sd);
+  const seed64 = BigInt.asUintN(64, BigInt(opts.seed));
+  const prng = new PRNG([48n, 32n, 16n, 0n].map(k => Number(seed64 >> k & 0xffffn)));
+  // out[0] is a summary for the file's comment.
+  const {out, counts} = (opts.mode === 'random' ? random : ouLegal)(opts, require(sd), prng);
+  out[0] = [`// gen_teams.cjs --mode ${opts.mode} --teams ${opts.teams} --seed ${seed64}`,
+    `// Showdown ${commitOf(sd)}; ${out[0]}`, ''].join('\n');
+  process.stdout.write(out.join('\n') + '\n');
+  console.error(counts);
+}
+
+function random(opts, {Dex, Teams}, prng) {
+  const dex = Dex.mod('gen3');
+  const gen3 = x => x.exists && !x.isNonstandard && x.gen <= 3;
+  const speciesIds = engineIds('SPECIES_IDS');
+  const moveIds = engineIds('MOVE_IDS');
+  const abilityIds = engineIds('ABILITY_IDS');
+  const itemIds = engineItems(true);
+  // Castform's formes are battle-only; Hidden Power is written bare and takes
+  // its type from the IVs.
+  const species = dex.species.all().filter(s => gen3(s) && speciesIds.has(s.id)).map(s => s.name);
+  const abilities = dex.abilities.all().filter(a => gen3(a) && abilityIds.has(a.id)).map(a => a.name);
+  const moves = dex.moves.all().filter(m => gen3(m) && m.id !== 'struggle' &&
+    !m.name.startsWith('Hidden Power ') && moveIds.has(MOVE_ALIASES[m.id] || m.id)).map(m => m.name);
+  const items = dex.items.all().filter(i => gen3(i) && itemIds.has(i.id)).map(i => i.name);
+  const natures = dex.natures.all().map(n => n.name);
+  const stats = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
+
+  const drawSet = () => {
+    const ivs = {}, evs = {};
+    for (const s of stats) { ivs[s] = prng.random(32); evs[s] = prng.random(256); }
+    const left = moves.slice();
+    const set = {
+      name: '', species: prng.sample(species), level: prng.random(1, 101),
+      gender: prng.sample(['M', 'F', '']), ability: prng.sample(abilities),
+      item: prng.random() < NO_ITEM ? '' : prng.sample(items),
+      nature: prng.sample(natures), ivs, evs, moves: [],
+    };
+    for (let n = prng.random(1, 5); set.moves.length < n;) {
+      set.moves.push(left.splice(prng.random(left.length), 1)[0]);
+    }
+    // Export leaves out happiness 255, and the two parsers default it
+    // differently when the set has Frustration (showdown.hpp), so 255 isn't
+    // drawn with Frustration.
+    const top = set.moves.includes('Frustration') ? 255 : 256;
+    set.happiness = prng.random(top);
+    return set;
+  };
+
+  const out = [`${species.length} species, ${abilities.length} abilities, ` +
+    `${moves.length} moves, ${items.length} items`];
+  for (let n = 0; n < opts.teams; n++) {
+    const team = [];
+    for (let k = prng.random(1, 7); team.length < k;) team.push(drawSet());
+    out.push(`=== [gen3customgame] Random ${n + 1} ===`, '', Teams.export(team).trim(), '');
+  }
+  return {out, counts: {teams: opts.teams}};
+}
+
+function ouLegal(opts, {Teams, TeamValidator}, prng) {
   const validator = TeamValidator.get('gen3ou');
   const dex = validator.dex;
   const rules = validator.ruleTable;
-
-  const seed64 = BigInt.asUintN(64, BigInt(opts.seed));
-  const prng = new PRNG([48n, 32n, 16n, 0n].map(k => Number(seed64 >> k & 0xffffn)));
 
   const engine = engineItems();
   const items = dex.items.all()
@@ -134,11 +211,7 @@ function main() {
     }
   };
 
-  const out = [
-    `// gen_teams.cjs --mode ${opts.mode} --teams ${opts.teams} --seed ${seed64}`,
-    `// Showdown ${commitOf(sd)}; ${pool.length} species, ${items.length} items`,
-    '',
-  ];
+  const out = [`${pool.length} species, ${items.length} items`];
   const counts = {teams: 0, teamRedraws: 0};
   for (let n = 0; n < opts.teams; n++) {
     let team = null;
@@ -154,8 +227,7 @@ function main() {
     out.push(`=== [gen3ou] Random ${n + 1} ===`, '', Teams.export(team).trim(), '');
     counts.teams++;
   }
-  process.stdout.write(out.join('\n') + '\n');
-  console.error(counts);
+  return {out, counts};
 }
 
 main();

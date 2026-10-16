@@ -237,6 +237,16 @@ std::string_view item_id(Item item) {
   return "?";
 }
 
+// Showdown's item id as ours: the items without an effect are all Other (or
+// Mail), so two of them compare equal.
+Item item_of(std::string_view id) {
+  if (id.empty()) return Item::None;
+  for (const ItemName& n : ITEM_IDS) {
+    if (n.id == id) return n.item;
+  }
+  return Item::KnockedOff; // no Showdown item maps here, so it never matches
+}
+
 // As Showdown's Pokemon.status, which is "fnt" once fainted.
 const char* status_id(const Pokemon& p) {
   const Status s = p.status;
@@ -558,7 +568,7 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
         for (const json::Value& x : m[4].array) why += " " + std::to_string(x.integer());
         why += ";";
       }
-      if (item_id(p.item) != m[5].string) {
+      if ((p.item == Item::KnockedOff ? Item::None : p.item) != item_of(m[5].string)) {
         why += std::string(" ") + side + " slot " + std::to_string(slot) +
                ": item " + std::string(item_id(p.item)) + ", Showdown " +
                m[5].string + ";";
@@ -688,7 +698,12 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
       names.shiny[size_t(s)][i] = sets[i]["shiny"].boolean;
     }
   }
-  format::Formatter formatter(names);
+  // Custom Game is a debug format: Showdown shows exact HP to everyone.
+  bool exact_hp = false;
+  for (const json::Value& line : steps[0]["log"].array) {
+    exact_hp |= line.string == "|tier|[Gen 3] Custom Game";
+  }
+  format::Formatter formatter(names, exact_hp);
   std::vector<uint8_t> buffer(protocol::MAX_LOG_SIZE);
 
   Battle battle = *init;

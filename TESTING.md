@@ -24,10 +24,10 @@ kinds of check, in priority order (CLAUDE.md, "Priorities"):
 
 | | OU | Random OU-legal | Truly random |
 |---|---|---|---|
-| Teams | `teams/ou/*.txt` (real Smogon teams) | generated, kept only if gen3ou's validator accepts | generated, no legality check |
-| Showdown format | `gen3ou` | `gen3ou` | `gen3customgame` |
+| Teams | `teams/ou/*.txt` (real Smogon teams) | generated, kept only if gen3ou's validator accepts | generated, no legality at all |
+| Showdown format | `gen3ou` | `gen3ou` | `gen3customgame` + the two clause mods |
 | Strictness | highest | middle | lowest |
-| Built | yes | yes | no |
+| Built | yes | yes | yes |
 
 The two random environments use generators, not the step 5 group files
 (`tools/teams/group*.txt`), which stay in git history. The banned moves
@@ -84,16 +84,44 @@ commit, so a generated team keeps its provenance.
     hits), and Follow Me and Helping Hand, which Showdown's singles logs
     as a failure (lines unchecked) where the engine only uses PP (state
     the same, log only).
-- **Truly random.** As Showdown's `ExhaustiveRunner`
-  (`showdown/sim/tools/exhaustive-runner.ts`), which libpkmn's fuzz uses:
-  cycle through pools of every species, move, ability and item so each
-  appears, with no legality check. Level 100.
-  - Before the first run, audit what this can reach that OU never does
-    (unverified which of these the engine handles): ability/species pairs
-    that don't exist, Follow Me and Helping Hand (also in random
-    OU-legal, above), Quick Claw (the trace script bans it, Showdown's
-    gen3 doesn't log it), and whatever
-    `gen3customgame` allows that gen3ou doesn't.
+- **Truly random** (`tools/gen_teams.cjs --mode random`; decided
+  2026-10-16). No legality at all: every field is drawn independently and
+  uniformly, so it fuzzes rather than covers. Not Showdown's
+  `ExhaustiveRunner`, which cycles pools for coverage.
+  - Per team, 1-6 Pokémon. Per Pokémon: a species over every gen 3 one
+    both sims name (389: Castform's battle-only formes left out), repeats
+    allowed; an ability over all 76, whatever the species; 1-4 distinct
+    moves over all 353 but Struggle (bare Hidden Power, typed by the IVs);
+    an item over the 104 both name (every decomp item but Mail and Friend
+    Ball, `Other` included), or none 10% of the time; level 1-100; IVs
+    0-31; EVs 0-255 each, no total; a nature; happiness 0-255 (not 255
+    with Frustration: export drops 255, and the two parsers' defaults then
+    differ); gender M, F or unstated (Showdown's then picks, and the trace
+    carries it), whatever the species.
+  - Where it stops short (decided): distinct moves, since Showdown keys
+    Disable, Encore, Mimic and Sketch by move ID and the engine by slot,
+    and level 100 at most, the engine's layout.
+  - No validation anywhere (decided): `helpers::check_pokemon` checks only
+    the engine's bounds (IDs, level, IVs, EVs 0-255, a packed and distinct
+    moveset, an ability), and the parser has no Species Clause. The other
+    environments are validated by the trace script's gen3ou validator.
+    Showdown's battle takes any gender a set gives and clamps EVs to 0-255
+    with no total (`sim/pokemon.ts:340,397`).
+  - Showdown plays `gen3customgame@@@Sleep Clause Mod,Freeze Clause Mod`
+    (`showdown_traces.cjs --format custom`): the engine always applies the
+    two clauses, Custom Game has neither. It has no Endless Battle Clause,
+    which the engine doesn't have either; the turn limit isn't part of it
+    (`sim/battle.ts:1842`).
+  - `check_showdown` compares items as engine items, so two `Other` items
+    match (Showdown names them, the engine doesn't).
+  - Reached here and nowhere else: foreign abilities (Truant, Wonder
+    Guard, Forecast off Castform), teams under 6, level differences (OHKO
+    moves, Seismic Toss, Night Shade, Psywave), the Uber species and
+    Deoxys formes (whose stats the generator took from memory), the OU
+    bans (OHKO moves, Swagger, Assist, evasion moves and items, Sand Veil,
+    Soundproof), Quick Claw (unlogged in Showdown's gen3; unverified that
+    `check_showdown` matches its order) and the `Other` items, whose log
+    lines mismatch (log only, uncounted here).
 
 ## Team input
 
@@ -317,7 +345,16 @@ Rationale:
   standard deviations under; a Poisson(9) count passes it 99.9% of the
   time. Against the raw 99.85% it would be only about 1.3 below, so the
   bar assumes the 6 stay fixed.
-- **Truly random at 90%, state only.** Unmeasured, and it reaches
+- **Truly random at 90%, state only.** The log is still compared, since
+  it pins the branch where the state guard can't (Conversion 2's type):
+  Custom Game is a debug format, so Showdown shows exact HP on every
+  public line (`sim/battle.ts:227`), and `check_showdown` formats ours so
+  when the trace's tier is Custom Game. A log-only mismatch still ends
+  that game's check, so the `Other` items' names (log lines "") hide
+  whatever follows them. The first run (2026-10-16) "matched" 1,000 of
+  1,000 by stopping at step 0 on the HP; a run with `--no-log` matched
+  974 of 998, and the one failure diagnosed (Conversion 2) was a wrong
+  branch the log would have ruled out. The bar itself is unmeasured, and the environment reaches
   interactions CLAUDE.md's priority 3 says can wait.
 - **The same safety and chance bars everywhere.** A crash or a collision is
   an engine bug whatever produced the team.
@@ -421,6 +458,24 @@ suite for everything a forced one covers.
 
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
+
+- **Chance-key failures with truly random teams** (undiagnosed;
+  `run_env.py random --scale 0.1 --seed 13342887709897526592`,
+  2026-10-16). Four collisions, each differing only in `request` and each
+  with a switch among the two choices (check_chance games
+  17499747864150418390, 14109578614094302193, 14117078418065394890,
+  5737730489583551945), and one key set whose probabilities sum to 1.53
+  (17016063291978671705, a Raticate mirror with Sand Tomb and Super Fang).
+  Replay with `build/release/check_chance --samples 128 --replay GAME
+  build/runs/random-…/teams.txt` from that run's directory; the run seed
+  regenerates the same teams. A bug by the bars (zero everywhere), and
+  not reached by the OU environments. Suspected, unverified: speed ties,
+  common at random levels. A tie or Quick Claw roll left out of Actions
+  because a switch makes the order irrelevant may still be stored in
+  `Request.first` or `quick_claw`, which outlive the turn; and the sum
+  failure may be "does the order matter" answered differently across
+  branches (Icy Wind changing a tie mid-turn). First check: print both
+  branches' Request and the actives' Speed.
 
 - **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
   OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
@@ -577,7 +632,16 @@ turn, each measured before its bars are fixed.
    cures after Yawn waiting for the Update), which then match, as do
    shards 0 and 11 whole. Bar set to 99.8% (2026-10-16).
 8. Truly random: the audit (Generators), the generator, a measured run,
-   its bar.
+   its bar. Audit, generator and runner done (2026-10-16, Generators);
+   `random` in `tools/criteria.toml`. Exploratory run (seed
+   13342887709897526592, 1,000 games): check_showdown 950 of 953 on the
+   state (99.69%), 47 multi-hit games left out, 40 unmatched (37 by the
+   log alone, at least some the `Other` items' names; unclassified), 0
+   choice-set mismatches; soak 10,000 clean; check_chance 4 collisions and
+   1 sum failure (Known gaps). Paused there by the user (2026-10-16): no
+   10,000-game run, the 90% bar not re-set. Open: give `Other` items an
+   identity in the engine, or let check_showdown continue past a log-only
+   mismatch in a state-only environment.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions

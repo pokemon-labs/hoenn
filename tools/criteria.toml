@@ -42,3 +42,25 @@ games = 100000
 games = 1000
 samples = 128
 alpha = 1e-7
+
+# Truly random (TESTING.md, "Generators"): no legality, Showdown's gen3
+# custom game with the engine's two clauses. The match bar is state only and
+# unmeasured; set it from the 10,000-game run.
+[random]
+generate = { mode = "random", teams = 2000 }
+
+[random.showdown]
+format = "custom"       # showdown_traces.cjs --format
+games = 10000
+tries = 1000000
+matched = 0.90
+log_only_counts = false # a log-only mismatch is reported, not a failure
+choices = 0
+
+[random.soak]
+games = 100000
+
+[random.chance]
+games = 1000
+samples = 128
+alpha = 1e-7

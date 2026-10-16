@@ -321,8 +321,8 @@ struct Team {
   std::vector<helpers::Pokemon> pokemon;
 };
 
-// One team: sets separated by blank lines. Species Clause applies (Smogon's
-// rule, not the cartridge's): no two Pokémon of the same species.
+// One team: sets separated by blank lines, 1-6 of them. No legality checks,
+// not even Species Clause (TESTING.md, "Truly random").
 inline Parsed<Team> parse_team(std::string_view text, RNG& rng) {
   using namespace detail;
   Team team;
@@ -354,14 +354,6 @@ inline Parsed<Team> parse_team(std::string_view text, RNG& rng) {
   }
   if (!flush()) return {std::nullopt, error};
   if (const char* why = helpers::check_side(team.pokemon)) return {std::nullopt, why};
-  for (size_t i = 0; i < team.pokemon.size(); i++) {
-    for (size_t j = 0; j < i; j++) {
-      if (team.pokemon[i].species == team.pokemon[j].species) {
-        return {std::nullopt, "Species Clause: two " +
-                                  std::string(names::SPECIES_IDS[uint16_t(team.pokemon[i].species)])};
-      }
-    }
-  }
   return {std::move(team), {}};
 }
 

@@ -5,7 +5,8 @@
 // The output is Showdown's raw omniscient log (decided 2026-10-08): a
 // message that shows HP is the |split|pN triplet of sim/battle.ts addSplit,
 // the marker, the line with exact HP, then the line HP Percentage Mod shows
-// everyone else. Each player's view comes from Showdown's own
+// everyone else (or exact HP again in a debug format such as Custom Game,
+// Showdown's reportExactHP, sim/battle.ts:227). Each player's view comes from Showdown's own
 // extractChannelMessages, not from here. The formatter writes none of the
 // lines Showdown's FILTER drops (README "Protocol"), nor the blank `|`
 // lines between actions.
@@ -95,7 +96,9 @@ struct Reader {
 // `bytes`), appending lines to `out`.
 class Formatter {
  public:
-  explicit Formatter(const Names& names) : names_(names) {}
+  // `exact_hp`: Showdown's reportExactHP, which a debug format sets.
+  explicit Formatter(const Names& names, bool exact_hp = false)
+      : names_(names), exact_hp_(exact_hp) {}
 
   void format(std::span<const uint8_t> bytes, std::vector<std::string>& out) {
     detail::Reader r{bytes};
@@ -115,6 +118,7 @@ class Formatter {
 
  private:
   const Names& names_;
+  bool exact_hp_;
   size_t last_move_ = SIZE_MAX;
 
   std::string ident(ID id) const {
@@ -161,12 +165,11 @@ class Formatter {
 
   // A line with HP: the split triplet. `before` is the line up to the HP
   // and `after` what follows it.
-  static void split(std::vector<std::string>& out, Player p, const std::string& before,
-                    uint16_t hp, uint16_t max, uint8_t status,
-                    const std::string& after) {
+  void split(std::vector<std::string>& out, Player p, const std::string& before,
+             uint16_t hp, uint16_t max, uint8_t status, const std::string& after) const {
     out.push_back(std::string("|split|") + detail::side_id(p));
     out.push_back(before + detail::health(hp, max, status, true) + after);
-    out.push_back(before + detail::health(hp, max, status, false) + after);
+    out.push_back(before + detail::health(hp, max, status, exact_hp_) + after);
   }
 
   void line(ArgType type, detail::Reader& r, std::vector<std::string>& out) {
