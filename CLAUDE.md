@@ -304,12 +304,21 @@ the log (opcodes, the formatter, Showdown's omniscient stream; README
 "Protocol"). Work now is the test framework (`testing.md`, "Implementation"),
 then fixing what it finds; there is no further plan.
 
-**Next:** `testing.md` Implementation step 8, truly random (the audit,
-the generator, a measured run, its bar). Step 7 is done: random OU-legal's
-bar is 99.8% (`tools/criteria.toml`), set from the rerun (99.85%, 9 of its
-15 failures the Truant gap, the other 6 fixed after).
-`build/runs/classify.py`'s KNOWN list is out of date (all of those items
-are written now).
+**Next** (agreed 2026-10-16, in order). Step 7 is done: random
+OU-legal's bar is 99.8% (`tools/criteria.toml`), set from the rerun
+(99.85%; 9 of its 15 failures the Truant gap, the other 6 fixed after).
+1. A regression fixture (testing.md: a failing game "becomes a committed
+   fixture"; nothing implements it yet): the fixed failing games from the
+   step 6-7 runs, replayed by check_showdown in ctest. Open, to lay out
+   before writing: commit trace lines whole or trimmed, where they live,
+   Truant games in or out (or as expected failures).
+2. Step 8, safety half first: the audit and the generator (testing.md,
+   "Truly random"), gated on soak and check_chance; check_showdown
+   reported only until those are clean. Report-only departs from
+   testing.md's planned 90% bar: confirm with the user.
+3. Run `bench` (release) for drift, then `min_ko_roll`, Calc's
+   `Summaries` and the search adaptation.
+`build/runs/classify.py`'s KNOWN list is out of date.
 
 **Not written:**
 - `min_ko_roll`, Calc's `Summaries`, the search adaptation.
