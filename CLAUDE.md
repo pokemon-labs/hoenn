@@ -992,8 +992,9 @@ adapted (see Interface).
   `[still]` and `[miss]` were normalized away until group 2
   (`MOVE_ATTRIBUTES`). The traces carry nicknames (`sets[].name`), so
   regenerate old ones. Result: 184 of 200 games (seed 7) match to the
-  end, every failure by the log alone. Run 4 processes at most (the user's
-  12 threads are busy): split the trace by game and `xargs -P4`.
+  end, every failure by the log alone. Split traces by game to run in
+  parallel (`scratch/split.py N prefix traces...`); since 2026-10-15 the
+  user allows all 16 threads (was 4).
 - Done (2026-10-08), the 16 group-1 failures of seed 7, following Showdown:
   - **Residual ties, one coin per stage** (`Stage`, `battler_stage`,
     `stage_order_matters`, `rolls::residual_tie`): 11 failures were exact
@@ -1122,13 +1123,57 @@ adapted (see Interface).
   output in `scratch/all/`)**: group 1 9943, 2 9915 (before the
   Synchronize fix; recheck in `scratch/all/g2b/`), 3 9998, 4 9982, 5 9996,
   6 9947, 7 9988, 8 9718; teams/adv seed 8 992/1000. Soaks clean.
-  check_chance: 1 collision each in groups 1, 2, 4 (all reproduce at
-  6fdcd51) and 8 (game 7159328670391257150, turn 50), undiagnosed.
-  **Next:** read the group 2 recheck; group 8's failures (Mirror Move,
-  Encore + Metronome, choice sets, Trick, Lum not curing Smeargle; ~70%
-  log-only); the 4 collisions; group 6's leftovers (Leftovers order under
-  paralysis, 34 log-only; Grudge's -activate when the KO ends the battle;
-  Focus Punch vs confusion).
+  Group 2 recheck after the Synchronize fix: 9974.
+  check_chance: 1 collision each in groups 1, 2, 4 and 8. Read from the
+  reports (not replayed): all four look like the known winner-HP false
+  positive (a residual KO ends the battle; samples differ only in whether
+  the winner's own residual ran first).
+  **Group 8 fixes (2026-10-15, after 283ac28; UNCOMMITTED, ctest debug and
+  release pass; no soak or check_chance yet)**, all as Showdown: a Role
+  Play failing in its own TryHit still counts as an attack (gotAttacked);
+  Hustle cuts Bide's start accuracy (Physical); the Choice Band lock
+  outlives its band until the holder's next move (cancel()) or the turn's
+  end (turn_cleanup), and any move locks (Struggle, uncalled moves), so a
+  band Tricked back keeps the lock; Pursuit KOing a switcher prints Natural
+  Cure's cure before the faint and Attract's -end before the switch; Lum
+  eats before Rest's heal; a Fire hit thaws before Color Change
+  (`defrost()`); Beat Up is '???' (`move_type`: no Color Change, nothing
+  for Conversion 2); Mirror Move's entry survives the attacker leaving and
+  returning in the same turn (`ActivePokemon::last_taken_from`, in former
+  padding; still 124 B), is pruned at the turn's end, and needs the
+  attacker's last_move; a landing future attack clears it; no faint flush
+  after a multi-hit loop (gen3 prints faints after AfterMove); no Charge
+  -end for a user that fainted; Bide's -end after a confusion self-hit;
+  a Baton Pass recipient's berries/White Herb run before arrive(); an
+  item_cure pass after the residuals (Showdown's Update; Thrash's fatigue
+  confusion vs Lum); Recycle works on a knocked-off hand (Showdown's
+  itemKnockedOff then still blocks Trick/Thief; ours doesn't).
+  `check_showdown`: an all-Imprisoned Pokémon (hidden-disabled moves,
+  every choice becomes Struggle) counts as forced.
+  Group 8 on the same 10k traces (`scratch/g8r/s0-13.jsonl`, 14 shards):
+  9718 -> 9890. Of the 110 left: 69 multi-hit moves via Metronome (rare
+  branches), 30 Encore + a Metronome-called multi-turn move (Showdown's
+  Encore OverrideAction swaps the locked move for Metronome, run as
+  `[from] lockedmove`, no PP, with the lock's handlers still going; left
+  as a known gap, the user's call 2026-10-15), 7 Leftovers order on an exact Speed tie
+  (the coin is a fair 50/50 per stage, verified; probably few
+  state-matching tries, unconfirmed), 2 crit+crit+freeze Porygon2 (rare?),
+  1 crit+freeze+Lum, 1 Limber cure vs Attract -end order (Update speed
+  order, log-only).
+  **Partial rerun with these fixes (2026-10-15, `scratch/run_all16.sh`,
+  output in `scratch/all16/`; stopped after group 4 to start the test
+  framework):** check_showdown groups 1-4 unchanged (9943, 9974, 9998,
+  9982); soaks clean; check_chance 1 collision in groups 1 and 2 (the
+  winner-HP pattern, from the reports) and a **new one in group 3**, not
+  terminal: `check_chance --replay 15040563541741120241
+  tools/teams/group3.txt` (Pelipper mirror, turn 111: P1 first, Toxic hits,
+  p2's Surf crits; p2's fresh toxic ticks in one sample and not the other,
+  same Actions). Undiagnosed; suspect the new item_cure pass or the
+  residual Speed-tie order. Groups 5-8 and the baseline not rerun.
+  **Next:** the test framework (tiers: OU teams, random OU-legal, truly
+  random, each with codified pass criteria); diagnose the group 3
+  collision and finish the rerun under it; commit when the runs hold. Still open from group 6: Grudge's -activate
+  when the KO ends the battle; Focus Punch vs confusion.
   Group 7 done (2026-10-15), as Showdown's gen3: Mist and Safeguard
   (`screen`), Mud Sport and Water Sport (gen4 volatiles on the user, in
   `self_volatile`), Magic Coat (bounces in `try_hit` after the roll and

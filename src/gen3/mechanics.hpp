@@ -890,6 +890,17 @@ constexpr void turn_cleanup(Battle& battle) {
       }
     }
     if (a.substitute_hp == 0) a.volatiles.substitute = false;
+    // Showdown's endTurn drops an attackedBy entry whose source isn't active
+    // (sim/battle.ts:1707): one that left and came back keeps it.
+    const Side& other = battle.sides[&side == &battle.sides[0] ? 1 : 0];
+    if (a.last_taken_from != other.order[0]) {
+      a.last_taken_move = Move::None;
+      a.last_taken_from = 0;
+    }
+    // Showdown's choicelock onDisableMove (cancel()).
+    bool known = false;
+    for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
+    if (!known || !holds(side, HoldEffect::ChoiceBand)) a.choice_move = Move::None;
   }
 }
 
@@ -980,7 +991,6 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   // (leave()): its onUpdate runs then.
   // Showdown keeps the foe's partiallytrapped until its residual (Stage::Bind).
   if (f.volatiles.wrapped != 0) f.volatiles.wrapper_gone = true;
-  f.last_taken_move = Move::None;
 
   if constexpr (CHANCE<O>) {
     Durations::Side& d = options.chance.durations.get(player);
@@ -1522,9 +1532,6 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   // recipient isn't the source.
   if (f.volatiles.wrapped != 0) f.volatiles.wrapper_gone = true;
   if (!baton) f.volatiles.escape_prevention = false;
-  // Showdown's clearVolatile drops the leaver's lastMove, which Mirror Move
-  // needs from its attacker.
-  f.last_taken_move = Move::None;
 
   std::swap(side.order[0], side.order[slot - 1]);
   if constexpr (CHANCE<O>) options.chance.durations.switched(player, slot, baton);
@@ -1594,6 +1601,9 @@ constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
   n.wrapper_gone = v.wrapper_gone;
   n.lock_on = v.lock_on;
   a.wrapped_move = old.wrapped_move;
+  // Showdown's gen3 Update after the Baton Pass action, before the
+  // recipient's runSwitch: a berry or White Herb takes what was passed.
+  item_cure(battle, player, options);
   arrive(battle, player, options);
 }
 
@@ -2091,7 +2101,6 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     if (!ended && rolls::confusion(battle, player, options)) {
       m.self = true;
       m.unable = true;
-      abort_move(battle, player, options);
       uint32_t d = apply_roll(damage(battle, player, player, Hit::confusion()),
                               rolls::damage(battle, player, 0, options));
       const ItemData item = item_data(mon.item);
@@ -2106,6 +2115,8 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
       mon.hp = mon.hp > d ? uint16_t(mon.hp - d) : 0;
       protocol::damage(options.log, protocol::ident(battle, player), mon,
                        protocol::Damage::Confusion);
+      // Showdown's MoveAborted comes after the self-hit (Bide's -end).
+      abort_move(battle, player, options);
       if (mon.fainted()) faint(battle, player, options);
       return false;
     }
@@ -2133,6 +2144,11 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
     m.unable = true;
     return false;
   }
+
+  // Showdown's choicelock onBeforeMove (priority 0): a lock whose band is
+  // gone ends here or at the end of the turn (turn_cleanup), not when the
+  // band leaves, so a band Tricked back the same turn finds it still set.
+  if (!holds(side, HoldEffect::ChoiceBand)) a.choice_move = Move::None;
 
   // CANCELER_TAUNTED
   if (a.taunt != 0 && get(m.move).bp == 0) {
@@ -2526,6 +2542,9 @@ constexpr uint16_t passive_damage(Battle& battle, Player player,
 // in its move ID. Whether it's physical follows the type, as both agree.
 constexpr Type move_type(const Battle& battle, Move move) {
   const MoveData& data = get(move);
+  // Showdown's gen3 Beat Up is '???' (onModifyMove): no Color Change, and
+  // nothing for Conversion 2 to resist.
+  if (data.effect == Effect::BeatUp) return Type::Mystery;
   if (data.effect != Effect::WeatherBall) return data.type;
   switch (effective_weather(battle)) {
   case Weather::Sun: return Type::Fire;
@@ -3335,6 +3354,25 @@ constexpr void synchronize(Battle& battle, Player holder, MoveState& m,
                                              protocol::ident(battle, holder)));
 }
 
+// MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
+// Power's damage is recorded under its base type, Normal, so Hidden Power
+// Fire doesn't thaw (datahpupdate, bsc:1852). The table's type, not the type
+// as used: Showdown's gen3 frz checks the base move's type
+// (data/mods/gen3/conditions.ts:47), so Weather Ball in sun doesn't thaw.
+// It's a DamagingHit handler there, run before the abilities' (a condition's
+// sub-order), so the hit calls it before ability_on_damage.
+template <typename O>
+constexpr void defrost(Battle& battle, Player player, const MoveState& m, O& options) {
+  Pokemon& target = battle.side(foe(player)).get(1);
+  const MoveData& data = get(m.move);
+  if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
+      !(m.result & MoveResult::NO_EFFECT) && data.type == Type::Fire &&
+      data.effect != Effect::HiddenPower) {
+    protocol::cure_status(options.log, protocol::ident(battle, foe(player)), target.status);
+    target.status = Status::none();
+  }
+}
+
 // ABILITYEFFECT_ON_DAMAGE (util:2735): the target's Color Change, or its
 // contact ability acting on the attacker (p). Only after the target's own
 // HP took damage from a move with an effect, so never on a self-targeting
@@ -3351,7 +3389,8 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
   const MoveData& data = get(m.move);
 
   if (t.ability == Ability::ColorChange) {
-    if (m.move != Move::Struggle && data.bp != 0 && !has_type(t, m.type) &&
+    if (m.move != Move::Struggle && data.bp != 0 && m.type != Type::Mystery &&
+        !has_type(t, m.type) &&
         !target_mon.fainted()) {
       t.types[0] = m.type;
       t.types[1] = m.type;
@@ -3484,22 +3523,12 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   ActivePokemon& a = side.active;
   Side& target_side = m.self ? side : battle.side(foe(player));
   ActivePokemon& t = target_side.active;
-  const Pokemon& target = target_side.get(1);
-  const MoveData& data = get(m.move);
   const bool no_effect = m.result & MoveResult::NO_EFFECT;
 
   // MOVEEND_RAGE is rage(), at Showdown's onHit.
 
-  // MOVEEND_DEFROST: a Fire move's special damage thaws the target. Hidden
-  // Power's damage is recorded under its base type, Normal, so Hidden Power
-  // Fire doesn't thaw (datahpupdate, bsc:1852). The table's type, not the type as
-  // used: Showdown's gen3 frz checks the base move's type
-  // (data/mods/gen3/conditions.ts:47), so Weather Ball in sun doesn't thaw.
-  if (!m.self && target.status.frozen() && !target.fainted() && m.damaged &&
-      !no_effect && data.type == Type::Fire && data.effect != Effect::HiddenPower) {
-    protocol::cure_status(options.log, protocol::ident(battle, foe(player)), target.status);
-    target_side.get(1).status = Status::none();
-  }
+  // MOVEEND_DEFROST, where the hit didn't already run it (defrost()).
+  defrost(battle, player, m, options);
 
   // MOVEEND_SYNCHRONIZE_TARGET, ON_DAMAGE_ABILITIES, IMMUNITY_ABILITIES,
   // SYNCHRONIZE_ATTACKER. No self-targeting move arms Synchronize (Rest's
@@ -3516,18 +3545,13 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // Showdown.
   if (m.stolen != Item::None) side.get(1).item = m.stolen;
 
-  // MOVEEND_CHOICE_MOVE. A Baton Pass that worked doesn't lock, and skips
-  // the check that the locked move is still known.
-  bool skip = false;
-  if (m.obeys && holds(side, HoldEffect::ChoiceBand) &&
-      m.chosen != Move::Struggle && a.choice_move == Move::None) {
-    skip = m.chosen == Move::BatonPass && !(m.result & MoveResult::FAILED);
-    if (!skip) a.choice_move = m.chosen;
-  }
-  if (!skip) {
-    bool known = false;
-    for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
-    if (!known) a.choice_move = Move::None;
+  // MOVEEND_CHOICE_MOVE, as Showdown's (gen4 items.ts onAfterMove): any
+  // move locks, Struggle or one the user doesn't know too; such a lock
+  // lasts until the end of the turn (turn_cleanup), as choicelock's
+  // onDisableMove. A Baton Pass that worked doesn't lock.
+  if (m.obeys && holds(side, HoldEffect::ChoiceBand) && a.choice_move == Move::None &&
+      !(m.chosen == Move::BatonPass && !(m.result & MoveResult::FAILED))) {
+    a.choice_move = m.chosen;
   }
 
   // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends the
@@ -3567,7 +3591,10 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   }
 
   // MOVEEND_MIRROR_MOVE, as Showdown's attackedBy (mirror_move()).
-  if (m.attacked && !m.self && mirrors(t)) t.last_taken_move = m.move;
+  if (m.attacked && !m.self && mirrors(t)) {
+    t.last_taken_move = m.move;
+    t.last_taken_from = side.order[0];
+  }
 }
 
 // Every move with one of those effects has a power to hit with.
@@ -4138,6 +4165,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
         secondary(battle, player, m, options, i);
         synchronize(battle, defender, m, options);
       }
+      defrost(battle, player, m, options);
       ability_on_damage(battle, player, m, i, options);
       for (const Player p : {Player::P1, Player::P2}) {
         if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
@@ -4148,9 +4176,9 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     if (effect == Effect::TripleKick) rolls::kicks(player, hits, options);
     m.damaged = damaged;
     m.contact_done = true;
+    // Gen3's tryMoveHit prints no faint here: they wait for the end of
+    // runMove, after AfterMove (Charge's -end).
     protocol::hit_count(options.log, protocol::ident(battle, defender), hits);
-    // Showdown's faintMessages after the hit loop (sim/battle-actions.ts:969).
-    protocol::faints(options.log);
   } else {
     // critcalc, damagecalc, typecalc, then adjustnormaldamage: the roll,
     // then whatever lets the target survive at 1 HP (not behind a
@@ -4406,9 +4434,9 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // drops, the secondaries and the AfterHit handlers (Knock Off, Thief),
   // before the recoil (applyRecoilDamage in tryMoveHit). The decomp runs it
   // in moveend (MOVEEND_ON_DAMAGE_ABILITIES), after all of them. Rage's
-  // boost is rage(), at onHit. The defrost, a DamagingHit there too, stays
-  // in moveend: no move on the teams reaches that order.
+  // boost is rage(), at onHit.
   if (!m.contact_done) {
+    defrost(battle, player, m, options);
     ability_on_damage(battle, player, m, 0, options);
     m.contact_done = true;
   }
@@ -4666,8 +4694,10 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
   mon.hp = mon.stats.hp;
   const ID id = protocol::ident(battle, player);
   protocol::status(options.log, id, mon.status, protocol::StatusSource::by_move(Move::Rest));
-  protocol::heal(options.log, id, mon, protocol::Heal::Silent);
   if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 1;
+  // Showdown's Lum Berry eats before the heal (onAfterSetStatus, inflict()).
+  if (item_data(mon.item).effect == HoldEffect::CureStatus) item_cure(battle, player, options);
+  protocol::heal(options.log, id, mon, protocol::Heal::Silent);
   moveend(battle, player, m, options);
 }
 
@@ -5987,9 +6017,9 @@ constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
   m.attackstring = true;
   pp_reduce(battle, player, m);
   // Showdown's gen3 Bide is aimed at the user with accuracy 100, so its own
-  // stages count, as Nature Power's.
+  // stages count, as Nature Power's, and Hustle's 0.8 (it's Physical).
   const uint32_t calc = staged_accuracy(battle, player, get(m.move).accuracy,
-                                        a.boosts.acc, a.ability, false);
+                                        a.boosts.acc, a.ability, true);
   if (calc < 100 && !rolls::hit(battle, player, calc, options)) {
     const ID id = protocol::ident(battle, player);
     protocol::miss(options.log, id, id);
@@ -6574,19 +6604,25 @@ constexpr bool no_mirror(Move move) {
 
 // Mirror Move, as Showdown's gen3 (data/mods/gen3/moves.ts:432): the last
 // move that got past the accuracy check and TryHit on the user
-// (last_taken_move, Showdown's attackedBy), if its user is still in, still
-// knows it and it isn't on the noMirror list; else it fails. The decomp
+// (last_taken_move, Showdown's attackedBy), if its user is in (the same
+// Pokémon, last_taken_from), has used a move since it came in (its
+// lastMove, which clearVolatile drops), still knows it and it isn't on the
+// noMirror list; else it fails. The decomp
 // keeps the flag FLAG_MIRROR_MOVE_AFFECTED instead.
 template <typename O>
 constexpr void mirror_move(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   m.attackstring = true;
   pp_reduce(battle, player, m);
-  const Move move = battle.side(player).active.last_taken_move;
-  bool known = false;
-  for (const MoveSlot& ms : battle.side(foe(player)).active.moves) {
-    known |= ms.id == move || (is_hidden_power(ms.id) && is_hidden_power(move));
+  const ActivePokemon& a = battle.side(player).active;
+  const Move move = a.last_taken_move;
+  const Side& source = battle.side(foe(player));
+  bool known = a.last_taken_from == source.order[0] && source.active.last_move != Move::None;
+  bool knows = false;
+  for (const MoveSlot& ms : source.active.moves) {
+    knows |= ms.id == move || (is_hidden_power(ms.id) && is_hidden_power(move));
   }
+  known &= knows;
   if (move == Move::None || no_mirror(move) || !known) {
     protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
@@ -6749,8 +6785,6 @@ constexpr void role_play(Battle& battle, Player player, MoveState& m, O& options
   }
   if (mine == theirs || theirs == Ability::WonderGuard ||
       (swap && mine == Ability::WonderGuard)) {
-    // Role Play's is a TryHit failure: no gotAttacked.
-    if (!swap) m.attacked = false;
     protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
@@ -6773,9 +6807,9 @@ constexpr void role_play(Battle& battle, Player player, MoveState& m, O& options
 // target's Sticky Hold makes it immune (onTryImmunity), then a Substitute
 // stops it. It fails if either item was knocked off (takeItem, gen 4 and
 // earlier), neither holds one, or either holds Mail (its onTakeItem).
-// Otherwise the items swap; a Choice Band lock ends with its band (the
-// choicelock volatile's onDisableMove), and the user's new band locks it
-// into Trick (moveend, as Thief). Log: Activate Trick, then the target's
+// Otherwise the items swap; a Choice Band lock outlives its band until
+// the holder's next move or the end of the turn (cancel()), and the user's
+// new band locks it into Trick (moveend, as Thief). Log: Activate Trick, then the target's
 // Item or silent EndItem, then the user's.
 template <typename O>
 constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
@@ -6817,16 +6851,16 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   }
   user.item = theirs;
   target.item = mine;
-  if (!holds(side, HoldEffect::ChoiceBand)) side.active.choice_move = Move::None;
-  if (!holds(foe_side, HoldEffect::ChoiceBand)) foe_side.active.choice_move = Move::None;
   moveend(battle, player, m, options);
 }
 
 // Recycle, as Showdown's (gen4 drops its snatch flag): the item last used
 // up in this position (Side::recycle_item, Showdown's lastItem, which gen 4
 // and earlier hand to the switch-in) comes back to an empty hand; it fails
-// otherwise. Showdown lets a Pokémon whose item was knocked off recycle;
-// here the Knock Off sentinel stays and it fails. Log: Item [from] Recycle.
+// otherwise. A knocked-off hand counts as empty, as Showdown's (Knock Off
+// sets no lastItem, so only an item used up earlier comes back). Showdown's
+// itemKnockedOff then still stops Trick and Thief from taking it; here the
+// recycled item replaces the sentinel and they can. Log: Item [from] Recycle.
 template <typename O>
 constexpr void recycle(Battle& battle, Player player, MoveState& m, O& options) {
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
@@ -6834,7 +6868,8 @@ constexpr void recycle(Battle& battle, Player player, MoveState& m, O& options) 
   pp_reduce(battle, player, m);
   Side& side = battle.side(player);
   Pokemon& mon = side.get(1);
-  if (mon.item != Item::None || side.recycle_item == Item::None) {
+  if ((mon.item != Item::None && mon.item != Item::KnockedOff) ||
+      side.recycle_item == Item::None) {
     protocol::failed(options.log, protocol::ident(battle, player));
     m.result |= MoveResult::FAILED;
     return moveend(battle, player, m, options);
@@ -6997,7 +7032,8 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   } else if (forced(a)) {
     // gCurrMovePos keeps the slot chosen when the lock began *(verify)*.
     // A locked move uses no PP (Showdown's runMove skips deductPP while
-    // getLockedMove names one).
+    // getLockedMove names one). Known gap: Showdown's Encore on a lock that
+    // Metronome called runs Metronome as the locked move instead.
     m.move = a.locked_move;
     m.locked = true;
     m.no_pp = true;
@@ -7030,8 +7066,9 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   const bool charged = a.volatiles.charged_up;
   execute(battle, player, m, options);
   // Charge's onAfterMove and onMoveAborted (self_volatile); not after
-  // Pursuit on a switching target, which Showdown runs with useMove.
-  if (charged && !pursuing && m.move != Move::Charge) {
+  // Pursuit on a switching target, which Showdown runs with useMove, nor
+  // for a user that fainted (Showdown prints no -end then; faint() clears it).
+  if (charged && !pursuing && m.move != Move::Charge && !battle.side(player).get(1).fainted()) {
     a.volatiles.charged_up = false;
     protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
   }
@@ -7097,8 +7134,22 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
       if (i == 0 && pursues(battle, foe(p))) {
         protocol::activate(options.log, protocol::ident(battle, p),
                            protocol::Activate::Pursuit);
+        const Status status = battle.side(p).get(1).status;
         use_move(battle, foe(p), false, turn, options, true);
+        // A KO: Showdown's switch action goes on, and its SwitchOut prints
+        // Natural Cure's cure before the queued faint; gen3's Update after
+        // the action then ends the foe's Attract before the switch line.
+        const bool ko = battle.side(p).get(1).fainted();
+        if (ko && battle.side(p).active.ability == Ability::NaturalCure && status.any()) {
+          protocol::cure_status(options.log, protocol::ident(battle, p), status,
+                                protocol::Cure::NaturalCure);
+        }
         protocol::faints(options.log);
+        if (ActivePokemon& f = battle.side(foe(p)).active; ko && f.volatiles.infatuated) {
+          protocol::end_effect(options.log, protocol::ident(battle, foe(p)),
+                               protocol::End::Attract);
+          f.volatiles.infatuated = false;
+        }
         pursued = true;
       }
       switch_to(battle, p, c.data(), options);
@@ -7771,6 +7822,10 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   m.slot = MoveState::NO_SLOT;
   const uint32_t d = survive(battle, user, m, stored, rolls::FUTURE, options);
   m.hp_dealt = hp_update(battle, player, d, m, options);
+  // Its tryMoveHit records it in attackedBy, and both moves are on Mirror
+  // Move's noMirror list: Mirror Move fails until the next attack.
+  side.active.last_taken_move = Move::None;
+  side.active.last_taken_from = 0;
   ActivePokemon& a = side.active;
   if (a.substitute_hp == 0) a.volatiles.substitute = false;
   if (m.damaged) {
@@ -7945,6 +8000,13 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     if (a.stall != 0 && --a.stall == 0) a.protect_uses = 0;
   }
   if (Flow over = outcome(battle)) return over;
+  // Showdown's gen3 Update after the residual action (sim/battle.ts:2915),
+  // unless a replacement is due: a berry takes what came after the item
+  // stage (Thrash's confusion, Yawn's sleep).
+  if (!battle.sides[0].get(1).fainted() && !battle.sides[1].get(1).fainted()) {
+    const Player first = log_order(battle);
+    for (const Player p : {first, foe(first)}) item_cure(battle, p, options);
+  }
   return faints(battle, Phase::FaintAfterResiduals);
 }
 

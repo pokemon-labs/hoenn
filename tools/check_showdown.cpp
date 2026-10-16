@@ -234,12 +234,33 @@ std::string choice_string(Choice c) {
   return "?";
 }
 
-std::vector<std::string> showdown_choices(const json::Value& step,
+// Whether every move of the side's active Pokémon is disabled or out of PP
+// in `prev`'s state. Imprison disables moves as 'hidden': Showdown's request
+// still offers them, and any of them becomes Struggle (side.ts chooseMove).
+bool hidden_struggle(const json::Value* prev, const char* side) {
+  if (!prev) return false;
+  const json::Value& moves = (*prev)["state"][std::string(side) + "active"]["moves"];
+  if (moves.array.empty()) return false;
+  for (const json::Value& m : moves.array) {
+    if (!m[2].boolean && m[1].integer() > 0) return false;
+  }
+  return true;
+}
+
+bool showdown_forced(const json::Value& step, const json::Value* prev, const char* side) {
+  return step["forced"][side].boolean || hidden_struggle(prev, side);
+}
+
+std::vector<std::string> showdown_choices(const json::Value& step, const json::Value* prev,
                                           const char* side) {
   std::vector<std::string> out;
-  const bool forced = step["forced"][side].boolean;
+  const bool forced = showdown_forced(step, prev, side);
   for (const json::Value& c : step["choices"][side].array) {
-    out.push_back(forced && c.string == "move 1" ? "forced" : c.string);
+    if (forced && c.string.rfind("move ", 0) == 0) {
+      if (c.string == "move 1") out.push_back("forced");
+    } else {
+      out.push_back(c.string);
+    }
   }
   std::sort(out.begin(), out.end());
   return out;
@@ -659,7 +680,8 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
         std::vector<std::string> ours;
         for (uint8_t i = 0; i < n; i++) ours.push_back(choice_string(out[i]));
         std::sort(ours.begin(), ours.end());
-        const std::vector<std::string> theirs = showdown_choices(step, side);
+        const std::vector<std::string> theirs =
+            showdown_choices(step, k > 0 ? &steps[k - 1] : nullptr, side);
         if (ours != theirs) {
           std::printf("game %lld, step %zu (turn %u): %s's choices differ\n  ours:",
                       game, k, battle.turn, side);
@@ -674,8 +696,9 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
       }
     }
 
-    const Choice x = to_choice(step["chosen"]["p1"].string, step["forced"]["p1"].boolean);
-    const Choice y = to_choice(step["chosen"]["p2"].string, step["forced"]["p2"].boolean);
+    const json::Value* prev = k > 0 ? &steps[k - 1] : nullptr;
+    const Choice x = to_choice(step["chosen"]["p1"].string, showdown_forced(step, prev, "p1"));
+    const Choice y = to_choice(step["chosen"]["p2"].string, showdown_forced(step, prev, "p2"));
     std::string why;
     std::map<std::string, uint64_t> tally;
     bool matched = false;

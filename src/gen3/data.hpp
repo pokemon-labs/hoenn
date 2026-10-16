@@ -553,6 +553,10 @@ struct ActivePokemon {
   // whose duration otherwise runs out at that turn's residuals: bit 0 for the
   // lock (lockedmove or rollout), bit 1 for furycutter (RENEWED_*).
   uint8_t renewed;
+  // The party position (Side::order value, 1-6) of the Pokémon whose move
+  // set last_taken_move: Showdown's attackedBy source, kept while it's away
+  // until the end of the turn (turn_cleanup).
+  uint8_t last_taken_from;
 
   static constexpr uint8_t RENEWED_LOCK = 1;
   static constexpr uint8_t RENEWED_FURY_CUTTER = 2;
@@ -579,7 +583,7 @@ struct ActivePokemon {
            stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
            rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
            first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
-           move_actions <= 2 && renewed <= 3 &&
+           move_actions <= 2 && renewed <= 3 && last_taken_from <= 6 &&
            stall <= 2;
   }
 
