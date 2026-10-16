@@ -69,20 +69,22 @@ Now: `soak`, `check_chance`, `check_teams` and `coverage` take several
 files; `showdown_traces.cjs --teams FILE` and `bench` take one;
 `protocol_survey.cjs` hard-codes `all.txt`. The ctest `check_teams` globs
 `../teams/adv/*.txt`, so it parses every team twice (once from
-`all.txt`).
+`all.txt`); it should leave `all.txt` out too.
 
 Decided (2026-10-15): every tool that takes teams takes a list of team
 files as positional arguments (one file is a list of one) and pools every
-team in them. Same behaviour in every tool.
+team in them. Same behaviour in every tool. The OU environment passes the
+dump files in `../teams/adv/`, every `*.txt` but `all.txt`, which stays
+for birch.
 
 Proposed:
 
 - A team is identified by (file, index in the file, title). The trace's
   game record carries both teams' identities, and every failure report
   prints them.
-- `all.txt` is deleted. It lives in the birch repo (`../teams/adv/`), and
-  birch's `README.md`, `teams/adv/README.md` and `docs/HANDOFF.md` mention
-  it, so that's a separate birch commit.
+- Open: the teams are in the birch repo, outside this one
+  (`pokemon-labs/hoenn`), so a fresh checkout of this repo alone (a CI
+  machine) has no OU teams. Copy them in, or check out birch too.
 - Some teams appear in more than one file (e.g. "DDSala OffCune
   PursuitMeta RestLax SDHera"). Pooled as given, they're drawn twice as
   often; no dedupe.
@@ -209,6 +211,16 @@ comparison, since the log hides some state.
 "Matched" is a `check_showdown` game reproduced to its end, state and log,
 within the cap. Every bar is per run.
 
+**Multi-hit failures are allowed** (decided 2026-10-15, every
+environment): a game whose first unmatched step is a multi-hit move
+(Effect::MultiHit, Beat Up, Double Kick, Triple Kick, Twineedle,
+Bonemerang, or one of these called by Metronome, Sleep Talk, Mirror
+Move or Assist) counts as neither matched nor failed: it leaves the
+denominator, and the summary reports how many. Rule proposed, not built:
+`check_showdown` doesn't classify failures by move yet. The cost: a real
+multi-hit bug past the first hit would hide here, so `soak` and
+`check_chance` are its only cover.
+
 | | OU | Random OU-legal | Truly random |
 |---|---|---|---|
 | `check_showdown` games | 10,000 | 10,000 | 10,000 |
@@ -227,9 +239,9 @@ Rationale:
 - **OU at 98.5%.** Measured: 99.2% on 1,000 games (seed 8, 2026-10-08),
   too few to place a bar 4 standard deviations below (±0.28). Every
   failure there is a rare branch the random search missed (Beat Up, Rock
-  Blast), not a known engine bug. Re-set the bar from a 10,000-game
-  baseline. It should rise toward 99.9% once Showdown's draws are forced
-  (limitation 3 below), which would leave only real mismatches.
+  Blast), not a known engine bug, and multi-hit failures now leave the
+  count, so the measured rate should rise. Re-set the bar from a
+  10,000-game baseline.
 - **Random OU-legal at 97%, state only.** Unmeasured. The group files ran
   98.9% to 99.98% (10,000 games each), but they're hand-built around a few
   moves; uniform random sets will reach more rare-branch moves and
@@ -264,11 +276,13 @@ reporting job against master, defined but not hooked up to Showdown's
 pushes yet.
 
 **Decided (2026-10-15): Showdown itself, not `@pkmn/sim`.** Gating uses
-smogon/pokemon-showdown at a pinned commit (now `c046106`, 0.11.11);
-reporting uses master. That means the pin must live in the repo as a file
-the jobs read (now it's only prose in CLAUDE.md, and `showdown/` is an
-ignored depth-1 clone), and a job clones and builds Showdown before
-running.
+smogon/pokemon-showdown at a pinned commit; reporting uses master. The pin
+is a file in the repo holding the full commit hash (now
+`c046106cbe075931b1ff8d8b800ff5be47a85f96`, 0.11.11), which the runner
+reads to check out and build Showdown. Today the pin is only prose in
+CLAUDE.md and the commit of the ignored local clone `showdown/`, so a
+fresh checkout can't know which Showdown to test against. Bumping
+Showdown is then a one-line commit.
 
 For comparison, libpkmn (`~/oak/cpp/extern/engine/.github/workflows/`):
 `test.yml` gates on push and pull request against a pinned `@pkmn/sim`
@@ -314,15 +328,16 @@ built.
   `check_showdown` runs in release; the pick set is otherwise checked only
   by the unforced games.
 
-**An inconsistency.** The Metronome pick is forced because a low
+**Multi-hit moves aren't forced.** The Metronome pick is forced because a low
 probability defeated the search, yet Beat Up and Rock Blast games fail in
 the same test for the same reason (six exact rolls are about 4e-8 per
 try) and aren't forced. It's a special case added when group 8 needed it,
 not a principle. Their draws are just as public: `-crit` and `-hitcount`
 are logged, and each roll follows from the HP change. The principled
-version is limitation 3: force every public draw Showdown made, recorded
-by wrapping its PRNG, and search only the hidden ones. Then the Metronome
-special case goes.
+version would force every public draw Showdown made, recorded by wrapping
+its PRNG (limitation 3). Rejected (the user, 2026-10-15): too much
+machinery around Showdown's source. Instead a game lost to a multi-hit
+move is allowed in every environment (Pass criteria).
 
 **The risk.** A forced test trusts the override path. If an override is
 applied where the free draw isn't, a forced test can pass while the free
@@ -385,8 +400,8 @@ them. Most important for search first:
    current OU failure is of this kind. Fix for 2 and 3: the trace script
    records Showdown's public draws (roll, crit, secondaries) by wrapping
    its PRNG, tagged by call site, and the checker forces them through
-   Calc; hidden counters stay sampled. This would revise the "random
-   branch search" decision.
+   Calc; hidden counters stay sampled. Rejected 2026-10-15; multi-hit
+   failures are allowed instead (Pass criteria).
 4. **One direction only.** Branches we have and Showdown doesn't are what
    search exploits. A statistical reverse test is cheaper than replaying
    into Showdown.
@@ -416,9 +431,34 @@ list stays current. It needs fixed seeds and stable failures, which means
 limitation 3 fixed first: until then, any change to the number of tries a
 game needs reshuffles which rare branches fail.
 
+## Implementation
+
+Order (agreed 2026-10-15): shared pieces first, then each environment in
+turn, each measured before its bars are fixed.
+
+1. Team input as a pooled list of files in every tool (`showdown_traces.cjs`,
+   `bench`, `protocol_survey.cjs`; the ctest `check_teams` leaves out
+   `all.txt`).
+2. `check_chance`'s terminal-state comparison (`Result` and probability).
+3. `check_showdown`'s multi-hit classification.
+4. The criteria file: per environment, the game counts, try cap, bars
+   and which mismatches count, read by the runner, so tightening a bar is
+   a one-line diff. The Showdown pin file.
+5. The runner: one committed command per environment, running the suites
+   in parallel shards, fresh seeds unless given, printing seeds and
+   commits, exit nonzero on any failed bar. Replaces
+   `scratch/run_all16.sh`.
+6. OU: a 10,000-game run to measure the real match rate (98.5% is a guess
+   from 1,000 games), then set the bar a safe margin under it.
+7. Random OU-legal: the generator, a measured run, its bar.
+8. Truly random: the audit (Generators), the generator, a measured run,
+   its bar.
+9. CI, later: a gating workflow, then the reporting one.
+
 ## Decisions
 
-Decided (2026-10-15): percentages for now; fresh seeds; team files as a
+Decided (2026-10-15): percentages for now; multi-hit failures allowed;
+no PRNG wrapping; fresh seeds; team files as a
 pooled list, the same in every tool; generators for the two random
 environments; Showdown itself (pinned for gating, master for reporting),
 not `@pkmn/sim`; terminal states compared by `Result` and probability;
@@ -428,3 +468,4 @@ Open:
 
 1. **Where the jobs run, and how often** (deferred by the user).
 2. **Re-setting the bars** from measured 10,000-game baselines.
+3. **The OU teams outside this repo** (Team input).
