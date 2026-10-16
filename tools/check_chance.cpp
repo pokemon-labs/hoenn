@@ -68,7 +68,16 @@ struct Value {
   Result result;
   double probability;
 
-  friend bool operator==(const Value&, const Value&) = default;
+  // Search never expands a terminal state, so two ends must agree only on
+  // the Result and the probability (testing.md, "Terminal states"): the
+  // winner's HP may differ.
+  friend bool operator==(const Value& a, const Value& b) {
+    if (a.result.over() || b.result.over()) {
+      return a.result == b.result && a.probability == b.probability;
+    }
+    return a.battle == b.battle && a.durations == b.durations &&
+           a.result == b.result && a.probability == b.probability;
+  }
 };
 
 struct Totals {
@@ -144,7 +153,8 @@ void print_state(const Battle& battle, const Durations& durations) {
 
 // Names the parts of two values that differ.
 void print_diff(const Value& a, const Value& b) {
-  std::printf("  differs in:");
+  std::printf("  results %u/%u, differs in:", unsigned(a.result.type()),
+              unsigned(b.result.type()));
   if (a.result != b.result) std::printf(" result");
   if (a.probability != b.probability) std::printf(" probability");
   if (!(a.durations == b.durations)) std::printf(" durations");

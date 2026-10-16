@@ -1037,8 +1037,9 @@ adapted (see Interface).
   p2's Surf crits; p2's fresh toxic ticks in one sample and not the other,
   same Actions). Undiagnosed; suspect the new item_cure pass or the
   residual Speed-tie order. Groups 5-8 and the baseline not rerun.
-  **Next:** the test framework, specified in `testing.md`; diagnose the group 3
-  collision and finish the rerun under it; commit when the runs hold. Still open from group 6: Grudge's -activate
+  **Next:** the test framework, specified in `testing.md` (steps 1-3 of
+  its Implementation done 2026-10-15; the group 3 collision was the
+  winner-HP false positive after all); finish the rerun under it. Still open from group 6: Grudge's -activate
   when the KO ends the battle; Focus Punch vs confusion.
   Group 7 done (2026-10-15), as Showdown's gen3: Mist and Safeguard
   (`screen`), Mud Sport and Water Sport (gen4 volatiles on the user, in

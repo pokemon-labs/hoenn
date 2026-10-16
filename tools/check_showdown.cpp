@@ -88,6 +88,32 @@ void force_metronome(const json::Value& log, Calc& calc) {
   }
 }
 
+// Whether Showdown's log of a step uses a multi-hit move, called ones
+// (Metronome, Sleep Talk, Mirror Move, Assist) included: each gets its own
+// |move| line. A game whose first failure is such a step leaves the count
+// (testing.md, "Pass criteria"): its rolls and crits are too many for the
+// random search.
+bool multi_hit(const json::Value& log) {
+  for (const json::Value& l : log.array) {
+    const std::string& line = l.string;
+    if (!line.starts_with("|move|p")) continue;
+    const size_t a = line.find('|', 6) + 1, b = line.find('|', a);
+    const std::string_view name(line.data() + a, b - a);
+    for (uint16_t i = 1; i < CARTRIDGE_MOVES; i++) {
+      if (display::MOVE_NAMES[i] != name) continue;
+      switch (get(Move(i)).effect) {
+      case Effect::MultiHit:
+      case Effect::DoubleHit:
+      case Effect::Twineedle:
+      case Effect::TripleKick:
+      case Effect::BeatUp: return true;
+      default: break;
+      }
+    }
+  }
+  return false;
+}
+
 // A log unit: one line, or a |split| triplet as one.
 using Unit = std::vector<std::string>;
 
@@ -194,6 +220,8 @@ struct Counts {
   uint64_t choices = 0;
   uint64_t unmatched = 0;
   uint64_t log_only = 0; // unmatched steps where some try matched the state
+  uint64_t multi_hit = 0; // unmatched at a multi-hit step: neither matched
+                          // nor failed, and not in `unmatched`
 };
 
 Counts stats;
@@ -780,9 +808,11 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     stats.max_tries = std::max(stats.max_tries, t);
     if (!matched && state_matched) why = log_why;
     if (!matched) {
-      std::printf("game %lld, step %zu (turn %u): no match in %llu tries, "
+      const bool multi = multi_hit(step["log"]);
+      std::printf("game %lld, step %zu (turn %u): no match in %llu tries%s, "
                   "choices %s / %s\n  closest try:%s\n  Showdown's log:\n",
                   game, k, battle.turn, (unsigned long long)t,
+                  multi ? " (multi-hit, left out)" : "",
                   step["chosen"]["p1"].string.c_str(),
                   step["chosen"]["p2"].string.c_str(), why.c_str());
       print_log(step);
@@ -797,8 +827,12 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
                       sorted[i].second.c_str());
         }
       }
-      stats.unmatched++;
-      if (state_matched) stats.log_only++;
+      if (multi) {
+        stats.multi_hit++;
+      } else {
+        stats.unmatched++;
+        if (state_matched) stats.log_only++;
+      }
       return;
     }
   }
@@ -866,11 +900,13 @@ int main(int argc, char** argv) {
     finish();
   }
 
-  std::printf("check_showdown: %llu games, %llu matched to the end; %llu "
+  std::printf("check_showdown: %llu games, %llu matched to the end, %llu "
+              "left out at a multi-hit step; %llu "
               "steps, %.1f tries per step (max %llu); failures: %llu setup, "
               "%llu choices, %llu unmatched (%llu by the log alone)\n",
               (unsigned long long)stats.games,
               (unsigned long long)stats.completed,
+              (unsigned long long)stats.multi_hit,
               (unsigned long long)stats.steps,
               stats.steps ? double(stats.tries) / double(stats.steps) : 0.0,
               (unsigned long long)stats.max_tries,
@@ -878,5 +914,5 @@ int main(int argc, char** argv) {
               (unsigned long long)stats.choices,
               (unsigned long long)stats.unmatched,
               (unsigned long long)stats.log_only);
-  return stats.completed == stats.games ? 0 : 1;
+  return stats.completed + stats.multi_hit == stats.games ? 0 : 1;
 }

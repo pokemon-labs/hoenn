@@ -65,17 +65,14 @@ commit, so a generated team keeps its provenance.
 **Decided (2026-10-15):** tests take any number of team files, so the OU
 dump needn't be copied into `all.txt`, and each team keeps its source.
 
-Now: `soak`, `check_chance`, `check_teams` and `coverage` take several
-files; `showdown_traces.cjs --teams FILE` and `bench` take one;
-`protocol_survey.cjs` hard-codes `all.txt`. The ctest `check_teams` globs
-`../teams/adv/*.txt`, so it parses every team twice (once from
-`all.txt`); it should leave `all.txt` out too.
-
 Decided (2026-10-15): every tool that takes teams takes a list of team
 files as positional arguments (one file is a list of one) and pools every
 team in them. Same behaviour in every tool. The OU environment passes the
 dump files in `../teams/adv/`, every `*.txt` but `all.txt`, which stays
-for birch.
+for birch. Built (2026-10-15): `showdown_traces.cjs` and
+`protocol_survey.cjs games` default to those files; the trace's game record
+carries each team's `file` beside its index there. The dumps and `all.txt`
+hold the same 327 teams (318 pass gen3ou's validator).
 
 Proposed:
 
@@ -163,10 +160,10 @@ damage-roll or the sleep-end record is caught.
   CLAUDE.md, "Chance"): when the battle ends, two samples with the same key
   must agree on the `Result` and the probability only. Search never
   expands a terminal node. The bar stays strict (0 collisions); these
-  aren't allowed as known failures. The test (not yet changed) compares the whole
-  state, so it reports 1-2 collisions a run where a residual KO ends the
-  battle and the samples differ only in whether the winner's own residual
-  ran first.
+  aren't allowed as known failures. Built (2026-10-15): the three
+  collisions of the last group run (groups 1, 2 and 3) were all of this
+  kind (both samples `Lose`, differing in the winner's HP and toxic
+  counter) and no longer report.
 - **Which probabilities are checked.** Our own only. Two samples with one
   key must report the same probability, and the calibration checks that
   each key's reported probability matches how often our RNG lands on it.
@@ -199,8 +196,10 @@ comparison, since the log hides some state.
 
 ### Others
 
-- `bench` (release, null log, Chance on, Calc off): about 3.2M updates/s
-  on the OU teams; `tools/libpkmn_bench.zig` about 9.0M/s for libpkmn's
+- `bench` (release, null log, Chance on, Calc off): about 0.94M
+  updates/s on the OU teams (2026-10-15; `6c22ace`, before step 5, gives
+  1.46M on this machine today, so the 3.2M recorded then wasn't like for
+  like); `tools/libpkmn_bench.zig` about 9.0M/s for libpkmn's
   Gen I; ADV-Simulator's update about 1.4 µs. None is like for like.
   Not a pass/fail suite.
 - `coverage`: which moves on the given teams have a written mechanic
@@ -216,8 +215,10 @@ environment): a game whose first unmatched step is a multi-hit move
 (Effect::MultiHit, Beat Up, Double Kick, Triple Kick, Twineedle,
 Bonemerang, or one of these called by Metronome, Sleep Talk, Mirror
 Move or Assist) counts as neither matched nor failed: it leaves the
-denominator, and the summary reports how many. Rule proposed, not built:
-`check_showdown` doesn't classify failures by move yet. The cost: a real
+denominator, and the summary reports how many. Built (2026-10-15): a
+failing step is multi-hit when any `|move|` line in Showdown's log of it
+names such a move (a called move has its own line), whichever side used
+it. Seed 8's 8 failures (1,000 OU games) are all classified so. The cost: a real
 multi-hit bug past the first hit would hide here, so `soak` and
 `check_chance` are its only cover.
 
@@ -355,12 +356,6 @@ Showdown change closes gets crossed off here.
   games). Showdown's Encore swaps the locked move for Metronome, runs it
   as `[from] lockedmove` without PP, and the lock's handlers keep going.
   Left as a gap (the user, 2026-10-15); comment in `use_move`.
-- **New `check_chance` collision, group 3** (2026-10-15, undiagnosed):
-  `check_chance --replay 15040563541741120241 tools/teams/group3.txt`. A
-  Pelipper mirror, turn 111: P1 first, Toxic hits, p2's Surf crits; p2's
-  new toxic ticks in one sample and not the other, with the same Actions.
-  Suspects: the new `item_cure` pass after the residuals, or the residual
-  order on a Speed tie.
 - **Endure and a future attack** landing the same turn: Endure doesn't
   save the target (no `Turn` at the residuals; Showdown's would).
 - **Toxic stage across a double replacement:** Showdown keeps the
@@ -436,11 +431,9 @@ game needs reshuffles which rare branches fail.
 Order (agreed 2026-10-15): shared pieces first, then each environment in
 turn, each measured before its bars are fixed.
 
-1. Team input as a pooled list of files in every tool (`showdown_traces.cjs`,
-   `bench`, `protocol_survey.cjs`; the ctest `check_teams` leaves out
-   `all.txt`).
-2. `check_chance`'s terminal-state comparison (`Result` and probability).
-3. `check_showdown`'s multi-hit classification.
+1. Team input as a pooled list of files in every tool. Done (2026-10-15).
+2. `check_chance`'s terminal-state comparison. Done (2026-10-15).
+3. `check_showdown`'s multi-hit classification. Done (2026-10-15).
 4. The criteria file: per environment, the game counts, try cap, bars
    and which mismatches count, read by the runner, so tightening a bar is
    a one-line diff. The Showdown pin file.

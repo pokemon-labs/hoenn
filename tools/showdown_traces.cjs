@@ -5,10 +5,11 @@
 // check_showdown replays the traces against it.
 //
 //   node tools/showdown_traces.cjs [--games N] [--seed N]
-//       [--teams FILE] [--showdown PATH] > traces.jsonl
+//       [--showdown PATH] [TEAM_FILE...] > traces.jsonl
 //
-// Defaults: 100 games, seed 1, teams/adv/all.txt, showdown/ (0.11.11; build
-// it first with `node build` there). Each team goes through Showdown's
+// The teams in every TEAM_FILE are pooled, duplicates included. Defaults:
+// 100 games, seed 1, every teams/adv/*.txt but all.txt, showdown/ (0.11.11;
+// build it first with `node build` there). Each team goes through Showdown's
 // gen3ou validator, as in real play: it sets the IVs a Hidden Power type
 // needs. Teams it rejects are skipped (9 of 327 on 0.11.11, Quick Claw among
 // them, which Showdown's gen3 doesn't log), and so are teams whose
@@ -17,7 +18,7 @@
 // Each game is a "game" line, then one "step" line per update:
 //
 //   {"type":"game","game":G,"seed":[4 x u16],"choice_seed":[4 x u16],
-//    "p1":{"team":I,"text":"...","sets":[...]},"p2":{...}}
+//    "p1":{"file":"...","team":I,"text":"...","sets":[...]},"p2":{...}}
 //   {"type":"step","turn":T,                the turn after the step
 //    "choices":{"p1":[...],"p2":[...]},   legal choices before the step
 //    "forced":{"p1":B,"p2":B},             the move is locked (or Struggle)
@@ -31,7 +32,8 @@
 //             "weather":ID},
 //    "result":null | "p1" | "p2" | "tie"}
 //
-// `team` is the team's index in FILE and `text` its export block, which
+// `file` is the team's file as given, `team` its index there and `text`
+// its export block, which
 // both sides parse. `sets` is what Showdown made of each set, in team order:
 // {"species","gender","ability","name","shiny","stats":[hp,atk,def,spa,spd,spe]},
 // so the engine can take Showdown's random genders, check its own stats and
@@ -53,32 +55,43 @@ function parseArgs(argv) {
   const opts = {
     games: 100,
     seed: 1,
-    teams: path.join(__dirname, '../../teams/adv/all.txt'),
     showdown: path.join(__dirname, '../showdown'),
+    files: [],
   };
   for (let i = 0; i < argv.length; i++) {
-    const key = argv[i].replace(/^--/, '');
-    if (!(key in opts) || i + 1 >= argv.length) {
-      console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--teams FILE] [--showdown PATH]');
+    if (!argv[i].startsWith('--')) {
+      opts.files.push(argv[i]);
+      continue;
+    }
+    const key = argv[i].slice(2);
+    if (!(key in opts) || key === 'files' || i + 1 >= argv.length) {
+      console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--showdown PATH] [TEAM_FILE...]');
       process.exit(1);
     }
     opts[key] = typeof opts[key] === 'number' ? +argv[++i] : argv[++i];
   }
+  if (!opts.files.length) {
+    const dir = path.join(__dirname, '../../teams/adv');
+    opts.files = fs.readdirSync(dir).filter(f => f.endsWith('.txt') && f !== 'all.txt')
+      .sort().map(f => path.join(dir, f));
+  }
   return opts;
 }
 
-function loadTeams(file, Dex, Teams, TeamValidator) {
+function loadTeams(files, Dex, Teams, TeamValidator) {
   const species = Dex.mod('gen3').species;
   const validator = TeamValidator.get('gen3ou');
-  const blocks = fs.readFileSync(file, 'utf8').split(/^=== .*===$/m)
-    .map(s => s.trim()).filter(Boolean);
   const teams = [];
-  blocks.forEach((text, index) => {
-    const team = Teams.import(text);
-    if (!team || team.length !== 6 || !team.every(p => species.get(p.species).exists)) return;
-    if (validator.validateTeam(team)) return;
-    teams.push({index, text, packed: Teams.pack(team)});
-  });
+  for (const file of files) {
+    const blocks = fs.readFileSync(file, 'utf8').split(/^=== .*===$/m)
+      .map(s => s.trim()).filter(Boolean);
+    blocks.forEach((text, index) => {
+      const team = Teams.import(text);
+      if (!team || team.length !== 6 || !team.every(p => species.get(p.species).exists)) return;
+      if (validator.validateTeam(team)) return;
+      teams.push({file, index, text, packed: Teams.pack(team)});
+    });
+  }
   return teams;
 }
 
@@ -152,7 +165,7 @@ function result(battle) {
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const {Battle, Dex, PRNG, Teams, TeamValidator} = require(path.resolve(opts.showdown));
-  const teams = loadTeams(opts.teams, Dex, Teams, TeamValidator);
+  const teams = loadTeams(opts.files, Dex, Teams, TeamValidator);
   console.error({teams: teams.length});
   const master = new PRNG([0, 0, opts.seed >>> 16 & 0xffff, opts.seed & 0xffff]);
   const newSeed = () => [0, 0, 0, 0].map(() => master.random(65536));
@@ -171,8 +184,8 @@ function main() {
     battle.setPlayer('p2', {name: 'p2', team: t2.packed});
     out.push(JSON.stringify({
       type: 'game', game: g, seed, choice_seed: choiceSeed,
-      p1: {team: t1.index, text: t1.text, sets: sets(battle.p1)},
-      p2: {team: t2.index, text: t2.text, sets: sets(battle.p2)},
+      p1: {file: t1.file, team: t1.index, text: t1.text, sets: sets(battle.p1)},
+      p2: {file: t2.file, team: t2.index, text: t2.text, sets: sets(battle.p2)},
     }));
     let logged = 0;
     const step = (choices, forced, chosen) => {

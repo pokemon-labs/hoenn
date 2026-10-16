@@ -3,7 +3,7 @@
 // the opcode inventory in src/gen3/README.md, "Protocol". Two modes:
 //
 //   node tools/protocol_survey.cjs static [path/to/pokemon-showdown]
-//   node tools/protocol_survey.cjs games FORMAT N [path/to/pokemon-showdown]
+//   node tools/protocol_survey.cjs games FORMAT N [--showdown PATH] [TEAM_FILE...]
 //
 // `static` lists every add(...) call (and addMove, addSplit, hint,
 // attrLastMove) in the handlers of the gen3 moves, abilities, items and
@@ -13,7 +13,8 @@
 // don't show, and neither do the later-gen and doubles branches' guards, so
 // some lines are unreachable in gen3 singles.
 //
-// `games` plays N random games of FORMAT (gen3ou over teams/adv/all.txt, or
+// `games` plays N random games of FORMAT (gen3ou over the teams of every
+// TEAM_FILE, pooled, by default every teams/adv/*.txt but all.txt; or
 // gen3randombattle with generated teams) with random legal choices, and
 // prints each distinct message shape with its count. Shapes replace
 // Pokémon, HP, numbers, moves and most item names with placeholders and keep
@@ -128,13 +129,17 @@ function shape(line) {
   return out.join('|');
 }
 
-function playGames(format, games, PS) {
+function playGames(format, games, PS, files) {
   const {Battle, Dex, PRNG, Teams} = require(PS);
   let teams = null;
   if (format === 'gen3ou') {
-    const file = path.join(__dirname, '../../teams/adv/all.txt');
+    if (!files.length) {
+      const dir = path.join(__dirname, '../../teams/adv');
+      files = fs.readdirSync(dir).filter(f => f.endsWith('.txt') && f !== 'all.txt')
+        .sort().map(f => path.join(dir, f));
+    }
     const species = Dex.mod('gen3').species;
-    teams = fs.readFileSync(file, 'utf8').split(/^=== .*===$/m)
+    teams = files.flatMap(file => fs.readFileSync(file, 'utf8').split(/^=== .*===$/m))
       .map(s => s.trim()).filter(Boolean).map(s => Teams.import(s))
       // Skips teams whose nicknames Showdown's importer reads as species.
       .filter(t => t && t.length === 6 && t.every(p => species.get(p.species).exists));
@@ -187,8 +192,15 @@ function playGames(format, games, PS) {
 if (mode === 'static') {
   scanStatic(path.resolve(rest[0] || DEFAULT_PS));
 } else if (mode === 'games' && rest.length >= 2) {
-  playGames(rest[0], +rest[1], path.resolve(rest[2] || DEFAULT_PS));
+  const [format, n, ...args] = rest;
+  let ps = DEFAULT_PS;
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--showdown' && i + 1 < args.length) ps = args[++i];
+    else files.push(args[i]);
+  }
+  playGames(format, +n, path.resolve(ps), files);
 } else {
-  console.error('usage: protocol_survey.cjs static [ps] | games FORMAT N [ps]');
+  console.error('usage: protocol_survey.cjs static [ps] | games FORMAT N [--showdown ps] [TEAM_FILE...]');
   process.exit(1);
 }

@@ -2,11 +2,11 @@
 // Calc off. Build it in the release preset (-O3, no asserts).
 //
 // Builds every battle first, each between two teams drawn at random from the
-// file, then plays them one after another with uniformly random legal
+// teams of every file, pooled, then plays them one after another with uniformly random legal
 // choices. The clock starts at the first battle's first update and stops
 // after the last battle's last update, so parsing and building aren't timed.
 //
-// Usage: bench TEAMS_FILE BATTLES [SEED]
+// Usage: bench [--battles N] [--seed N] TEAM_FILE...
 
 #include <array>
 #include <chrono>
@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "common/options.hpp"
@@ -49,25 +50,33 @@ struct Cheap {
 } // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 3) {
-    std::fprintf(stderr, "usage: bench TEAMS_FILE BATTLES [SEED]\n");
-    return 2;
+  uint64_t battles = 10000;
+  uint64_t seed = 1;
+  std::vector<std::string> files;
+  for (int i = 1; i < argc; i++) {
+    const std::string arg = argv[i];
+    if (arg == "--battles" && i + 1 < argc) {
+      battles = std::strtoull(argv[++i], nullptr, 10);
+    } else if (arg == "--seed" && i + 1 < argc) {
+      seed = std::strtoull(argv[++i], nullptr, 10);
+    } else {
+      files.push_back(arg);
+    }
   }
-  const uint64_t battles = std::strtoull(argv[2], nullptr, 10);
-  const uint64_t seed = argc > 3 ? std::strtoull(argv[3], nullptr, 10) : 1;
 
   std::vector<std::vector<helpers::Pokemon>> teams;
-  {
-    std::ifstream in(argv[1]);
+  RNG parse_rng{0};
+  for (const std::string& file : files) {
+    std::ifstream in(file);
     std::stringstream ss;
     ss << in.rdbuf();
-    RNG rng{0};
-    for (const auto& team : showdown::parse_teams(ss.str(), rng)) {
+    for (const auto& team : showdown::parse_teams(ss.str(), parse_rng)) {
       if (team.value) teams.push_back(team.value->pokemon);
     }
   }
   if (teams.empty() || battles == 0) {
-    std::fprintf(stderr, "bench: no teams in %s, or no battles\n", argv[1]);
+    std::fprintf(stderr, "usage: bench [--battles N] [--seed N] TEAM_FILE... "
+                         "(no teams, or no battles)\n");
     return 2;
   }
 
