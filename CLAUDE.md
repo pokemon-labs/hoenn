@@ -310,17 +310,16 @@ then fixing what it finds; there is no further plan.
 bars: check_showdown 9823/9898 = 99.24% (75 failures), 2 choice-set
 mismatches, 2 chance collisions; soak and probabilities passed. The user
 decided to fix first, then rerun with a fresh seed and set the bar from
-that rate. The fixes are committed and pass ctest (debug and release).
-Replaying the 75 failures left 7 (6 the Truant gap, 1 a search-budget miss,
-s4g182, that matches at 2M tries), and both chance collisions (a locked
-rampage's accuracy roll into Protect, now recorded) replay clean. To do:
-the rerun was started 2026-10-16 at engine `d344f32`, seed
-16645649204763325269, into
-`build/runs/ou_legal-20261016-120831-16645649204763325269/`; when its
-`summary.txt` is there, read its summary, classify the
-failures, propose the bar from the rate, then step 8.
-`build/runs/classify.py`'s KNOWN list is out of date (all of those items
-are written now).
+that rate. The fixes are in `d344f32`. The rerun (seed
+16645649204763325269, `build/runs/ou_legal-20261016-120831-16645649204763325269/`)
+failed too: check_showdown 9898/9913 = 99.85% (bar 99.90%), 1 choice-set
+mismatch; soak and check_chance passed. Of the 15: 9 the Truant gap (8
+Trace, 1 Skill Swap); 6 are Showdown divergences to fix: Sticky Hold on a
+fainted target keeps the item from Knock Off (gen4 mod has no hp check; 2),
+Brick Break into an immune target breaks no screens (its onTryHit is in
+moveHit), Imprison treats all Hidden Powers as one (also the choice set),
+Rage boosts on Present's heal, and a status berry after Yawn's sleep waits
+for the end of the residuals (log only). Bar still to decide.
 
 **Not written:**
 - `min_ko_roll`, Calc's `Summaries`, the search adaptation.
