@@ -1,17 +1,25 @@
 //! libpkmn's Gen I speed with the same frame as tools/bench.cpp: null log,
-//! Chance on (Rational(f64), like ours), Calc off. Builds every battle first
-//! (libpkmn's random teams: it has no Showdown team parser), then times from
-//! the first battle's first update to the last battle's last update.
+//! Chance on (Rational(f64), like ours), Calc off; or, built with
+//! libpkmn_bench_log_options.zig, as bench --log: the real log (reset before
+//! each update), Chance and Calc off. libpkmn's options are comptime, so each
+//! mode is its own build. Builds every battle first (libpkmn's random teams:
+//! it has no Showdown team parser), then times from the first battle's first
+//! update to the last battle's last update.
 //!
-//! Build (from the libpkmn checkout, `E`):
-//!   zig build-exe -O ReleaseFast --dep pkmn -Mroot=tools/libpkmn_bench.zig \
-//!     --dep build_options -Mpkmn=$E/src/lib/pkmn.zig \
-//!     -Mbuild_options=tools/libpkmn_bench_options.zig
+//! Build (from the libpkmn checkout, `E`; OPTIONS is
+//! tools/libpkmn_bench_options.zig or tools/libpkmn_bench_log_options.zig):
+//!   zig build-exe -O ReleaseFast --dep pkmn --dep build_options \
+//!     -Mroot=tools/libpkmn_bench.zig --dep build_options \
+//!     -Mpkmn=$E/src/lib/pkmn.zig -Mbuild_options=$OPTIONS
 //!
 //! Usage: libpkmn_bench BATTLES [SEED]
 
+const build_options = @import("build_options");
 const pkmn = @import("pkmn");
 const std = @import("std");
+
+const log_on = build_options.log orelse false;
+const chance_on = build_options.chance orelse false;
 
 const Battle = @TypeOf(pkmn.gen1.helpers.Battle.random(@constCast(&pkmn.PSRNG.init(0)), .{}));
 
@@ -44,7 +52,14 @@ pub fn main(init: std.process.Init) !void {
     for (all) |*b| b.* = pkmn.gen1.helpers.Battle.random(&random, .{});
 
     var chance = pkmn.gen1.Chance(pkmn.Rational(f64)){ .probability = .{} };
-    const options = pkmn.battle.options(pkmn.protocol.NULL, &chance, pkmn.gen1.calc.NULL);
+    var buf: [pkmn.LOGS_SIZE]u8 = undefined;
+    var writer: pkmn.protocol.Writer = .{ .buffer = &buf };
+    const log = if (log_on) pkmn.protocol.FixedLog{ .writer = &writer } else pkmn.protocol.NULL;
+    const options = pkmn.battle.options(
+        log,
+        if (chance_on) &chance else pkmn.gen1.chance.NULL,
+        pkmn.gen1.calc.NULL,
+    );
 
     var rng = Cheap{ .s = if (seed == 0) 1 else seed };
     var choices: [pkmn.CHOICES_SIZE]pkmn.Choice = undefined;
@@ -56,7 +71,8 @@ pub fn main(init: std.process.Init) !void {
         var c1 = pkmn.Choice{};
         var c2 = pkmn.Choice{};
         while (true) {
-            options.chance.reset();
+            if (chance_on) options.chance.reset();
+            if (log_on) writer.reset();
             const result = try battle.update(c1, c2, &options);
             updates += 1;
             if (result.type != .None) break;
@@ -71,9 +87,10 @@ pub fn main(init: std.process.Init) !void {
 
     const seconds = @as(f64, @floatFromInt(ns)) / 1e9;
     std.debug.print(
-        "libpkmn_bench: {d} battles, {d} updates in {d:.3} s: {d:.0} updates/s ({d:.1} turns per battle)\n",
+        "libpkmn_bench{s}: {d} battles, {d} updates in {d:.3} s: {d:.0} updates/s ({d:.1} turns per battle)\n",
         .{
-            battles,                                           updates, seconds,
+            if (log_on) " (log)" else "",                      battles,
+            updates,                                           seconds,
             @as(f64, @floatFromInt(updates)) / seconds,
             @as(f64, @floatFromInt(turns)) / @as(f64, @floatFromInt(battles)),
         },

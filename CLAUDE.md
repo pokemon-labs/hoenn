@@ -282,8 +282,9 @@ tools/
   criteria.toml       the bars per environment (run_env.py)
   check_frame.cpp     the turn frame and scenarios, plus a self-play soak
   soak.cpp            long random self-play runs, replayable by seed
-  bench.cpp           updates/s, null log, Chance on (release)
-  libpkmn_bench.zig   the same for libpkmn's Gen I (+ _options.zig)
+  bench.cpp           updates/s, null log, Chance on, or --log (release)
+  libpkmn_bench.zig   the same for libpkmn's Gen I (+ _options.zig,
+                      _log_options.zig)
   coverage.cpp        which moves on the teams have a written mechanic
   teams/              step 5's synthetic group teams (soak, check_chance)
   fixtures/           showdown.jsonl, the regression fixture
