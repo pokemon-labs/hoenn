@@ -66,6 +66,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
 #include "../common/data.hpp"
 #include "../common/protocol.hpp"
@@ -113,6 +114,8 @@ enum class Cant : uint8_t {
   // The move Sleep Talk picked has no PP: Showdown's gen3 Sleep Talk prints
   // its ID, not its name (data/mods/gen3/moves.ts:574).
   SleepTalkPP,
+  // From the Damp holder, then [of] the move's user (data/abilities.ts:815).
+  Damp,
 };
 
 constexpr bool names_move(Cant c) { return c >= Cant::Taunt; }
@@ -461,12 +464,14 @@ void switched(L& log, ArgType type, ID id, const Pokemon& mon,
   }
 }
 
-template <typename L> void cant(L& log, ID id, Cant reason, Move m = Move::None) {
+template <typename L>
+void cant(L& log, ID id, Cant reason, Move m = Move::None, ID of = NO_ID) {
   if constexpr (L::enabled) {
     log.write(ArgType::Cant);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(reason));
     if (names_move(reason)) detail::move_id(log, m);
+    if (reason == Cant::Damp) log.write_byte(of.bits);
   }
 }
 
@@ -509,10 +514,39 @@ template <typename L> void faints(L& log) {
         log.write_byte(uint8_t(Activate::Grudge));
         log.write_int(q.grudge_move);
       }
+      if (q.forme_after.bits != 0 && q.forme_after == q.ids[i]) {
+        log.write(ArgType::FormeChange);
+        log.write_byte(q.forme.bits);
+        log.write_byte(q.forme_type);
+      }
     }
     q.n = 0;
     q.bond = 0;
     q.grudge_move = 0;
+    q.forme_after = ID{0};
+  }
+}
+
+// A Forecast -formechange (forme_change) that waits for `after`'s queued
+// Faint: Showdown's faintMessages runs the fainted Pokémon's ability End
+// (Cloud Nine's, Air Lock's) after its faint line.
+template <typename L> void forme_change_after(L& log, ID after, ID id, gen3::Type t) {
+  if constexpr (L::enabled) {
+    auto& q = log.faints;
+    assert(q.forme_after.bits == 0);
+    q.forme_after = after;
+    q.forme = id;
+    q.forme_type = uint8_t(t);
+  }
+}
+
+// faintMessages(lastFirst) (sim/battle.ts:2545): the last queued Faint
+// first, after an instafaint damage (gen4 Liquid Ooze's).
+template <typename L> void faints_last_first(L& log) {
+  if constexpr (L::enabled) {
+    auto& q = log.faints;
+    if (q.n == 2) std::swap(q.ids[0], q.ids[1]);
+    faints(log);
   }
 }
 

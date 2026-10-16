@@ -185,6 +185,12 @@ struct FaintQueue {
   ID grudge;
   ID grudge_source;
   uint16_t grudge_move;
+  // A Forecast -formechange of `forme` into `forme_type`, written after
+  // `forme_after`'s Faint (its Cloud Nine or Air Lock's End); forme_after 0
+  // for none.
+  ID forme_after;
+  ID forme;
+  uint8_t forme_type;
 };
 
 struct NoFaintQueue {};

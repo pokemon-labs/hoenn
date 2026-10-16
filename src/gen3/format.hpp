@@ -637,12 +637,14 @@ class Formatter {
       case C::Imprison: s += "move: Imprison"; break;
       case C::PP:
       case C::SleepTalkPP: s += "nopp"; break;
+      case C::Damp: s += "ability: Damp"; break;
       }
       if (reason == C::SleepTalkPP) {
         s += "|" + to_id(move_name(Move(r.u16())));
       } else if (protocol::names_move(reason)) {
         s += "|" + move_name(Move(r.u16()));
       }
+      if (reason == C::Damp) s += "|[of] " + ident(ID{r.byte()});
       out.push_back(s);
       return;
     }

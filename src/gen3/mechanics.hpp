@@ -926,12 +926,14 @@ constexpr void turn_cleanup(Battle& battle) {
 // until the next change. The decomp's CastformDataTypeChange (util:2504)
 // also runs at the end of every move; this follows Showdown. The form is
 // kept as the type (no species change: Castform's forms share its stats).
-// Log: -formechange.
+// Log: -formechange, or after `after`'s Faint if set.
 template <typename O>
-constexpr void forecast(Battle& battle, Player p, Weather w, O& options) {
+constexpr void forecast(Battle& battle, Player p, Weather w, O& options,
+                        ID after = protocol::NO_ID) {
   ActivePokemon& a = battle.side(p).active;
+  // Not a transformed Pokémon (onWeatherChange, data/abilities.ts:1477).
   if (a.species != Species::Castform || a.ability != Ability::Forecast ||
-      battle.side(p).get(1).fainted()) {
+      a.volatiles.transformed || battle.side(p).get(1).fainted()) {
     return;
   }
   const Type t = w == Weather::Sun    ? Type::Fire
@@ -941,7 +943,11 @@ constexpr void forecast(Battle& battle, Player p, Weather w, O& options) {
   if (a.types[0] == t && a.types[1] == t) return;
   a.types[0] = t;
   a.types[1] = t;
-  protocol::forme_change(options.log, protocol::ident(battle, p), t);
+  if (after.bits != 0) {
+    protocol::forme_change_after(options.log, after, protocol::ident(battle, p), t);
+  } else {
+    protocol::forme_change(options.log, protocol::ident(battle, p), t);
+  }
 }
 
 // Showdown's eachEvent('WeatherChange'): Forecast on both sides, in Speed
@@ -993,9 +999,11 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   a.types[1] = get(a.species).types[1];
   a.ability = kept.ability;
   a.first_turn = 2;
-  // Showdown's faintMessages runs the ability's End.
+  // Showdown's faintMessages runs the ability's End, after the faint line
+  // (only the foe can be a Castform).
   if (a.ability == Ability::CloudNine || a.ability == Ability::AirLock) {
-    weather_change(battle, options);
+    forecast(battle, foe(player), effective_weather(battle), options,
+             protocol::ident(battle, player));
   }
 
   ActivePokemon& f = battle.side(foe(player)).active;
@@ -1031,9 +1039,11 @@ constexpr void deduct_pp(Battle& battle, Player player, uint8_t slot, uint8_t n)
 //
 // Grudge, as Showdown's onFaint: the user's last move (`used`, Showdown's
 // lastMove: Sleep Talk for a move it called) loses all its PP, unless the
-// user's own faint came first (Explosion).
+// user's own faint came first (Explosion). The loss waits for the end of
+// moveend (`grudge`, MoveState::grudge).
 template <typename O>
-constexpr void faint_target(Battle& battle, Player player, Move used, O& options) {
+constexpr void faint_target(Battle& battle, Player player, Move used, bool& grudge,
+                            O& options) {
   const Player defender = foe(player);
   if (!battle.side(defender).get(1).fainted()) return;
   const bool bond = battle.side(defender).active.volatiles.destiny_bond;
@@ -1043,7 +1053,7 @@ constexpr void faint_target(Battle& battle, Player player, Move used, O& options
     ActivePokemon& a = battle.side(player).active;
     for (uint8_t s = 0; s < 4; s++) {
       if (a.moves[s].id != used || a.moves[s].pp == 0) continue;
-      deduct_pp(battle, player, s, a.moves[s].pp);
+      grudge = true;
       protocol::faint(options.log, protocol::ident(battle, defender));
       protocol::grudge(options.log, protocol::ident(battle, defender),
                        protocol::ident(battle, player), used);
@@ -1121,9 +1131,9 @@ constexpr void wake(Battle& battle, Player player, O& options) {
 }
 
 // The cures ITEMEFFECT_NORMAL (util:3485-3606) and ITEMEFFECT_MOVE_END
-// (util:3627-3752) share, and White Herb, which both run too. Cured sleep
-// and confusion are public, so their counts reset. Returns whether the item
-// was used.
+// (util:3627-3752) share. Both run White Herb too, which here waits for
+// Showdown's checks (white_herb). Cured sleep and confusion are public, so
+// their counts reset. Returns whether the item was used.
 template <typename O>
 constexpr bool item_cure(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
@@ -1215,28 +1225,43 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     protocol::end_effect(options.log, id, protocol::End::AttractMentalHerb);
     break;
   }
-  case HoldEffect::RestoreStats: {
-    // White Herb: every lowered stage back to 0.
-    bool lowered = false;
-    const auto reset = [&](int8_t& b) {
-      if (b < 0) {
-        b = 0;
-        lowered = true;
-      }
-    };
-    Boosts& b = a.boosts;
-    reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
-    reset(b.acc), reset(b.eva);
-    if (!lowered) return false;
-    // Showdown's onUse, after useItem's -enditem.
-    use_item(battle, player, options);
-    protocol::clear_negative_boost(options.log, protocol::ident(battle, player));
-    break;
-  }
   default:
     return false;
   }
   return true;
+}
+
+// White Herb (HOLD_EFFECT_RESTORE_STATS): every lowered stage back to 0.
+// The decomp checks it with the other cures (item_cure) and at switch-in;
+// Showdown's has no onUpdate, only onStart (at switch-in, or when Trick
+// hands it over), onAnySwitchIn, onAnyAfterMove and a residual at order 29
+// (data/items.ts:7679), and this follows it. Log: EndItem, then
+// -clearnegativeboost (its onUse).
+template <typename O>
+constexpr void white_herb(Battle& battle, Player player, O& options) {
+  Side& side = battle.side(player);
+  if (!holds(side, HoldEffect::RestoreStats) || side.get(1).fainted()) return;
+  bool lowered = false;
+  const auto reset = [&](int8_t& b) {
+    if (b < 0) {
+      b = 0;
+      lowered = true;
+    }
+  };
+  Boosts& b = side.active.boosts;
+  reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
+  reset(b.acc), reset(b.eva);
+  if (!lowered) return;
+  use_item(battle, player, options);
+  protocol::clear_negative_boost(options.log, protocol::ident(battle, player));
+}
+
+// Both White Herbs, by Speed (an onAny handler on each holder): the order
+// changes only the log.
+template <typename O> constexpr void white_herbs(Battle& battle, O& options) {
+  const Player first = log_order(battle);
+  white_herb(battle, first, options);
+  white_herb(battle, foe(first), options);
 }
 
 constexpr bool lost(const Side& side) {
@@ -1429,9 +1454,7 @@ constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
 // ITEMEFFECT_ON_SWITCH_IN (util:3291): White Herb.
 template <typename O>
 constexpr void item_switch_in(Battle& battle, Player player, O& options) {
-  if (holds(battle.side(player), HoldEffect::RestoreStats)) {
-    item_cure(battle, player, options);
-  }
+  white_herb(battle, player, options);
 }
 
 // The Pokémon in SLOT 1 becomes active: Cmd_switchindataupdate (bsc:4621)
@@ -1460,20 +1483,21 @@ template <typename O>
 constexpr void arrive(Battle& battle, Player player, O& options) {
   // Each arrival is its own Showdown action (runSwitch), with faintMessages
   // after it. Showdown's Update after the switch action, before runSwitch:
-  // an immunity ability cures a status it got while it had another ability.
+  // an immunity ability cures a status it got while it had another ability,
+  // and the berries act (a Leppa Berry whose move Grudge emptied).
   ability_immunity(battle, options);
+  {
+    const Player first = log_order(battle);
+    for (const Player p : {first, foe(first)}) {
+      if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
+    }
+  }
   if (spikes(battle, player, options)) return protocol::faints(options.log);
   // Showdown's gen3 runSwitch (data/mods/gen4/scripts.ts:18): Spikes, then
   // the SwitchIn event, where every White Herb on the field checks
   // (onAnySwitchIn), then the ability's Start, then the item's
   // (item_switch_in).
-  const bool h1 = holds(battle.sides[0], HoldEffect::RestoreStats) && !battle.sides[0].get(1).fainted();
-  const bool h2 = holds(battle.sides[1], HoldEffect::RestoreStats) && !battle.sides[1].get(1).fainted();
-  if (h1 || h2) {
-    const Player herb = h1 && h2 ? log_order(battle) : h1 ? Player::P1 : Player::P2;
-    item_cure(battle, herb, options);
-    if (h1 && h2) item_cure(battle, foe(herb), options);
-  }
+  white_herbs(battle, options);
   ActivePokemon& a = battle.side(player).active;
   // bsc:5258. The battle start doesn't run switchineffects, so a Truant
   // Pokémon that starts the battle acts on turn 1 (Showdown's gen3
@@ -1848,6 +1872,9 @@ struct MoveState {
   // gBattleStruct->changedItems for the user: the item Thief or Covet took,
   // given to the user at MOVEEND_CHANGED_ITEMS. None when nothing was taken.
   Item stolen;
+  // The target fainted under Grudge (faint_target): the used move loses its
+  // PP at the end of moveend, Showdown's faintMessages after the move.
+  bool grudge;
   // This turn's ProtectStruct; set by use_move, null only for the
   // residuals' MoveState, which never reads it.
   Turn* turn;
@@ -3312,13 +3339,16 @@ constexpr bool try_hit(Battle& battle, Player player, MoveState& m, Aim aim,
     // leaves the state a miss would (a NO_EFFECT flag). Soundproof and
     // Flash Fire set none, so moveend records the move as landed
     // (last_landed_move, last_taken_move) and their roll matters even when
-    // the block itself changes nothing.
+    // the block itself changes nothing. A locked rampage's block by Protect
+    // renews the lock, which a miss doesn't.
+    const bool renews = protect && get(m.move).effect == Effect::Rampage && m.locked;
     const bool recorded =
-        !protect && !sturdy &&
-        (bounce || soundproof || absorb == Absorb::Takes ||
-         (absorb == Absorb::Idle && t.ability == Ability::FlashFire) ||
-         (absorb == Absorb::None && !aim.immune &&
-          (aim.matters || (mirrors(t) && !aim.wonder_guard))));
+        renews ||
+        (!protect && !sturdy &&
+         (bounce || soundproof || absorb == Absorb::Takes ||
+          (absorb == Absorb::Idle && t.ability == Ability::FlashFire) ||
+          (absorb == Absorb::None && !aim.immune &&
+           (aim.matters || (mirrors(t) && !aim.wonder_guard)))));
     if (recorded) {
       hits = rolls::hit(battle, player, calc, options);
     } else if (!aim.immune || blocked || aim.wonder_guard) {
@@ -3423,13 +3453,15 @@ constexpr void defrost(Battle& battle, Player player, const MoveState& m, O& opt
 // ABILITYEFFECT_ON_DAMAGE (util:2735): the target's Color Change, or its
 // contact ability acting on the attacker (p). Only after the target's own
 // HP took damage from a move with an effect, so never on a self-targeting
-// move or a confusion self-hit. Statuses skip Safeguard on the cartridge;
-// Showdown's Safeguard blocks them, and this follows Showdown. Effect
-// Spore's sleep is subject to Sleep Clause, as Showdown's onSetStatus.
+// move or a confusion self-hit, and as Showdown's gen3 handlers (`if
+// (damage && ...)`) not after a hit that took no HP (Endure at 1 HP).
+// Statuses skip Safeguard on the cartridge; Showdown's Safeguard blocks
+// them, and this follows Showdown. Effect Spore's sleep is subject to Sleep
+// Clause, as Showdown's onSetStatus.
 template <typename O>
 constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
                                  uint8_t i, O& options) {
-  if (m.self || !m.damaged || (m.result & MoveResult::NO_EFFECT)) return;
+  if (m.self || !m.damaged || m.hp_dealt == 0 || (m.result & MoveResult::NO_EFFECT)) return;
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
   const Pokemon& target_mon = battle.side(target).get(1);
@@ -3673,7 +3705,9 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     // As Showdown's lastMove (moveUsed): a move stopped before it was used
     // leaves the last move as it was. The decomp writes MOVE_UNAVAILABLE,
     // so Encore after a full paralysis fails there and works here.
-    if (m.obeys) a.last_move = m.chosen;
+    // Bide's release runs from its onBeforeMove, so moveUsed doesn't run: a
+    // Bide that Metronome called leaves Metronome the last move (Torment).
+    if (m.obeys && !m.release) a.last_move = m.chosen;
     a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
   }
 
@@ -3681,6 +3715,20 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   if (m.attacked && !m.self && mirrors(t)) {
     t.last_taken_move = m.move;
     t.last_taken_from = side.order[0];
+  }
+
+  // Showdown's AfterMove, which a move stopped before it ran skips
+  // (runMove returns at BeforeMove): White Herb.
+  if (!m.unable) white_herbs(battle, options);
+
+  // Then faintMessages: Grudge takes the move's PP (faint_target), after
+  // the item cures above, so a Leppa Berry waits for the next Update.
+  if (m.grudge) {
+    for (uint8_t s = 0; s < 4; s++) {
+      if (a.moves[s].id == m.chosen && a.moves[s].pp != 0) {
+        deduct_pp(battle, player, s, a.moves[s].pp);
+      }
+    }
   }
 }
 
@@ -3808,6 +3856,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // counts a hit that took no HP, and this follows it (Turn::hit). Log:
   // Cant Focus Punch.
   if (effect == Effect::FocusPunch && m.turn->hit[index(player)]) {
+    m.unable = true; // Showdown's beforeMoveCallback: no AfterMove
     protocol::last_still(options.log);
     protocol::cant(options.log, protocol::ident(battle, player),
                    protocol::Cant::FocusPunch);
@@ -3910,7 +3959,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // to Mirror Coat) and adjustsetdamage, but no crit or roll. Showdown's
   // gen3 onTry agrees. A failure under Pressure still costs 2 PP, as
   // Showdown deducts before onTry; the decomp spares it
-  // (ppNotAffectedByPressure). No message.
+  // (ppNotAffectedByPressure). No message. Showdown's also fails when Sleep
+  // Talk calls it: onTry needs the counter volatile, which only the chosen
+  // move's beforeTurnCallback adds (data/moves.ts:3000); the cartridge
+  // counters as usual.
   //
   // Endeavor (BattleScript_EffectEndeavor, bs1:2479): attackstring and
   // ppreduce, then Cmd_setdamagetohealthdifference (bsc:9366) fails it
@@ -3930,7 +3982,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     const uint16_t foe_hp = battle.side(foe(player)).get(1).hp;
     if (effect == Effect::Endeavor) {
       fixed = foe_hp > user.hp ? foe_hp - user.hp : 0u;
-    } else {
+    } else if (!m.called) {
       fixed = 2u * (effect == Effect::Counter ? m.turn->physical
                                               : m.turn->special)[index(player)];
     }
@@ -3951,12 +4003,19 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // changes nothing; tryexplosion fails if any active Pokémon has Damp
   // (BattleScript_DampStopsExplosion goes to moveend); otherwise the user's
   // HP drops to 0 before the hit (setatkhptozero, bsc:6577) and it faints
-  // after moveend, whether or not the hit lands.
+  // after moveend, whether or not the hit lands. Log: Showdown's Damp
+  // (onAnyTryMove, data/abilities.ts:812) marks the move line [still],
+  // then Cant from the holder, the faster one if both hold it.
   if (effect == Effect::Explosion) {
-    if (battle.sides[0].active.ability == Ability::Damp ||
-        battle.sides[1].active.ability == Ability::Damp) {
+    const bool d1 = battle.sides[0].active.ability == Ability::Damp;
+    const bool d2 = battle.sides[1].active.ability == Ability::Damp;
+    if (d1 || d2) {
       m.attackstring = true;
       pp_reduce(battle, player, m);
+      const Player holder = d1 && d2 ? log_order(battle) : d1 ? Player::P1 : Player::P2;
+      protocol::last_still(options.log);
+      protocol::cant(options.log, protocol::ident(battle, holder), protocol::Cant::Damp,
+                     m.move, protocol::ident(battle, player));
       return moveend(battle, player, m, options);
     }
     // Showdown faints the user here (selfdestruct 'always'), so its Faint
@@ -4255,6 +4314,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       flinch_item(battle, player, m, i, options);
       defrost(battle, player, m, options);
       ability_on_damage(battle, player, m, i, options);
+      synchronize(battle, player, m, options);
       for (const Player p : {Player::P1, Player::P2}) {
         if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
       }
@@ -4350,7 +4410,9 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       m.hp_dealt != 0) {
     uint16_t drain = m.damaged ? uint16_t(m.hp_dealt / 2) : uint16_t((m.hp_dealt + 1) / 2);
     if (drain == 0) drain = 1;
-    if (foe_side.active.ability == Ability::LiquidOoze) {
+    // Dream Eater's own script skips Liquid Ooze (bs1:434), as Showdown's
+    // (data/mods/gen4/abilities.ts:255).
+    if (foe_side.active.ability == Ability::LiquidOoze && effect != Effect::DreamEater) {
       passive_damage(battle, player, drain, options);
       protocol::damage_ability(options.log, protocol::ident(battle, player), user,
                                Ability::LiquidOoze, protocol::ident(battle, defender));
@@ -4527,10 +4589,12 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // drops, the secondaries and the AfterHit handlers (Knock Off, Thief),
   // before the recoil (applyRecoilDamage in tryMoveHit). The decomp runs it
   // in moveend (MOVEEND_ON_DAMAGE_ABILITIES), after all of them. Rage's
-  // boost is rage(), at onHit.
+  // boost is rage(), at onHit. A status it gives a Synchronize attacker
+  // goes back at once (onAfterSetStatus), before the recoil.
   if (!m.contact_done) {
     defrost(battle, player, m, options);
     ability_on_damage(battle, player, m, 0, options);
+    synchronize(battle, player, m, options);
     m.contact_done = true;
   }
   // An OHKO move's -ohko after a hit that took the target's last HP (gen3
@@ -4548,8 +4612,11 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // As Showdown (applyRecoilDamage only if move.totalDamage), a hit that
   // took no HP (Endure or Focus Band at 1 HP) has no recoil; the decomp's
   // is at least 1.
+  // A user that the target's Rough Skin KO'd takes none (Showdown's damage
+  // to a fainted Pokémon does nothing).
   if ((effect == Effect::Recoil || effect == Effect::DoubleEdge) && affects &&
-      m.hp_dealt != 0 && (m.move == Move::Struggle || side.active.ability != Ability::RockHead)) {
+      m.hp_dealt != 0 && !user.fainted() &&
+      (m.move == Move::Struggle || side.active.ability != Ability::RockHead)) {
     uint16_t recoil =
         uint16_t(m.hp_dealt / (effect == Effect::DoubleEdge ? 3 : 4));
     if (recoil == 0) recoil = 1;
@@ -4560,7 +4627,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // tryfaintmon
-  faint_target(battle, player, m.chosen, options);
+  faint_target(battle, player, m.chosen, m.grudge, options);
   moveend(battle, player, m, options);
   if (effect == Effect::Explosion) faint(battle, player, options);
 }
@@ -4666,7 +4733,13 @@ constexpr StatusStop status_stop(const Battle& battle, Player player, Secondary 
     break;
   case Secondary::Sleep:
     if (t.ability == Ability::Insomnia || t.ability == Ability::VitalSpirit) {
-      return StatusStop::Ability;
+      // An uproar's onAnySetStatus (a Condition) goes first if its holder is
+      // the target or at least as fast (Speed, then subOrder).
+      const Player target = foe(player);
+      const bool first = t.volatiles.uproar != 0 ||
+                         (battle.side(player).active.volatiles.uproar != 0 &&
+                          speed(battle, player) >= speed(battle, target));
+      return first ? StatusStop::Uproar : StatusStop::Ability;
     }
     break;
   default:
@@ -5417,11 +5490,13 @@ constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
     return moveend(battle, player, m, options);
   }
   // BattleScript_AbilityPreventsPhasingOut and BattleScript_PrintMonIsRooted
-  // set no result flag.
+  // set no result flag. With both, Suction Cups speaks (Showdown's
+  // onDragOutPriority 1, data/abilities.ts:4694; the decomp checks Ingrain
+  // first).
   if (anchored) {
     protocol::activate(options.log, protocol::ident(battle, foe(player)),
-                       t.volatiles.rooted ? protocol::Activate::Ingrain
-                                          : protocol::Activate::SuctionCups);
+                       t.ability == Ability::SuctionCups ? protocol::Activate::SuctionCups
+                                                         : protocol::Activate::Ingrain);
     return moveend(battle, player, m, options);
   }
   m.drag = true;
@@ -5469,13 +5544,11 @@ constexpr void baton_pass(Battle& battle, Player player, MoveState& m,
 // nosleeptalk and charge flags, which are the decomp's list
 // (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
 // IsTwoTurnsMove) except that Showdown's gen3 Bide drops its flags
-// (data/mods/gen3/moves.ts) and Showdown adds Mimic, Nature Power and
-// Sketch.
+// (data/mods/gen3/moves.ts) and Showdown adds Nature Power (its gen3 keeps
+// the base flags, data/moves.ts:12607).
 constexpr bool sleep_talk_banned(Move move) {
   if (move == Move::Bide) return false;
-  if (move == Move::Mimic || move == Move::NaturePower || move == Move::Sketch) {
-    return true;
-  }
+  if (move == Move::NaturePower) return true;
   return get(move).extra & Extra::NoSleepTalk;
 }
 
@@ -5699,7 +5772,7 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
   }
   m.kings_rock_done = true;
   protocol::hit_count(options.log, protocol::ident(battle, defender), i);
-  faint_target(battle, player, m.chosen, options);
+  faint_target(battle, player, m.chosen, m.grudge, options);
   moveend(battle, player, m, options);
 }
 
@@ -6927,18 +7000,22 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   const ID id = protocol::ident(battle, player);
   const ID of = protocol::ident(battle, foe(player));
   protocol::activate_with(options.log, id, protocol::Activate::Trick, Move::None, of);
+  // Each setItem runs the new item's onStart (White Herb) before its line.
+  user.item = Item::None;
+  target.item = mine;
   if (mine != Item::None) {
+    white_herb(battle, foe(player), options);
     protocol::item(options.log, of, mine, protocol::ItemFrom::Trick);
   } else {
     protocol::end_item(options.log, of, theirs, protocol::EndItemFrom::Trick);
   }
+  user.item = theirs;
   if (theirs != Item::None) {
+    white_herb(battle, player, options);
     protocol::item(options.log, id, theirs, protocol::ItemFrom::Trick);
   } else {
     protocol::end_item(options.log, id, mine, protocol::EndItemFrom::Trick);
   }
-  user.item = theirs;
-  target.item = mine;
   moveend(battle, player, m, options);
 }
 
@@ -7616,9 +7693,12 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     const ID seeder_id = protocol::ident(battle, seeder);
     protocol::damage_seeded(options.log, id, mon, seeder_id);
     if (ooze) {
+      // Showdown's gen4 Liquid Ooze damages with instafaint
+      // (data/mods/gen4/abilities.ts:256): a seeder it KOs faints first.
       passive_damage(battle, seeder, drained, options);
       protocol::damage_ability(options.log, seeder_id, seeder_mon,
                                Ability::LiquidOoze, id);
+      if (seeder_mon.fainted()) protocol::faints_last_first(options.log);
     } else if (seeder_mon.hp != seeder_mon.stats.hp) {
       heal(seeder_mon, drained);
       protocol::heal(options.log, seeder_id, seeder_mon, protocol::Heal::Silent);
@@ -7947,6 +8027,12 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
     rage(battle, user, m, options);
   }
   protocol::faints(options.log);
+  // The hit loop's Update after its faintMessages (sim/battle-actions.ts:996)
+  // ends the foe's Attract once its source has fainted.
+  if (ActivePokemon& f = battle.side(user).active; target.fainted() && f.volatiles.infatuated) {
+    protocol::end_effect(options.log, protocol::ident(battle, user), protocol::End::Attract);
+    f.volatiles.infatuated = false;
+  }
   return outcome(battle);
 }
 
@@ -8105,6 +8191,8 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     disable_residual(battle, p, options);
   }
   protocol::faints(options.log);
+  // White Herb's residual (order 29), the last.
+  for (const Player p : {last, foe(last)}) white_herb(battle, p, options);
   // Showdown's stall expires with the residuals, before a residual faint's
   // replacement: a turn without a successful Protect, Detect or Endure ends
   // the chain (protect()).
@@ -8252,9 +8340,11 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
       // CheckFocusPunch_ClearVarsBeforeTurnStarts (main:4906): Focus Punch's
       // setup is only a message (bs1:3709), which the decomp skips for a
       // sleeping user (main:4915) and Showdown doesn't (its focuspunch
-      // condition's onStart: SingleTurn Focus Punch, in the move order).
+      // condition's onStart: SingleTurn Focus Punch, from beforeTurnMove
+      // actions, sorted by Speed with a tie shuffle of their own).
       // TryClearRageStatuses follows Showdown instead (cancel()).
-      for (const Player p : {battle.request.first, foe(battle.request.first)}) {
+      const Player punch = log_order(battle);
+      for (const Player p : {punch, foe(punch)}) {
         if (battle.request.choice[index(p)].type() == Choice::Move &&
             battle.request.move[index(p)] == Move::FocusPunch) {
           protocol::single_turn(options.log, protocol::ident(battle, p),

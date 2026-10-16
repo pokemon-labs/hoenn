@@ -255,6 +255,7 @@ is the same and only the messages differ.
 | Stockpile family | Stockpile raises nothing; failures print | the same; failures are silent; Spit Up rolls |
 | Leech Seed KO of the last Pokémon | no `checkteamslost` | the battle ends there |
 | Sleep Talk's pick | skips disabled, taunted... moves; calls 0-PP moves | uniform over allowed slots; fails on 0 PP |
+| Sleep Talk's list | allows Nature Power; Counter and Mirror Coat work | bans Nature Power; Counter and Mirror Coat fail silently (no `beforeTurnCallback`) |
 | Statuses from contact abilities | ignore Safeguard | Safeguard blocks them |
 | Status berries at move end | only the first Pokémon | both |
 | Protect's chance after 4 uses | indexes past its 4-entry table (bsc:6514) | stays at 1/8 |

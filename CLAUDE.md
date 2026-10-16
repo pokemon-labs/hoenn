@@ -168,7 +168,8 @@ it's convenient, but a draw goes in `Actions` and `probability` only when its
 outcome can matter (Quick Claw with no holder, Static on a paralyzed target).
 "Matter" means the perfect-information state (decided 2026-10-08): a draw
 that changes only the log (a tied order of log lines, an accuracy roll into
-Protect) is made but not recorded. So `Actions` determines the state, not
+Protect, except a locked rampage's, which a block renews) is made but not
+recorded. So `Actions` determines the state, not
 the log; the log is extra information drawn alongside. A terminal state
 counts as the same whatever HP the winner is left at.
 
@@ -303,15 +304,20 @@ the log (opcodes, the formatter, Showdown's omniscient stream; README
 "Protocol"). Work now is the test framework (`testing.md`, "Implementation"),
 then fixing what it finds; there is no further plan.
 
-**Next:** `testing.md` Implementation step 7, random OU-legal. The
-exploratory run's gaps are fixed (988 of 989; the last, Trace copying
-Truant, is a known gap by decision). The 10,000-game run that sets the bar
-was started 2026-10-16 at engine `36ed3cc`, seed 17554437607677572831, into
-`build/runs/ou_legal-20261016-105917-17554437607677572831/`; when its
-`summary.txt` is there, report the rate, sort any failures
-(`python3 build/runs/classify.py RUN_DIR`, untracked: replays each failure
-and tallies known gaps), propose the bar a safe margin under the rate (as
-OU's), then step 8.
+**Next:** `testing.md` Implementation step 7, random OU-legal. The first
+10,000-game run (engine `36ed3cc`, seed 17554437607677572831, in
+`build/runs/ou_legal-20261016-105917-17554437607677572831/`) failed its
+bars: check_showdown 9823/9898 = 99.24% (75 failures), 2 choice-set
+mismatches, 2 chance collisions; soak and probabilities passed. The user
+decided to fix first, then rerun with a fresh seed and set the bar from
+that rate. The fixes are committed and pass ctest (debug and release).
+Replaying the 75 failures left 7 (6 the Truant gap, 1 a search-budget miss,
+s4g182, that matches at 2M tries), and both chance collisions (a locked
+rampage's accuracy roll into Protect, now recorded) replay clean. To do:
+start the rerun (`python3 tools/run_env.py ou_legal`, fresh seed), read its summary, classify the
+failures, propose the bar from the rate, then step 8.
+`build/runs/classify.py`'s KNOWN list is out of date (all of those items
+are written now).
 
 **Not written:**
 - `min_ko_roll`, Calc's `Summaries`, the search adaptation.

@@ -1309,6 +1309,7 @@ void check_recharge() {
   update(b, Choice::move(3), Choice::move(2), o);
   CHECK(!a.volatiles.recharge && !only_recharge());
   o.calc.overrides.p1.hit = Optional::True;
+  o.calc.overrides.p1.hits[0].crit = Optional::False;
   update(b, Choice::move(3), Choice::move(2), o);
   CHECK(a.volatiles.recharge && only_recharge());
   const uint16_t hp = t.hp;
@@ -2011,6 +2012,31 @@ void check_protect() {
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(o.chance.actions.p1.protect == Optional::None);
     CHECK(b.sides[0].active.protect_uses == 1);
+  }
+  // A locked Thrash into Protect: the accuracy roll comes first, and only a
+  // hit (blocked) renews the lock, so the roll is recorded.
+  {
+    helpers::Pokemon u = user;
+    u.moves[2] = Move::Splash;
+    helpers::Pokemon foe = SNORLAX;
+    foe.moves[2] = Move::Thrash;
+    Battle b = started({u}, {foe});
+    first(b);
+    Observed o{};
+    o.calc.overrides.p2.hit = Optional::True;
+    update(b, Choice::move(3), Choice::move(3), o);
+    CHECK(b.sides[1].active.volatiles.multiple_turns);
+    b.sides[1].active.volatiles.thrash = 2;
+    b.sides[1].active.boosts.acc = -1;
+    for (const Optional hit : {Optional::True, Optional::False}) {
+      Battle c = b;
+      Observed p{};
+      p.calc.overrides.p2.hit = hit;
+      update(c, Choice::move(1), Choice::move(0), p);
+      CHECK(p.chance.actions.p2.hit == hit);
+      CHECK(c.sides[1].active.volatiles.multiple_turns == (hit == Optional::True));
+      CHECK(c.sides[1].active.volatiles.confusion == 0);
+    }
   }
   // Endure leaves 1 HP against a lethal hit.
   {
