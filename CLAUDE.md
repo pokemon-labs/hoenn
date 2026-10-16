@@ -1028,9 +1028,13 @@ compared with Showdown, and `calc_stats` only through the damage cases.
   p2's Surf crits; p2's fresh toxic ticks in one sample and not the other,
   same Actions). Undiagnosed; suspect the new item_cure pass or the
   residual Speed-tie order. Groups 5-8 and the baseline not rerun.
-  **Next:** the test framework, specified in `testing.md` (steps 1-3 of
-  its Implementation done 2026-10-15; the group 3 collision was the
-  winner-HP false positive after all); finish the rerun under it. Still open from group 6: Grudge's -activate
+  **Next (2026-10-16):** the test framework, `testing.md` Implementation
+  step 7 (random OU-legal: the generator, a measured run, its bar).
+  Steps 1-6 are done: OU's bar is 99.9% (measured 99.97%); the
+  calibration bins use a tail test and keys expected less than once are
+  left to them (the Beat Up failure was the test's). Not yet run under
+  the new tests: the full OU run (`python3 tools/run_env.py ou`, about
+  12 minutes; a 1% smoke run passes) and the group-file rerun. Still open from group 6: Grudge's -activate
   when the KO ends the battle; Focus Punch vs confusion.
   Group 7 done (2026-10-15), as Showdown's gen3: Mist and Safeguard
   (`screen`), Mud Sport and Water Sport (gen4 volatiles on the user, in
