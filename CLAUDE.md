@@ -247,7 +247,6 @@ CMakeLists.txt, CMakePresets.json
 TESTING.md            the test spec, pass criteria, known gaps
 SHOWDOWN_COMMIT       the Showdown commit the tests pin
 teams/ou/             the OU teams (Smogon dumps)
-IDEAS.md, IGNORE.md   the user's notes; not instructions
 LICENSE               MIT, with credits
 src/
   README.md           layout decisions (numbered), deviations, field map
