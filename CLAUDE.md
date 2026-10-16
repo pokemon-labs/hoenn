@@ -304,22 +304,12 @@ the log (opcodes, the formatter, Showdown's omniscient stream; README
 "Protocol"). Work now is the test framework (`testing.md`, "Implementation"),
 then fixing what it finds; there is no further plan.
 
-**Next:** `testing.md` Implementation step 7, random OU-legal. The first
-10,000-game run (engine `36ed3cc`, seed 17554437607677572831, in
-`build/runs/ou_legal-20261016-105917-17554437607677572831/`) failed its
-bars: check_showdown 9823/9898 = 99.24% (75 failures), 2 choice-set
-mismatches, 2 chance collisions; soak and probabilities passed. The user
-decided to fix first, then rerun with a fresh seed and set the bar from
-that rate. The fixes are in `d344f32`. The rerun (seed
-16645649204763325269, `build/runs/ou_legal-20261016-120831-16645649204763325269/`)
-failed too: check_showdown 9898/9913 = 99.85% (bar 99.90%), 1 choice-set
-mismatch; soak and check_chance passed. Of the 15: 9 the Truant gap (8
-Trace, 1 Skill Swap); 6 are Showdown divergences to fix: Sticky Hold on a
-fainted target keeps the item from Knock Off (gen4 mod has no hp check; 2),
-Brick Break into an immune target breaks no screens (its onTryHit is in
-moveHit), Imprison treats all Hidden Powers as one (also the choice set),
-Rage boosts on Present's heal, and a status berry after Yawn's sleep waits
-for the end of the residuals (log only). Bar still to decide.
+**Next:** `testing.md` Implementation step 8, truly random (the audit,
+the generator, a measured run, its bar). Step 7 is done: random OU-legal's
+bar is 99.8% (`tools/criteria.toml`), set from the rerun (99.85%, 9 of its
+15 failures the Truant gap, the other 6 fixed after).
+`build/runs/classify.py`'s KNOWN list is out of date (all of those items
+are written now).
 
 **Not written:**
 - `min_ko_roll`, Calc's `Summaries`, the search adaptation.

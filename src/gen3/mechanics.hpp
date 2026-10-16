@@ -807,6 +807,12 @@ template <typename O> constexpr void order(Battle& battle, O& options) {
   r.first = first(battle, speeds(battle, r.move[0], r.move[1], true), options);
 }
 
+// Whether two moves are the same move: the typed Hidden Powers are all the
+// cartridge's MOVE_HIDDEN_POWER (and Showdown's `hiddenpower`).
+constexpr bool same_move(Move a, Move b) {
+  return a == b || (is_hidden_power(a) && is_hidden_power(b));
+}
+
 // ---------------------------------------------------------------------------
 // Selection
 // ---------------------------------------------------------------------------
@@ -829,7 +835,7 @@ constexpr uint8_t usable_moves(const Battle& battle, Player player) {
     if (f.volatiles.imprisoned_others) {
       // GetImprisonedMovesCount: the foe has Imprisoned and knows the move.
       bool imprisoned = false;
-      for (const MoveSlot& fm : f.moves) imprisoned |= fm.id == m;
+      for (const MoveSlot& fm : f.moves) imprisoned |= same_move(fm.id, m);
       if (imprisoned) continue;
     }
     if (a.encore_timer != 0 && a.encored_move != m) continue;
@@ -2136,7 +2142,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   // knows the move.
   if (f.volatiles.imprisoned_others) {
     bool imprisoned = false;
-    for (const MoveSlot& fm : f.moves) imprisoned |= fm.id == m.move;
+    for (const MoveSlot& fm : f.moves) imprisoned |= same_move(fm.id, m.move);
     if (imprisoned) {
       cant(protocol::Cant::Imprison);
       abort_move(battle, player, options);
@@ -3822,16 +3828,21 @@ constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
 // before the self effects, secondaries and contact abilities. The decomp's MOVEEND_RAGE
 // runs once, in moveend.
 template <typename O>
-constexpr void rage(Battle& battle, Player player, const MoveState& m, O& options) {
-  const Player defender = foe(player);
+constexpr void rage_boost(Battle& battle, Player defender, O& options) {
   ActivePokemon& t = battle.side(defender).active;
-  if (m.self || !m.damaged || !t.volatiles.rage || get(m.move).bp == 0 ||
-      battle.side(defender).get(1).fainted()) {
-    return;
-  }
   const int8_t n = t.boosts.atk < 6 ? 1 : 0;
   t.boosts.atk = int8_t(t.boosts.atk + n);
   protocol::boost(options.log, protocol::ident(battle, defender), 0, n, false);
+}
+
+template <typename O>
+constexpr void rage(Battle& battle, Player player, const MoveState& m, O& options) {
+  const Player defender = foe(player);
+  if (m.self || !m.damaged || !battle.side(defender).active.volatiles.rage ||
+      get(m.move).bp == 0 || battle.side(defender).get(1).fainted()) {
+    return;
+  }
+  rage_boost(battle, defender, options);
 }
 
 // BattleScript_EffectHit (bs1:236), from the attack canceler on.
@@ -4125,12 +4136,12 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // a type immunity would also stop the move.
   const bool wonder_guard =
       !affects && foe_side.active.ability == Ability::WonderGuard;
-  // Brick Break's accuracy check comes before typecalc and its screen
-  // breaking after, so it breaks screens even into a Ghost type: its
-  // accuracy matters then too. Showdown agrees (its TryHit breaks them, and
-  // the immunity is reported after, data/mods/gen3/scripts.ts:367).
+  // Brick Break breaks screens even into a Ghost type on the cartridge
+  // (removelightscreenreflect before typecalc). Showdown's onTryHit runs in
+  // moveHit, which an immunity or Wonder Guard never reaches
+  // (data/mods/gen3/scripts.ts:376), and this follows Showdown.
   SideConditions& foe_conditions = foe_side.conditions;
-  const bool breaks = effect == Effect::BrickBreak &&
+  const bool breaks = effect == Effect::BrickBreak && affects &&
                       (foe_conditions.reflect != 0 || foe_conditions.light_screen != 0);
   // A natural immunity (the type chart or Levitate), whether or not Wonder
   // Guard would also stop the move.
@@ -4141,9 +4152,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // it blocks a move the target is immune to too (Showdown's Protect
   // TryHit also comes first).
   if (!try_hit(battle, player, m,
-               {.immune = immune && !breaks,
-                .matters = affects || breaks,
-                .wonder_guard = wonder_guard && !breaks},
+               {.immune = immune, .matters = affects, .wonder_guard = wonder_guard},
                options)) {
     if (effect == Effect::RecoilIfMiss) crash(battle, player, m, h, options);
     moveend(battle, player, m, options);
@@ -4230,8 +4239,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // sim/battle-actions.ts:1190). The heal sets infiltrates, but gen4
   // Substitute's onTryPrimaryHit ignores it: getDamage gives no damage, so
   // the user's move fails into a Substitute (data/mods/gen4/moves.ts:1309).
-  // The decomp's odds differ (rolls::variable). Log: Heal, Fail Heal, or
-  // the user's Fail, each failure with [still].
+  // A heal that lands raises a Rage's Attack (runMoveEffects goes on to the
+  // Hit event; the cartridge's MOVEEND_RAGE needs damage). The decomp's
+  // odds differ (rolls::variable). Log: Heal (and Rage's Boost), Fail Heal,
+  // or the user's Fail, each failure with [still].
   if (effect == Effect::Present) {
     variable = rolls::variable(battle, player, effect, options);
     rolls::variable_matters(player, effect, variable, options);
@@ -4245,6 +4256,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
         target.hp = uint16_t(std::min<uint32_t>(target.stats.hp,
                                                 target.hp + target.stats.hp / 4u));
         protocol::heal(options.log, id, target);
+        if (foe_side.active.volatiles.rage) rage_boost(battle, defender, options);
       }
       return moveend(battle, player, m, options);
     }
@@ -4517,12 +4529,13 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // Knock Off (bs1:2475, MOVE_EFFECT_KNOCK_OFF, bsc:2858), as Showdown's
   // gen4 onAfterHit (data/mods/gen4/moves.ts:718; README decision 8): after
   // a hit on the target itself (not its Substitute) with the user still
-  // in, its item becomes the inert Item::KnockedOff, unless a living
-  // target's Sticky Hold keeps it. Its Choice Band lock ends with it
+  // in, its item becomes the inert Item::KnockedOff, unless the target's
+  // Sticky Hold keeps it, fainted or not (the gen4 onTakeItem has no HP
+  // check, data/mods/gen4/abilities.ts:438). Its Choice Band lock ends with it
   // (bsc:2885).
   if (effect == Effect::KnockOff && m.damaged && !user.fainted() &&
       target.item != Item::None && target.item != Item::KnockedOff) {
-    if (foe_side.active.ability == Ability::StickyHold && !target.fainted()) {
+    if (foe_side.active.ability == Ability::StickyHold) {
       protocol::activate_ability(options.log, protocol::ident(battle, defender),
                                  Ability::StickyHold);
     } else {
@@ -5093,7 +5106,7 @@ constexpr void imprison(Battle& battle, Player player, MoveState& m, O& options)
   bool shared = false;
   for (const MoveSlot& ms : a.moves) {
     for (const MoveSlot& fm : f.moves) {
-      shared |= ms.id != Move::None && ms.id == fm.id;
+      shared |= ms.id != Move::None && same_move(ms.id, fm.id);
     }
   }
   if (a.volatiles.imprisoned_others || !shared) {
@@ -6019,7 +6032,7 @@ constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
   const Move last = t.last_move;
   bool known = false;
   for (const MoveSlot& ms : a.moves) {
-    known |= ms.id == last || (is_hidden_power(ms.id) && is_hidden_power(last));
+    known |= same_move(ms.id, last);
   }
   if (!try_hit(battle, player, m, {.sure = true}, options)) {
     m.result |= MoveResult::FAILED;
@@ -6717,7 +6730,7 @@ constexpr void sketch(Battle& battle, Player player, MoveState& m, O& options) {
   if (is_hidden_power(last)) last = hidden_power(side.get(1).hidden_power_type);
   bool known = false;
   for (const MoveSlot& ms : a.moves) {
-    known |= ms.id == last || (is_hidden_power(ms.id) && is_hidden_power(last));
+    known |= same_move(ms.id, last);
   }
   if (!try_hit(battle, player, m, {.sure = true}, options)) {
     return moveend(battle, player, m, options);
@@ -6781,7 +6794,7 @@ constexpr void mirror_move(Battle& battle, Player player, MoveState& m, O& optio
   bool known = a.last_taken_from == source.order[0] && source.active.last_move != Move::None;
   bool knows = false;
   for (const MoveSlot& ms : source.active.moves) {
-    knows |= ms.id == move || (is_hidden_power(ms.id) && is_hidden_power(move));
+    knows |= same_move(ms.id, move);
   }
   known &= knows;
   if (move == Move::None || no_mirror(move) || !known) {
@@ -7371,14 +7384,12 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
 // (log_order).
 // ---------------------------------------------------------------------------
 
-// ITEMEFFECT_NORMAL (util:3317) for p's active Pokémon, at
-// ENDTURN_ITEMS1 (move_turn false) and ENDTURN_ITEMS2 (true). Leftovers,
-// the HP berries and the pinch berries need move_turn false, so they act
-// only once per end of turn; on the cartridge and in Showdown's gen3 mod
-// (onResidual, data/mods/gen3/items.ts) they don't act right after a hit.
+// ITEMEFFECT_NORMAL (util:3317) for p's active Pokémon, at ENDTURN_ITEMS1.
+// Leftovers, the HP berries and the pinch berries act only here; on the
+// cartridge and in Showdown's gen3 mod (onResidual, data/mods/gen3/items.ts)
+// they don't act right after a hit.
 template <typename O>
-constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
-                             O& options) {
+constexpr void item_end_turn(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
   Pokemon& mon = side.get(1);
   ActivePokemon& a = side.active;
@@ -7389,7 +7400,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
   case HoldEffect::RestoreHp:
     // Oran, Sitrus (30 HP in Gen III) and Berry Juice: a fixed amount.
     // Showdown's gen3 eatItem or useItem, then the heal from the item.
-    if (move_turn || mon.hp > mon.stats.hp / 2) return;
+    if (mon.hp > mon.stats.hp / 2) return;
     use_item(battle, player, options);
     heal(mon, item.param);
     protocol::heal_item(options.log, protocol::ident(battle, player), mon, held);
@@ -7406,7 +7417,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     // then addVolatile('confusion'), which Own Tempo and an existing
     // confusion stop silently; Safeguard doesn't, the holder being the
     // source.
-    if (move_turn || mon.hp > mon.stats.hp / 2) return;
+    if (mon.hp > mon.stats.hp / 2) return;
     use_item(battle, player, options);
     heal(mon, fraction(mon, item.param));
     protocol::heal_item(options.log, protocol::ident(battle, player), mon, held);
@@ -7418,7 +7429,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     return;
   }
   case HoldEffect::Leftovers:
-    if (!move_turn && mon.hp != mon.stats.hp) {
+    if (mon.hp != mon.stats.hp) {
       heal(mon, fraction(mon, 16));
       protocol::heal_item(options.log, protocol::ident(battle, player), mon, mon.item);
     }
@@ -7431,7 +7442,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     // TRY_EAT_STAT_UP_BERRY (util:3230): +1 at max HP / param (4) or less.
     // The decomp keeps the berry at +6; Showdown's gen3 eats it anyway
     // (data/items.ts:3392, onEat's boost prints its 0), and this follows it.
-    if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    if (mon.hp > mon.stats.hp / item.param) return;
     const uint8_t stat = uint8_t(item.effect) - uint8_t(HoldEffect::AttackUp);
     int8_t& b = stage(a.boosts, stat);
     const int8_t n = b < 6 ? 1 : 0;
@@ -7444,7 +7455,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     // Lansat Berry: Focus Energy (util:3441). The decomp keeps it under
     // Focus Energy; Showdown eats it anyway (data/items.ts:3267), as here.
     // Its addVolatile prints nothing if Focus Energy is already there.
-    if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    if (mon.hp > mon.stats.hp / item.param) return;
     use_item(battle, player, options);
     if (!a.volatiles.focus_energy) {
       protocol::start(options.log, protocol::ident(battle, player), protocol::Start::FocusEnergy);
@@ -7455,7 +7466,7 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     // Starf Berry: +2 to a random stat below +6 (util:3450). With none,
     // the decomp keeps it; Showdown eats it with no boost and no draw
     // (data/items.ts:6003), as here.
-    if (move_turn || mon.hp > mon.stats.hp / item.param) return;
+    if (mon.hp > mon.stats.hp / item.param) return;
     const Boosts& b = a.boosts;
     use_item(battle, player, options);
     if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) return;
@@ -7676,7 +7687,7 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
 
   case Stage::Item:
     // ENDTURN_ITEMS1 (util:1496)
-    item_end_turn(battle, player, false, options);
+    item_end_turn(battle, player, options);
     return std::nullopt;
 
   case Stage::LeechSeed: {
@@ -7842,9 +7853,10 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     }
   }
 
-  // ENDTURN_ITEMS2 (util:1501): the cures again, for statuses the passes
-  // above set.
-  item_end_turn(battle, player, true, options);
+  // The decomp's ENDTURN_ITEMS2 (util:1501) cures here what the passes above
+  // set; Showdown's berries wait for the Update after all the residuals
+  // (end_of_turn), so one Lum Berry takes both Yawn's sleep and Thrash's
+  // confusion.
   return std::nullopt;
 }
 

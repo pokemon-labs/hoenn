@@ -27,7 +27,7 @@ kinds of check, in priority order (CLAUDE.md, "Priorities"):
 | Teams | `teams/ou/*.txt` (real Smogon teams) | generated, kept only if gen3ou's validator accepts | generated, no legality check |
 | Showdown format | `gen3ou` | `gen3ou` | `gen3customgame` |
 | Strictness | highest | middle | lowest |
-| Built | yes | generator; bars unset | no |
+| Built | yes | yes | no |
 
 The two random environments use generators, not the step 5 group files
 (`tools/teams/group*.txt`), which stay in git history. The banned moves
@@ -78,7 +78,7 @@ commit, so a generated team keeps its provenance.
     commit; both parsers skip text before the first `===`.
   - **Order** (decided): the generator, then a 1,000-game exploratory run
     to rank the gaps by frequency, fix them, then the 10,000-game run that
-    sets the bar. The bars in `criteria.toml` are OU's until then.
+    sets the bar.
   - Known gaps it will reach: the unwritten items (Leppa, the flavor
     berries, King's Rock, Shell Bell; the last two can act on most
     hits), and Follow Me and Helping Hand, which Showdown's singles logs
@@ -275,8 +275,8 @@ multi-hit bug past the first hit would hide here, so `soak` and
 |---|---|---|---|
 | `check_showdown` games | 10,000 | 10,000 | 10,000 |
 | try cap | 1M | 1M | 1M |
-| matched | ≥ 99.9% | ≥ 97% | ≥ 90% |
-| log-only mismatches | count | reported, not counted | reported, not counted |
+| matched | ≥ 99.9% | ≥ 99.8% | ≥ 90% |
+| log-only mismatches | count | count | reported, not counted |
 | choice-set mismatches | 0 | 0 | 0 |
 | `soak` (debug) games | 100,000 | 100,000 | 100,000 |
 | `soak` failures | 0 | 0 | 0 |
@@ -289,11 +289,14 @@ Rationale:
 - **OU at 99.9%** (the user, 2026-10-16). Measured: 9943 of 9946
   counted games (99.97%, seed 8981393492580689921, 2026-10-16); the bar
   is about 4 standard deviations (±0.017) below it. Not rerun at 99.9%.
-- **Random OU-legal at 97%, state only.** Unmeasured. The group files ran
-  98.9% to 99.98% (10,000 games each), but they're hand-built around a few
-  moves; uniform random sets will reach more rare-branch moves and
-  untested item and ability pairs. Log-only mismatches are reported, not
-  counted, to lower the bar for now; may tighten later.
+- **Random OU-legal at 99.8%, log-only counted** (the user, 2026-10-16).
+  Measured: 9898 of 9913 counted games (99.85%, seed
+  16645649204763325269, engine `d344f32`), 9 of the 15 the Truant gap
+  (Known gaps) and 6 Showdown divergences then fixed. The Truant gap
+  alone, about 9 per 10,000 games (99.91%, ±0.03), puts the bar about 4
+  standard deviations under; a Poisson(9) count passes it 99.9% of the
+  time. Against the raw 99.85% it would be only about 1.3 below, so the
+  bar assumes the 6 stay fixed.
 - **Truly random at 90%, state only.** Unmeasured, and it reaches
   interactions CLAUDE.md's priority 3 says can wait.
 - **The same safety and chance bars everywhere.** A crash or a collision is
@@ -400,7 +403,8 @@ Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
 - **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
-  OU-legal exploratory run; 6 of the 10,000-game run, 2026-10-16; left as
+  OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
+  2026-10-16; left as
   a gap by decision). Showdown's `truantTurn` is a Pokemon property that
   only Truant's own onSwitchIn resets, so a Pokémon that gains Truant
   carries the value from its last Truant stint and may loaf or act on its
@@ -544,6 +548,14 @@ turn, each measured before its bars are fixed.
    mod's stages-only onHit) and White Herb (it acted on Intimidate's drop;
    Showdown's gen3 checks it before the ability's Start) fixed: 987 of 989
    (99.80%), and OU at the 6's seed, 1,000 games, 996 of 996.
+   10,000-game run (engine `36ed3cc`, seed 17554437607677572831): 9823 of
+   9898 (99.24%), 2 choice-set mismatches, 2 chance collisions; fixed in
+   `d344f32`. Rerun (seed 16645649204763325269): 9898 of 9913 (99.85%), 1
+   choice-set mismatch, soak and check_chance clean; 9 the Truant gap, 6
+   fixed after (Knock Off on a fainted Sticky Hold, Brick Break into an
+   immune target, Imprison and Hidden Power, Rage on Present's heal, the
+   cures after Yawn waiting for the Update), which then match, as do
+   shards 0 and 11 whole. Bar set to 99.8% (2026-10-16).
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.
 9. CI, later: a gating workflow, then the reporting one.
