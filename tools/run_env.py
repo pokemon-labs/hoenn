@@ -160,9 +160,33 @@ SHOWDOWN_SUMMARY = re.compile(
 SOAK_SUMMARY = re.compile(r'soak: (\d+) games.*\n.*failures (\d+)')
 CHANCE_SUMMARY = re.compile(r'check_chance: .* (\d+) collisions')
 CHANCE_PROB = re.compile(r'probability: (\d+) sum failures, (\d+) frequency')
+# The label is padded ("2^-1 ..2^-0").
 CHANCE_BIN = re.compile(
-    r'^\s+(2\^-\d+\.\.2\^-\d+|unseen)\s+(\S+) /\s+\S+\s+z\s+\S+\s+\[(\S+) (\S+)\]',
+    r'^\s+(2\^-\d+\s*\.\.2\^-\d+|unseen)\s+(\S+) /\s+\S+\s+p\s+\S+\s+\[(\S+) (\S+)\]',
     re.M)
+
+
+def bin_tail(o, e, v):
+    """check_chance's bin_tail: a normal tail for a large variance, else
+    Poisson(e), on o's side."""
+    if v >= 100:
+        return 0.5 * math.erfc(abs(o - e) / math.sqrt(2 * v))
+    if e <= 0:
+        return 0.0 if o > 0 else 1.0
+    def pmf(k):
+        return math.exp(k * math.log(e) - e - math.lgamma(k + 1))
+    total = 0.0
+    if o > e:
+        k = o
+        while k < o + 1e6:
+            t = pmf(k)
+            total += t
+            if t <= total * 1e-17:
+                break
+            k += 1
+    else:
+        total = sum(pmf(k) for k in range(int(o) + 1))
+    return min(total, 1.0)
 
 
 def main():
@@ -326,7 +350,7 @@ def main():
         mass += int(p.group(1))
         freq += int(p.group(2))
         for name, o, e, v in CHANCE_BIN.findall(text):
-            b = bins.setdefault(name, [0.0, 0.0, 0.0])
+            b = bins.setdefault(re.sub(r'\s', '', name), [0.0, 0.0, 0.0])
             b[0] += float(o)
             b[1] += float(e)
             b[2] += float(v)
@@ -338,17 +362,17 @@ def main():
                              f'build/release/check_chance --samples '
                              f'{env["chance"]["samples"]} --replay {g} '
                              f'{" ".join(os.path.relpath(f, ROOT) for f in files)})')
-    zmax, worst = 0.0, ''
+    pmin, worst = 1.0, ''
     for name, (o, e, v) in bins.items():
-        z = (o - e) / math.sqrt(v) if v > 0 else (0.0 if o == e else math.inf)
-        if abs(z) > abs(zmax):
-            zmax, worst = z, name
+        p = bin_tail(o, e, v)
+        if p < pmin:
+            pmin, worst = p, name
     bar('check_chance collisions', coll == 0 and crashed == 0,
         f'{coll} collisions, {crashed} shards without a summary')
     bar('check_chance probabilities', mass == 0 and freq == 0
-        and abs(zmax) < env['chance']['z'],
-        f'{mass} sum failures, {freq} frequency failures, largest |z| '
-        f'{abs(zmax):.2f} ({worst}; bar {env["chance"]["z"]})')
+        and pmin >= env['chance']['alpha'],
+        f'{mass} sum failures, {freq} frequency failures, smallest bin tail '
+        f'{pmin:.2g} ({worst}; bar {env["chance"]["alpha"]:g})')
 
     if notes:
         lines.append('failures:')

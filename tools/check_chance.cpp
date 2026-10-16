@@ -274,6 +274,34 @@ double tail(uint32_t k, uint32_t n, double p) {
 // The false-alarm rate allowed per check: millions of checks per run.
 constexpr double ALPHA = 1e-10;
 
+// The chance of a count at least as far from its mean as `o`, on o's side.
+// A sum of binomials: with a small variance (a deep bin, mean far below 1) a
+// normal approximation is far too narrow, so use Poisson(e) there, which is
+// exact in the limit and wider than the truth otherwise.
+double bin_tail(double o, double e, double v) {
+  if (v >= 100) return 0.5 * std::erfc(std::fabs(o - e) / std::sqrt(2 * v));
+  if (e <= 0) return o > 0 ? 0.0 : 1.0;
+  const auto pmf = [e](double k) {
+    return std::exp(k * std::log(e) - e - std::lgamma(k + 1));
+  };
+  double sum = 0;
+  if (o > e) {
+    // The terms fall at least geometrically past the mean.
+    for (double k = o; k < o + 1e6; k++) {
+      const double t = pmf(k);
+      sum += t;
+      if (t <= sum * 1e-17) break;
+    }
+  } else {
+    for (double k = 0; k <= o; k++) sum += pmf(k);
+  }
+  return std::min(sum, 1.0);
+}
+
+// A calibration bin fails below this tail chance. With ~40 bins, about
+// 4e-6 false alarms per run.
+constexpr double BIN_ALPHA = 1e-7;
+
 // Every choice pair at one state. First `samples` free updates, which give
 // the frequencies; then each key found is replayed `replays` times with its
 // Actions forced through Calc, so that a key the free samples saw once is
@@ -511,26 +539,24 @@ int main(int argc, char** argv) {
               (unsigned long long)stats.mass,
               (unsigned long long)stats.frequency,
               stats.pairs ? stats.missing / double(stats.pairs) : 0.0);
-  // A bin fails if its count is more than Z standard deviations from its
-  // mean. With ~40 bins, |z| > 6 by chance is about 1e-7 per run.
-  constexpr double Z = 6;
   int calibration = 0;
-  // The variance lets a runner pool bins over shards.
-  std::printf("  calibration of held-out draws (bin: observed / expected, z; "
-              "exact expected and variance):\n");
+  // The variance lets a runner pool bins over shards, so every bin with an
+  // expectation is printed: leaving out the empty ones would bias the pool.
+  std::printf("  calibration of held-out draws (bin: observed / expected, "
+              "tail chance; exact expected and variance):\n");
   for (int b = 0; b < Totals::BINS; b++) {
     const double o = stats.observed[b], e = stats.expected[b];
     const double v = stats.variance[b];
-    if (o == 0 && e < 0.5) continue;
-    const double z = v > 0 ? (o - e) / std::sqrt(v) : (o == e ? 0 : INFINITY);
-    const bool bad = std::fabs(z) > Z;
+    if (o == 0 && e == 0) continue;
+    const double p = bin_tail(o, e, v);
+    const bool bad = p < BIN_ALPHA;
     calibration += bad;
     if (b == Totals::UNSEEN) {
-      std::printf("    unseen        %10.0f / %12.1f  z %+6.2f  [%.17g %.17g]%s\n",
-                  o, e, z, e, v, bad ? "  FAIL" : "");
+      std::printf("    unseen        %10.0f / %12.1f  p %8.2g  [%.17g %.17g]%s\n",
+                  o, e, p, e, v, bad ? "  FAIL" : "");
     } else {
-      std::printf("    2^-%-2d..2^-%-2d %10.0f / %12.1f  z %+6.2f  [%.17g %.17g]%s\n",
-                  b + 1, b, o, e, z, e, v, bad ? "  FAIL" : "");
+      std::printf("    2^-%-2d..2^-%-2d %10.0f / %12.1f  p %8.2g  [%.17g %.17g]%s\n",
+                  b + 1, b, o, e, p, e, v, bad ? "  FAIL" : "");
     }
   }
   return stats.collisions || stats.mass || stats.frequency || calibration

@@ -20,4 +20,4 @@ games = 100000          # debug: ASan, UBSan, asserts
 [ou.chance]
 games = 1000
 samples = 128
-z = 6                   # every calibration bin |z| below this
+alpha = 1e-7            # every calibration bin's tail chance at least this

@@ -150,7 +150,10 @@ damage-roll or the sleep-end record is caught.
   probability (Chernoff, 1e-10), the keys' sum is at most 1, and held-out
   draws landing on unfound keys fit 1 − sum. Over the run, held-out hits
   are binned by key probability (powers of 2, plus "unseen") and each
-  bin's z must be under 6. The per-pair tests alone are too weak (they
+  bin's count must have a tail chance of at least 1e-7: a normal tail
+  with the exact variance when that is at least 100, else Poisson
+  (decided 2026-10-16; a z-test called a 2% event in a bin expecting
+  0.02 hits z 7.0). The per-pair tests alone are too weak (they
   missed rolls reported at 1/17). Because samples go through
   `randomize_hidden`, this checks it against the reported probabilities
   (consistency, not truth). Mutations caught: crits at 1/4, rolls at
@@ -237,7 +240,7 @@ multi-hit bug past the first hit would hide here, so `soak` and
 | `soak` failures | 0 | 0 | 0 |
 | `check_chance` games (128 samples) | 1,000 | 1,000 | 1,000 |
 | collisions | 0 | 0 | 0 |
-| calibration | every bin \|z\| < 6 | same | same |
+| calibration | every bin tail ≥ 1e-7 | same | same |
 
 Rationale:
 
@@ -357,7 +360,8 @@ Showdown change closes gets crossed off here.
 - **Beat Up's probabilities** (the first OU 10,000-game run, 2026-10-16,
   undiagnosed): a five-hit key reported at 4.6e-8 came up in 2 of 128 free
   samples (`check_chance --samples 128 --replay 7066941967204212297
-  teams/ou/*.txt`, turn 9), and the 2^-22 calibration bin had z 7.0.
+  teams/ou/*.txt`, turn 9). The 2^-22 calibration bin's z 7.0 in that
+  run was the z-test's fault (a 2% event), not this.
   Either the hits' draws aren't independent or what is recorded isn't
   what is drawn.
 - **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
@@ -461,9 +465,11 @@ turn, each measured before its bars are fixed.
    trace processes run at most one per GB free at the start
    (`--trace-jobs`): each grows past 350 MB, and 16 at once exhausted this
    7 GB machine (the OOM killer took the user's browser, 2026-10-15).
-   Open: the calibration bar's |z| is a normal approximation, wrong for
-   the deepest bins, whose expected counts are far below 1 (one hit
-   against 0.007 expected gave z 11.8 in a smoke run, a 0.7% event).
+   The calibration bar was a |z| under 6, wrong for bins expecting far
+   below one hit; now a tail chance (Probability calibration, above).
+   Fixed with it (2026-10-16): the runner's regex dropped the bins
+   2^-1 to 2^-9 (padded labels), and check_chance left out empty bins
+   with expectations under 0.5, which biased the pooled deep bins.
 6. OU: a 10,000-game run to measure the real match rate (98.5% is a guess
    from 1,000 games), then set the bar a safe margin under it. Measured
    (2026-10-16, seed 8981393492580689921, 11.5 minutes): 9943 of 9946
