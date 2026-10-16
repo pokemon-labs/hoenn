@@ -228,7 +228,7 @@ is the same and only the messages differ.
 | Pursuit on a switching target | final damage ×2; no attack canceler; partial moveend | base power ×2; canceler (paralysis...) and full moveend |
 | Stat berries with nothing to do | kept (stat at +6, Lansat under Focus Energy, Starf at all +6) | eaten anyway |
 
-Not yet compared with Showdown: everything not on `teams/adv/` (Uproar,
+Not yet compared with Showdown: everything not on `teams/ou/` (Uproar,
 Thrash, Bide, Future Sight, Transform...).
 
 ### Damage
@@ -239,7 +239,7 @@ Thrash, Bide, Future Sight, Transform...).
   "read Emerald" and to "don't write mechanics from Showdown's source"
   (CLAUDE.md), decided because the two disagree on common OU damage (Thick
   Fat Snorlax, Choice Band Guts Heracross) and the target is matching
-  Showdown. `damage.hpp` follows 0.11.10's `getDamage`
+  Showdown. `damage.hpp` follows 0.11.10's `getDamage` (0.11.11 gives the same cases)
   (`sim/battle-actions.ts`) and gen3 `modifyDamage`
   (`data/mods/gen3/scripts.ts`), citing the handler for each modifier.
   `tools/check_damage` compares it with Showdown over 74 cases, crit and
@@ -379,7 +379,7 @@ Where it departs from the decomp, or from the draws the decomp makes:
 - *(open, an optimization)* When every roll KOs (or every roll breaks the
   Substitute), the roll can't change state, so it needn't be drawn. Skipping
   it would shrink search's chance nodes a lot, but it changes what the
-  `Actions` key holds; decide with the birch adaptation.
+  `Actions` key holds; decide when search is adapted.
 
 `faint()` is `cleareffectsonfaint` (status cleared) and `FaintClearSetData`
 (main:3264), run where the HP reaches 0, so a residual between the faint and
@@ -393,10 +393,10 @@ bs1:3394), and the frame raises another request in the same phase.
 The binary log: plumbing and opcodes in `common/protocol.hpp`, the gen3
 messages in `gen3/protocol.hpp`, the text formatter in `gen3/format.hpp`.
 Written by groups of messages (see the end of this section).
-It comes from a survey of Showdown 0.11.10 (ADV-Simulator's pinned copy),
+It comes from a survey of Showdown 0.11.10,
 redone on `showdown/` 0.11.11 (see below):
 the `add(...)` calls of every gen3 move, ability, item, condition, the gen3
-scripts and the sim core, plus 3,000 random gen3 OU games over `teams/adv/`
+scripts and the sim core, plus 3,000 random gen3 OU games over the OU teams
 and 4,000 `gen3randombattle` games, collecting every message shape
 (`tools/protocol_survey.cjs`). Random
 play reaches what's common, not everything; Lock-On, Uproar, Thrash, Bide,
@@ -404,7 +404,7 @@ Future Sight, Hail and Disable come from the static scan only.
 
 Redone (2026-10-08) on `showdown/` (0.11.11, `c046106`), which the
 realizability test pins (CLAUDE.md, Testing): the static scan, and 3,000
-gen3 OU games over `teams/adv/` on each version with the same seed. The
+gen3 OU games over the OU teams on each version with the same seed. The
 table below follows 0.11.11, which differs from 0.11.10 in:
 
 - Trace prints the old ability: `-ability|P|NEW|Trace|[from] ability:
@@ -576,7 +576,7 @@ Decided (2026-10-08):
 - **`-anim` is the last move line** (Battle.addMove): `[miss]` amends it
   and `[still]` removes it (Battle.attrLastMove, `sim/battle.ts:3121`), in
   the formatter. `-mustrecharge` and `-notarget` have no site yet: no
-  recharge move is on `teams/adv/`, and a singles target can't be gone
+  recharge move is on `teams/ou/`, and a singles target can't be gone
   when a move runs. `-ohko` follows a lethal OHKO hit, or any OHKO hit on
   a Substitute (gen4 Substitute's onTryPrimaryHit).
 - **Faints are queued** (`FaintQueue` in the log, not in `Battle`): Showdown
@@ -595,7 +595,7 @@ no active Pokémon (see CLAUDE.md, "Turn phases"). `showdown.hpp` parses
 Showdown exports into those sets; its header lists where it departs from
 Showdown's importer (a mismatched `Hidden Power [T]` is an error; Return with
 Frustration gets 255 happiness; Cute Charm is male when it can be).
-`tools/check_teams.cpp` runs it over `teams/adv/`.
+`tools/check_teams.cpp` runs it over `teams/ou/`.
 
 ## Battle layout decisions
 
@@ -662,7 +662,7 @@ main = `src/battle_main.c`.
    constant. About 274 decomp uses touch one flag; the 8 that combine flags
    become helpers (`trapped()`, `semi_invulnerable()`, Baton Pass's
    keep-list). Packing will make them bitfields, so never take a pointer or
-   reference to a member. Before packing, check whether birch reads raw
+   reference to a member. Before packing, check whether search reads raw
    `Battle` bytes (unverified).
 7. **Types live on `Pokemon`** and switch-in copies them. Equivalent to the
    decomp, which recomputes them from the species.

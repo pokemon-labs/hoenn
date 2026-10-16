@@ -2,7 +2,7 @@
 
 Pokémon Showdown exports scraped 2026-10-06 from pokepast.es links in
 [Smogon's ADV forum](https://www.smogon.com/forums/forums/adv/), one file per
-thread. Only six-Pokémon teams that ADV-Simulator imports are kept, and
+thread. Only six-Pokémon teams that import cleanly are kept, and
 duplicates within a file are dropped.
 
 | File | Teams | Thread |
@@ -16,7 +16,7 @@ duplicates within a file are dropped.
 | `spl-xi.txt`, `spl-xii.txt`, `spl-xiv.txt` | 10, 7, 9 | SPL XI and XII postseason threads, SPL XIV teams report |
 | `teambuilding-competition-8-fire-offense.txt` | 93 | Teambuilding Competition Round 8 (3770678) |
 
-Copied from birch's `teams/adv/` (2026-10-15) and edited so every team
+Edited (2026-10-15) so every team
 passes Showdown's gen3ou validator (pinned in `SHOWDOWN_COMMIT`): 13 Pokémon
 without an EVs line have `EVs: 1 HP` (no stat changes), a nickname in
 parentheses lost them, and 7 teams that break today's rules (Quick Claw,

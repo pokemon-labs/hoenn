@@ -1,4 +1,4 @@
-// Compares damage.hpp with Pokémon Showdown 0.11.10, every roll with and
+// Compares damage.hpp with Pokémon Showdown 0.11.11, every roll with and
 // without a crit, over the cases in damage_cases.inc (written by
 // damage_oracle.cjs). Each case builds a battle from two Showdown sets,
 // switches both in by hand (copying what switch-in copies), applies the

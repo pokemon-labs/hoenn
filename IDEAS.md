@@ -8,7 +8,7 @@ review scheduling of libpkmn's testing - we should be able to automatically catc
 
 README that informs users/claude what this repo is. Good enough for search (and therefore RL) sim. No rng matching. Fast. Safe. Styled after/derivative of libpkmn. AI slop. You can do perfect info search for IS-MCTS and logs let you just slap shit into transformer in imperfect info case.
 
-Make a static lib so we don't have to rebuild for all of birch's binaries
+Make a static lib so we don't have to rebuild for all of a driver's binaries
 
 Live document for cart/ps differences. Claude should cross shit off when they get patched by showdown.
 

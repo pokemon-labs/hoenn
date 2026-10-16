@@ -1456,7 +1456,7 @@ void check_mimic() {
   }
 }
 
-// The last single-slot moves on teams/adv/: Water Spout, Gust, Fake Out,
+// The last single-slot moves on teams/ou/: Water Spout, Gust, Fake Out,
 // Pain Split, Memento, Imprison and Nightmare.
 void check_misc_moves() {
   Observed o{};

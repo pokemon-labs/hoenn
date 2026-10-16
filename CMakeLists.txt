@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(pkmn_gen3 LANGUAGES CXX)
 
 # The engine is header-only: this target is just its include path and C++20.
-# A driver (birch) uses it with add_subdirectory and target_link_libraries.
+# A driver uses it with add_subdirectory and target_link_libraries.
 add_library(pkmn_gen3 INTERFACE)
 add_library(pkmn::gen3 ALIAS pkmn_gen3)
 target_include_directories(pkmn_gen3 INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)

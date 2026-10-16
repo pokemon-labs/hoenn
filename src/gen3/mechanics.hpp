@@ -2241,7 +2241,7 @@ inline constexpr double ACCURACY_BOOSTS[7] = {1,         4.0 / 3, 5.0 / 3, 2,
 
 // Whether the foe's Protect or Detect blocks m (DEFENDER_IS_PROTECTED,
 // bsc:57). Showdown's protect flag agrees with the decomp's
-// FLAG_PROTECT_AFFECTED on every move on teams/adv/ (checked 2026-10-07)
+// FLAG_PROTECT_AFFECTED on every move on teams/ou/ (checked 2026-10-07)
 // except Counter and Mirror Coat, which Showdown's protect flag covers;
 // this follows Showdown. (Mean Look has it in both: Showdown's gen5 mod,
 // which gen3 inherits, adds it to the base data's.) Log: Activate Protect
@@ -3626,7 +3626,7 @@ constexpr uint32_t survive(Battle& battle, Player player, const MoveState& m,
   // endure volatile (duration 1) would still be up at that residual
   // (order 11; a duration with no order expires last), so an Endure that
   // turn should save the target there too. Not kept: neither move is on
-  // teams/adv/.
+  // teams/ou/.
   if (m.turn != nullptr && m.turn->endure[index(defender)]) {
     protocol::activate(options.log, id, protocol::Activate::Endure);
     return target.hp - 1u;

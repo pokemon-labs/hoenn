@@ -1,13 +1,13 @@
-# rewrite: a libpkmn-style Gen III (ADV) engine in C++
+# Hoenn: a libpkmn-style Gen III (ADV) engine in C++
 
-This is an attempt to replace ADV-Simulator as birch's engine. It follows
+A Gen III engine for search and RL. It follows
 libpkmn's design choices (a small POD battle, one `update` per turn, the
 choice/result protocol, and the Chance and Calc options), but it's written in
 C++ and doesn't chase every saved bit.
 
-**It's a header-only C++ library, used directly by a C++ driver (birch).**
+**It's a header-only C++ library, used directly by a C++ driver.**
 There is no C API and no compiled library: no `pkmn.h`, no `extern "C"`, no
-`pkmn_gen3_*` names. birch adapts its search to this interface, not the
+`pkmn_gen3_*` names. A driver adapts its search to this interface, not the
 reverse.
 
 **Be cautious, and don't push ahead.** While a design choice is still open,
@@ -130,8 +130,6 @@ competitive play, not cartridge-exact behaviour for every input.
   `src/battle_util.c` (end of turn, abilities, items),
   `src/battle_script_commands.c`, `data/battle_scripts_1.s`. Cite them as
   main:N, util:N, bsc:N, bs1:N.
-- **ADV-Simulator** (`../birch/ADV-Simulator`) shows what has to be handled and is
-  a differential oracle in testing.
 - **Don't write mechanics from Showdown's source.** Use it for Smogon's
   clauses and for the team format, which aren't cartridge mechanics.
   Exception, decided: the damage formula follows Showdown's arithmetic
@@ -142,16 +140,7 @@ competitive play, not cartridge-exact behaviour for every input.
 ## Interface (libpkmn's shape)
 
 Keep libpkmn's shape, as C++ templates and plain functions. Names and
-signatures are ours. birch still runs on ADV-Simulator, in two ways (both
-under `../birch/cpp/include/`):
-- **Its C-style API** (`pkmn_gen3_*`): `search/mcts.h`, `search/data.h`,
-  `search/poke-engine-evaluate.h`, `gen3/parse.h`, `util/`. Search calls
-  update, choices, reseed and `randomize_hidden`. It keys chance nodes on the
-  raw `Actions` bytes (`Obs`, sized `PKMN_GEN3_CHANCE_ACTIONS_SIZE`), and its
-  damage-roll clamping writes override bytes 0 and 8.
-- **Its C++ `::Battle` object API** (`get_stats()`, `team.active()`...):
-  the encoders in `encode/`, `nn/`, `py/` and `train/`. These read
-  ADV-Simulator's durations as 12 bytes per player; ours are 11.
+signatures are ours.
 
 - **`update(battle, c1, c2, options) -> Result`** runs one turn, or the rest
   of a turn after a mid-turn request. At turn 0 both players pass and
@@ -234,7 +223,7 @@ record, all in one place. It touches `actions`, `durations` and
 `probability` directly under `if constexpr (Chance::enabled)`. The null
 types are only `{ static constexpr bool enabled = false; }`. Writing an
 `Actions` field that's already set asserts. `randomize_hidden` (resampling
-the hidden counters from `Durations`, which birch's search calls) lives in
+the hidden counters from `Durations`, which search calls) lives in
 `chance.hpp`.
 
 **The observation must determine the branch exactly. No hashing.** Search
@@ -276,10 +265,10 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 - `check_data`: `static_assert`s on the generated tables.
 - `check_teams`: parses `PKMN_TEAMS_DIR` (default `teams/ou`, every `*.txt`); every
   team must parse (`--expect NAME` would allow a named team to fail).
-- `check_damage`: `damage.hpp` against Showdown 0.11.10, from the committed
-  `tools/damage_cases.inc`. Regenerate it with `node
-  tools/damage_oracle.cjs > tools/damage_cases.inc` (needs ADV-Simulator's
-  pinned Showdown, or its path as the argument).
+- `check_damage`: `damage.hpp` against the pinned Showdown, from the
+  committed `tools/damage_cases.inc`. Regenerate it with `node
+  tools/damage_oracle.cjs > tools/damage_cases.inc` (uses `showdown/`, or
+  a Showdown path as the argument).
 - `soak`: random self-play between random team pairs, checking `valid()`
   and the probability after every update; a crash prints the game's seed,
   and `--replay SEED` plays that game alone. Run it by hand in debug for
@@ -299,7 +288,7 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 CMakeLists.txt, CMakePresets.json
 testing.md            the test spec, pass criteria, known gaps
 SHOWDOWN_COMMIT       the Showdown commit the tests pin
-teams/ou/             the OU teams (Smogon dumps, copied from birch)
+teams/ou/             the OU teams (Smogon dumps)
 src/common/
   data.hpp            Player, ID, Optional, Choice, Result
   rng.hpp             SplitMix64 RNG and its draw helpers
@@ -346,8 +335,7 @@ this repo.
 `showdown/` is a symlink to the pinned Showdown checkout
 (`SHOWDOWN_COMMIT`, `c046106`, 0.11.11), which `tools/run_env.py` keeps
 fetched and built in `.showdown/<hash>/`; both are ignored. Cite it by
-path. `check_damage` still uses
-ADV-Simulator's pinned 0.11.10.
+path.
 
 ## Turn phases
 
@@ -534,11 +522,10 @@ becomes a few lines. These are structures, not steps:
   plus soak runs.
 
 **Plan steps, in order.** "Step N of the plan" and the `TODO(plan step N)`
-markers in the code mean this list. Don't rush step 3 because "birch runs"
+markers in the code mean this list. Don't rush step 3 because "search runs"
 feels like progress; every later mechanic inherits the frame.
 
-1. The pure calculation functions. **Done** except checking `calc_stats`
-   against ADV-Simulator over `teams/`. `damage.hpp` follows Showdown's
+1. The pure calculation functions. **Done**. `damage.hpp` follows Showdown's
    arithmetic, takes no `options` and never draws; a zero divisor is
    asserted (only corrupt stats reach it); the dynamic inputs are a `Hit`,
    which the hit backbone builds per action (its `MoveState` is on the
@@ -570,8 +557,8 @@ feels like progress; every later mechanic inherits the frame.
      - Immunity before crit, as Showdown (README "Damage").
      - Switch-in abilities (Intimidate, Sand Stream, Drizzle, Trace) wait
        for step 4, with the weather residuals.
-     - No birch adaptation in step 3: this is sim development, and the
-       "done when birch runs" criterion is dropped for now.
+     - No search adaptation in step 3: this is sim development, and the
+       "done when search runs" criterion is dropped for now.
      - Both last Pokémon fainting in one action is a `Tie`: the decomp ORs
        `B_OUTCOME_LOST` and `B_OUTCOME_WON` into `B_OUTCOME_DREW`
        (`Cmd_checkteamslost`, bsc:3563-3577), and Showdown's `checkWin`
@@ -585,7 +572,7 @@ feels like progress; every later mechanic inherits the frame.
    opcodes, a text formatter, Showdown's omniscient log).
 5. The rest of the moves (decided 2026-10-08), after the log: 97 left
    (99 unwritten, less Follow Me and Helping Hand). `tools/coverage` is
-   100% on `teams/adv/`, so each group needs synthetic teams carrying its
+   100% on `teams/ou/`, so each group needs synthetic teams carrying its
    moves for `check_showdown`. Groups, in order:
    1. Hits with a simple extra: Stomp, Astonish, Needle Arm, Extrasensory,
       Ancient Power, Silver Wind, Twineedle, Double Kick, Bonemerang,
@@ -628,12 +615,12 @@ decisions and newly observed gaps there, not here.
   including the turn-0 rule; `calc_stats`, `hidden_power`, `max_pp`.
 - `gen3/chance.hpp`: the `Random()` catalogue, draft `Actions` (121 B) and
   `Durations` (22 B).
-- `gen3/helpers.hpp` and `gen3/showdown.hpp`: all 327 teams in `teams/adv/`
+- `gen3/helpers.hpp` and `gen3/showdown.hpp`: all 320 teams in `teams/ou/`
   parse and build.
 - Decided: header-only C++ library with no C API; Chance's probability is a
   `double`; the damage formula follows Showdown's arithmetic.
 - `gen3/damage.hpp`: crit stage, type matchup, damage before the roll, the
-  roll. `check_damage` matches Showdown 0.11.10 on all 74 cases (148 with
+  roll. `check_damage` matches Showdown (0.11.10, and 0.11.11 since) on all 74 cases (148 with
   crits), covering every modifier it applies.
 
 - The build: CMake presets for debug (ASan/UBSan) and release, with
@@ -659,9 +646,7 @@ decisions and newly observed gaps there, not here.
 abilities and items, the berries and the Uproar, Thrash and Yawn
 residuals, the ability and item dispatchers,
 `min_ko_roll`, most scenario tests. Only the damage formula has been
-compared with Showdown; nothing with ADV-Simulator, and `calc_stats` only
-through the damage cases. birch still runs on ADV-Simulator and must be
-adapted (see Interface).
+compared with Showdown, and `calc_stats` only through the damage cases.
 
 **Next session** (step 4, on `main`; `step3` and `step4` were merged
 2026-10-08; ask before each open choice):
@@ -689,7 +674,7 @@ adapted (see Interface).
     kept. Protect, Endure, Counter,
     Mirror Coat, Magic Coat and Snatch are unblocked.
   - Skipping the damage roll when every roll KOs (fewer chance nodes, but
-    it changes the `Actions` key). Can wait for the birch adaptation.
+    it changes the `Actions` key). Can wait for the search adaptation.
 - Done (2026-10-07): accuracy switched to Showdown's arithmetic; confusion
   (the canceler, the self-hit, Confuse Ray's `Effect::Confuse` and the
   `ConfuseHit` secondary), covered by `check_frame`. Still to write:
@@ -795,11 +780,11 @@ adapted (see Interface).
   Energy and misses a semi-invulnerable target, as Showdown).
 - Done (2026-10-07): Reflect, Light Screen, Return, Frustration, Flail and
   Reversal (the decomp and Showdown agree; power at least 1).
-- **Gate (decided 2026-10-07):** once every move on `teams/adv/` is
+- **Gate (decided 2026-10-07):** once every move on `teams/ou/` is
   written, start the realizability test (`testing.md`).
 - Done (2026-10-07): Mean Look (Protect stops it: the decomp and Showdown,
   whose gen5 mod adds the flag, agree; fixed 2026-10-08; the protect flags
-  match on every teams/adv/ move but Counter and Mirror Coat). 99%
+  match on every `teams/ou/` move but Counter and Mirror Coat). 99%
   (15598 of 15696 slots).
 - Done (2026-10-08): `check_chance`, the user's chance-key test (see
   `testing.md`): 0 collisions over 500 games at 128 samples.
@@ -824,8 +809,8 @@ adapted (see Interface).
 - Done (2026-10-08): the last single-slot moves: Water Spout (and
   Eruption), Gust and Twister, Fake Out, Pain Split, Memento, Imprison,
   Nightmare, all checked against Showdown (Memento and Pain Split follow
-  it where the decomp differs). `tools/coverage`: 100% of the 7848 move
-  slots on `teams/adv/`.
+  it where the decomp differs). `tools/coverage`: 100% of the move
+  slots on the OU teams (7680 on `teams/ou/`).
 - Fixed (2026-10-08), found by 200k-game soaks: Mimic copying Hidden
   Power (every `Pokemon` now holds its own `hidden_power` and
   `hidden_power_type`, in what was padding); sleep or freeze landing on a
@@ -835,7 +820,7 @@ adapted (see Interface).
 - **Resume here (2026-10-08).** The realizability harness, with a
   temporary state guard (decided with the user; the log comparison
   replaces it later): `tools/showdown_traces.cjs` (seeded Showdown 0.11.11
-  games over `teams/adv/all.txt`, teams through the gen3ou validator, JSONL
+  games over the OU teams, through the gen3ou validator, JSONL
   traces) and `tools/check_showdown.cpp` (+ `tools/json.hpp`; `--why`,
   `--game`, `--tries`; random branch search; guard: HP, status, PP, items,
   boosts, main volatiles, Substitute HP, Protect's `stall` duration, side
@@ -995,7 +980,7 @@ adapted (see Interface).
   **10k results (2026-10-15, seeds 701-704, 1M cap, `scratch/run_all.sh`,
   output in `scratch/all/`)**: group 1 9943, 2 9915 (before the
   Synchronize fix; recheck in `scratch/all/g2b/`), 3 9998, 4 9982, 5 9996,
-  6 9947, 7 9988, 8 9718; teams/adv seed 8 992/1000. Soaks clean.
+  6 9947, 7 9988, 8 9718; the OU teams seed 8 992/1000. Soaks clean.
   Group 2 recheck after the Synchronize fix: 9974.
   check_chance: 1 collision each in groups 1, 2, 4 and 8. Read from the
   reports (not replayed): all four look like the known winner-HP false
@@ -1059,7 +1044,7 @@ adapted (see Interface).
   roll is recorded even when Mist, an ability or -6 blocks it (the hit
   still lands in `last_taken_move`; check_chance found it).
   - Results (`tools/teams/group7.txt`): `check_showdown` 200/200 on seeds
-    771-774 and 200/200 on 781-784; teams/adv 597/600 (the known rare
+    771-774 and 200/200 on 781-784; the OU teams 597/600 (the known rare
     branches); check_chance 0 collisions; 1000-game debug soak clean. Not
     done: the 10k run, `check_frame` scenarios.
   Group 6 done (2026-10-15), all 15 moves, as Showdown's gen3:
@@ -1076,7 +1061,7 @@ adapted (see Interface).
   only in `tools/teams/group6_swagger.txt` (soak, check_chance).
   - Results: `check_showdown` on `tools/teams/group6.txt` seed 761 (traces
     `scratch/g6/s0-3.jsonl`) 198/200 at the 1M cap; the 2 failures (Speed
-    tie plus two crits) match at 1.1M and 3.4M tries. teams/adv seed 8
+    tie plus two crits) match at 1.1M and 3.4M tries. The OU teams seed 8
     597/600 (the known rare branches). Debug ctest and a 500-game soak
     clean. Not done: the 10k run, `check_frame` scenarios.
   - Group 5, as Showdown: binding (`Effect::Trap` in `hit()`, 3-6 turns;
@@ -1092,7 +1077,7 @@ adapted (see Interface).
     pending future attack (turns, damage) from the traces.
   - Also fixed: a failed Baton Pass is the last move (Encore can lock it).
   - Results (`tools/teams/group5.txt`): seed 751 200/200 (3 games need a
-    2M-try cap), seed 752 999/1000; teams/adv seed 8 992/1000 (unchanged);
+    2M-try cap), seed 752 999/1000; the OU teams seed 8 992/1000 (unchanged);
     soak 5000 debug games clean; check_chance 0 collisions. The one failure
     is older and log-only: Pursuit KOing a switching Natural Cure holder
     (Showdown prints its silent -curestatus before the faint). Not done:
@@ -1112,7 +1097,7 @@ adapted (see Interface).
     comes before Sleep Clause, Rage's boost is at onHit per hit (`rage()`),
     Rapid Spin's self effect comes before the contact ability. Results
     (`tools/teams/group4.txt`): seed 701 200/200, seed 702 1000/1000;
-    soak clean; check_chance one winner-HP false positive. teams/adv seed
+    soak clean; check_chance one winner-HP false positive. The OU teams seed
     8: 992/1000, the same 8 Beat Up and Rock Blast rare-branch games as
     before. Not done: the 10k `run_group.sh 4`, `check_frame` scenarios.
   - Group 1: 10k games 9936 matched. Group 2 (2026-10-09): 9956; OHKO
@@ -1123,7 +1108,7 @@ adapted (see Interface).
     the next turn if its move never ran (`recharge_timer` doubles as its
     timer), Razor Wind's high crit, Whirlpool hits Dive. 10k games:
     9998 matched (the 2 failures match at a 30M-try cap:
-    rare branches); soak and check_chance clean. The teams/adv baseline,
+    rare branches); soak and check_chance clean. The OU teams' baseline,
     rerun after group 4: 992/1000. `check_frame` covers Dig, Skull Bash, the charge expiry
     and Hyper Beam.
   - Fixed during group 3, as Showdown: the Morning Sun family at full HP
@@ -1148,8 +1133,6 @@ adapted (see Interface).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.
-- The fix to one team in `../birch/teams/adv/` (Leer Mence's Forretress lost its
-  `IVs: 3 Atk`) is uncommitted in the birch repo.
 
 **Open:**
 
@@ -1171,6 +1154,3 @@ adapted (see Interface).
   silently.
 - `HoldEffect` `param` means something different per effect; read the decomp
   per effect.
-- This repo moved out of birch (`birch/rewrite/`) to `~/hoenn` on
-  2026-10-16; birch is its sibling, `../birch`. Run outputs in
-  `build/runs/` from before then print the old paths.

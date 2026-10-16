@@ -1,7 +1,7 @@
 // The damage formula: the deterministic steps of one hit, from the crit
 // stage through the damage roll.
 //
-// It follows Pokémon Showdown 0.11.10's gen3 arithmetic, not the decomp's
+// It follows Pokémon Showdown 0.11.11's gen3 arithmetic, not the decomp's
 // (decided 2026-10-07; src/gen3/README.md, "Damage", has the decomp trace and
 // every place the two differ). Showdown applies stat stages first, then
 // chains each event's modifiers into one 4096ths fixed-point multiplier

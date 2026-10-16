@@ -184,7 +184,7 @@ constexpr std::optional<gen3::Battle> init_battle(
   return b;
 }
 
-// A real set (teams/adv/sample-teams.txt), checked by hand.
+// A real set (teams/ou/sample-teams.txt), checked by hand.
 namespace detail {
 inline constexpr Pokemon SKARMORY = {
     .species = Species::Skarmory,

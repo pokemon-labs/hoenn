@@ -70,9 +70,8 @@ files as positional arguments (one file is a list of one) and pools every
 team in them. Same behaviour in every tool. Built (2026-10-15); the
 trace's game record carries each team's `file` beside its index there.
 
-**The OU teams are in this repo** (the user, 2026-10-15): `teams/ou/`, a
-copy of birch's `teams/adv/` (`../birch/teams/adv/`) dump files without `all.txt` (which stays
-in birch), with its README. The tools and ctest take every `*.txt` there,
+**The OU teams are in this repo** (the user, 2026-10-15): `teams/ou/`,
+the Smogon dump files with their README. The tools and ctest take every `*.txt` there,
 whatever its name, so a file can be added or renamed without touching
 them. Fixed in the copy, so Showdown's gen3ou validator accepts them: 13
 Pokémon with no EVs line got `EVs: 1 HP` (Showdown's own advice for 0 EVs;
@@ -319,7 +318,7 @@ built.
 
 **Where it's used, and why.**
 
-- **Search** (not a test): birch clamps damage rolls by writing override
+- **Search** (not a test): clamping damage rolls by writing override
   bytes.
 - **`check_frame`:** a scenario test needs one specific outcome (a crit, a
   Quick Claw proc) to exercise its mechanic. Forcing it makes the test
@@ -433,7 +432,7 @@ Also not built: scenario tests per tricky mechanic (Explosion ends the
 turn, a Spikes sac cancels the foe's attack, a mid-turn replacement takes
 residuals, a residual faint's replacement takes none, the battle ending
 mid-residuals, a double KO on the first action, Baton Pass resuming at
-the foe's move); differential runs against ADV-Simulator.
+the foe's move).
 
 ## Later: an OU expected-failure list
 
