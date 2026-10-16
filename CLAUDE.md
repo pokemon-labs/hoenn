@@ -314,7 +314,10 @@ that rate. The fixes are committed and pass ctest (debug and release).
 Replaying the 75 failures left 7 (6 the Truant gap, 1 a search-budget miss,
 s4g182, that matches at 2M tries), and both chance collisions (a locked
 rampage's accuracy roll into Protect, now recorded) replay clean. To do:
-start the rerun (`python3 tools/run_env.py ou_legal`, fresh seed), read its summary, classify the
+the rerun was started 2026-10-16 at engine `d344f32`, seed
+16645649204763325269, into
+`build/runs/ou_legal-20261016-120831-16645649204763325269/`; when its
+`summary.txt` is there, read its summary, classify the
 failures, propose the bar from the rate, then step 8.
 `build/runs/classify.py`'s KNOWN list is out of date (all of those items
 are written now).
