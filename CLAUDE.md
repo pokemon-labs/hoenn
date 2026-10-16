@@ -273,6 +273,7 @@ tools/
   check_chance.cpp    (c1, c2, Actions) determines the result; calibration
   check_showdown.cpp  the realizability test, replaying Showdown traces
   showdown_traces.cjs seeded Showdown games as JSONL traces (+ json.hpp)
+  gen_teams.cjs       seeded random teams (random OU-legal), validated
   run_env.py          one test environment's suites against its bars
   criteria.toml       the bars per environment (run_env.py)
   check_frame.cpp     the turn frame and scenarios, plus a self-play soak
@@ -303,8 +304,8 @@ the log (opcodes, the formatter, Showdown's omniscient stream; README
 then fixing what it finds; there is no further plan.
 
 **Next:** `testing.md` Implementation step 7, the random OU-legal
-environment. Its generator design is drafted there ("Generators") with
-choices still open for the user.
+environment (`run_env.py ou_legal`): the generator is done; next the
+1,000-game exploratory run, ranking its gaps by frequency.
 
 **Not written:**
 - Held items: Leppa Berry, the flavor berries (Figy, Wiki, Mago, Aguav,

@@ -84,7 +84,8 @@ function loadTeams(files, Dex, Teams, TeamValidator) {
   const validator = TeamValidator.get('gen3ou');
   const teams = [];
   for (const file of files) {
-    const blocks = fs.readFileSync(file, 'utf8').split(/^=== .*===$/m)
+    // Text before the first header (gen_teams.cjs's comment) isn't a team.
+    const blocks = fs.readFileSync(file, 'utf8').split(/^=== .*===$/m).slice(1)
       .map(s => s.trim()).filter(Boolean);
     blocks.forEach((text, index) => {
       const team = Teams.import(text);

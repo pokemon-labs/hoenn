@@ -27,7 +27,7 @@ kinds of check, in priority order (CLAUDE.md, "Priorities"):
 | Teams | `teams/ou/*.txt` (real Smogon teams) | generated, kept only if gen3ou's validator accepts | generated, no legality check |
 | Showdown format | `gen3ou` | `gen3ou` | `gen3customgame` |
 | Strictness | highest | middle | lowest |
-| Built | yes | no | no |
+| Built | yes | generator; bars unset | no |
 
 The two random environments use generators, not the step 5 group files
 (`tools/teams/group*.txt`), which stay in git history. The banned moves
@@ -35,46 +35,50 @@ those files carried for `soak` and `check_chance` only (OHKO moves,
 Swagger, Assist) are then reached by the truly random environment, whose
 `gen3customgame` allows them.
 
-### Generators (not built)
+### Generators
 
 One seeded Node script writes teams as Showdown export text, so every
 consumer (`soak`, `check_chance`, the trace script) reads files as now.
 Each file starts with a comment giving the mode, the seed and the Showdown
 commit, so a generated team keeps its provenance.
 
-- **Random OU-legal** (drafted 2026-10-16; the open choices below await
-  the user). Uniform rather than usage-weighted, for coverage.
+- **Random OU-legal** (`tools/gen_teams.cjs --mode ou-legal`; decided
+  2026-10-16). Uniform rather than usage-weighted, for coverage.
   `gen3randombattle` won't do: its levels vary by species and its sets are
   curated.
-  - Per slot: a species uniform over the 374 gen3ou allows (mostly NFE, LC
-    and PU); 4 distinct moves from its learnset with its prevolutions'
-    (Smeargle: every move Sketch can copy; fewer than 4 if that's all it
-    learns); one of its abilities, uniform; random IVs 0-31 (so Hidden
-    Power's type varies); all 510 EVs in random multiples of 4, at most 252
-    per stat; a nature, uniform; level 100.
-  - Validation per slot: each set goes through gen3ou's `validateSet` and
-    a rejected slot is redrawn. A scratch probe on 0.11.11 accepted 76% of
-    naive sets (rejections: Sand Veil, Soundproof, OHKO moves, Swagger,
-    impossible egg and event combinations), so redrawing whole teams would
-    keep only about 19%. Then `validateTeam` for the team clauses (Species
-    Clause, the Baton Pass clauses), redrawing the team up to a cap.
-  - **Open: the item pool.** Showdown's gen3 has 106 holdable items; the
-    engine's `Item` has the 75 with an effect, so Poké Balls, stones,
-    fossils, Mail and the plain berries don't parse. Recommended: draw from
-    the engine's 74 (Quick Claw is banned) plus no item about 10% of the
-    time (empty hands for Thief and Covet); adding the no-effect items to
-    the tables can come later. They matter only to Thief, Trick, Knock Off
-    and Recycle, which already handle any item.
-  - **Open: where teams come from.** Recommended: `run_env.py` generates a
-    fresh pool per run from the run seed (size in `criteria.toml`, default
-    2,000 teams) into the run directory, and all three suites read that
-    file, as fresh seeds intend. Each file starts with a comment giving the
-    mode, the seed and the Showdown commit (both parsers skip text before
-    the first `===`). The alternative is a committed fixed pool.
-  - **Open: the order.** Recommended: the generator, then a 1,000-game
-    exploratory run to rank the gaps by frequency, fix them, then the
-    10,000-game run that sets the bar. The alternative is writing the
-    known gaps first.
+  - Per slot: a species uniform over the 366 gen3ou allows that have an
+    allowed ability (374 less Sandshrew and the like, whose only ability is
+    Sand Veil or Soundproof), distinct within the team; an ability uniform
+    over its allowed ones; up to 4 distinct moves uniform over those
+    Showdown's `checkCanLearn` accepts and gen3ou doesn't ban (Smeargle:
+    every move; bare Hidden Power, typed by the IVs); IVs uniform 0-31;
+    508 EVs in random multiples of 4, at most 252 per stat; a nature
+    uniform; level 100. Happiness is written as 0 with Frustration
+    (Showdown's import), so the parser's Frustration-and-Return deviation
+    can't arise.
+  - Bans are filtered before drawing, so they don't thin any species. A
+    set `validateSet` still rejects (egg and event combinations, the OHKO
+    clause) redraws its moves; then `validateTeam` (the Baton Pass clauses)
+    redraws the team, about 0.7% of teams. 2,000 teams take 6 s. On
+    re-import every team passes `validateTeam`; Showdown only fills in
+    names and single-gender species' genders.
+  - **Items** (decided): the 59 of Showdown's gen3 items that map to an
+    engine effect item and gen3ou allows (not Quick Claw, Bright Powder or
+    Lax Incense), or none 10% of the time. The list is read from
+    `names.hpp`. Not the 42 that parse as `Other`: the state handles them,
+    but the formatter names `Other` and `Mail` as "", so Trick, Knock Off,
+    Thief, Covet and Recycle would mismatch the log until `Other` carries
+    its identity. (The draft's "they don't parse" and "the engine's 74"
+    were wrong: every decomp item parses, and 9 engine items are invalid
+    or unobtainable in Showdown's gen3.)
+  - **Teams** (decided): `run_env.py` generates a fresh pool per run from
+    the run seed (`generate` in `criteria.toml`, 2,000 teams) into the run
+    directory as `teams.txt`, and all three suites read it. The file
+    starts with a comment giving the mode, the seed and the Showdown
+    commit; both parsers skip text before the first `===`.
+  - **Order** (decided): the generator, then a 1,000-game exploratory run
+    to rank the gaps by frequency, fix them, then the 10,000-game run that
+    sets the bar. The bars in `criteria.toml` are OU's until then.
   - Known gaps it will reach: the unwritten items (Leppa, the flavor
     berries, King's Rock, Shell Bell; the last two can act on most
     hits), and Follow Me and Helping Hand, which Showdown's singles logs
@@ -517,8 +521,8 @@ turn, each measured before its bars are fixed.
    (14 of 16 shards, the rest OOM-killed) matched 8709 of 8714. The
    unmatched: Fake Out against Focus Punch (2), the toxic stage across a
    double replacement (1), 5 undiagnosed. Bar set to 99.9% (2026-10-16).
-7. Random OU-legal: the generator, a measured run, its bar. Design
-   drafted (Generators), open choices awaiting the user.
+7. Random OU-legal: the generator, a measured run, its bar. Generator
+   done (2026-10-16); next the 1,000-game exploratory run.
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.
 9. CI, later: a gating workflow, then the reporting one.

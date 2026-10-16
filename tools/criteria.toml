@@ -21,3 +21,23 @@ games = 100000          # debug: ASan, UBSan, asserts
 games = 1000
 samples = 128
 alpha = 1e-7            # every calibration bin's tail chance at least this
+
+# Random OU-legal (testing.md, "Generators"). The bars are OU's, unmeasured:
+# set them from the 10,000-game run, after the exploratory run's fixes.
+[ou_legal]
+generate = { mode = "ou-legal", teams = 2000 }
+
+[ou_legal.showdown]
+games = 10000
+tries = 1000000
+matched = 0.999
+log_only_counts = true
+choices = 0
+
+[ou_legal.soak]
+games = 100000
+
+[ou_legal.chance]
+games = 1000
+samples = 128
+alpha = 1e-7

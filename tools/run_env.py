@@ -5,7 +5,8 @@
                              [--showdown-commit HASH | --master]
                              [--out DIR] [--keep-traces]
 
-ENV is a table in tools/criteria.toml. The suites, each split into --jobs
+ENV is a table in tools/criteria.toml, with team files (`teams`) or a pool
+that tools/gen_teams.cjs draws from the run seed (`generate`). The suites, each split into --jobs
 shards run in parallel: check_showdown (traces from Showdown, then the
 check), soak (debug) and check_chance (release). A fresh 64-bit seed is
 drawn unless --seed is given; every shard's seed derives from it, so the run
@@ -210,9 +211,13 @@ def main():
               f'(have: {", ".join(criteria)})')
         return 2
     env = criteria[args.env]
-    files = sorted(glob.glob(os.path.join(ROOT, env['teams'], '*.txt')))
-    if not files:
-        print(f'run_env: no team files in {env["teams"]}')
+    if 'teams' in env:
+        files = sorted(glob.glob(os.path.join(ROOT, env['teams'], '*.txt')))
+        if not files:
+            print(f'run_env: no team files in {env["teams"]}')
+            return 2
+    elif 'generate' not in env:
+        print(f'run_env: {args.env} has neither teams nor generate')
         return 2
 
     with open(os.path.join(ROOT, 'SHOWDOWN_COMMIT')) as f:
@@ -249,6 +254,15 @@ def main():
     trace_jobs = args.trace_jobs or default_trace_jobs(n)
     traces_running = threading.Semaphore(trace_jobs)
     seeds = splitmix64(seed)
+    if 'generate' in env:
+        # A fresh pool from the run seed, read by every suite.
+        gen = env['generate']
+        files = [os.path.join(out, 'teams.txt')]
+        with open(files[0], 'w') as f:
+            run(['node', 'tools/gen_teams.cjs', '--mode', gen['mode'], '--teams',
+                 str(gen['teams']), '--seed', str(next(seeds)), '--showdown', sd],
+                stdout=f, stderr=subprocess.DEVNULL)
+        print(f'  {gen["teams"]} {gen["mode"]} teams in {files[0]}', flush=True)
     scaled = lambda g: max(1, round(g * args.scale))
     jobs = []
     with cf.ThreadPoolExecutor(max_workers=n) as pool:
