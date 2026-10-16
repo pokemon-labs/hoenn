@@ -274,7 +274,7 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 - `headers`: every header compiles alone (so its `static_assert`s run), and
   all are linked into one binary (no duplicate definitions).
 - `check_data`: `static_assert`s on the generated tables.
-- `check_teams`: parses `PKMN_TEAMS_DIR` (default `../teams/adv`); every
+- `check_teams`: parses `PKMN_TEAMS_DIR` (default `teams/ou`, every `*.txt`); every
   team must parse (`--expect NAME` would allow a named team to fail).
 - `check_damage`: `damage.hpp` against Showdown 0.11.10, from the committed
   `tools/damage_cases.inc`. Regenerate it with `node
@@ -298,6 +298,7 @@ target `pkmn::gen3` (include path `src/`, C++20). `cmake --preset debug`
 ```
 CMakeLists.txt, CMakePresets.json
 testing.md            the test spec, pass criteria, known gaps
+teams/ou/             the OU teams (Smogon dumps, copied from birch)
 src/common/
   data.hpp            Player, ID, Optional, Choice, Result
   rng.hpp             SplitMix64 RNG and its draw helpers
@@ -323,7 +324,7 @@ src/gen3/
 tools/
   generate.py         one-off data generator from pokeemerald/
   check_data.cpp      static_asserts on the generated tables
-  check_teams.cpp     parses teams/adv/ and builds a battle from each
+  check_teams.cpp     parses teams/ou/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
   check_chance.cpp    (c1, c2, Actions) determines the result; calibration
   check_frame.cpp     the turn frame and step 3, plus a self-play soak

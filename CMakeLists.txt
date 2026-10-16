@@ -75,13 +75,12 @@ target_link_libraries(check_showdown PRIVATE pkmn_gen3 pkmn_warnings)
 add_executable(coverage tools/coverage.cpp)
 target_link_libraries(coverage PRIVATE pkmn_gen3 pkmn_warnings)
 
-# The team corpus lives in birch, beside this repo.
-set(PKMN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../teams/adv
-    CACHE PATH "Showdown export teams for check_teams")
+# The OU teams: every *.txt in the directory, whatever its name.
+set(PKMN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/teams/ou
+    CACHE PATH "Showdown export teams for the tests")
 add_executable(check_teams tools/check_teams.cpp)
 target_link_libraries(check_teams PRIVATE pkmn_gen3 pkmn_warnings)
 file(GLOB PKMN_TEAM_FILES ${PKMN_TEAMS_DIR}/*.txt)
-list(FILTER PKMN_TEAM_FILES EXCLUDE REGEX "/all\\.txt$")
 if(PKMN_TEAM_FILES)
   add_test(NAME check_teams COMMAND check_teams ${PKMN_TEAM_FILES})
   add_test(NAME check_frame COMMAND check_frame ${PKMN_TEAM_FILES})

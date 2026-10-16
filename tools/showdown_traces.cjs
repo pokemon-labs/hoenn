@@ -8,7 +8,7 @@
 //       [--showdown PATH] [TEAM_FILE...] > traces.jsonl
 //
 // The teams in every TEAM_FILE are pooled, duplicates included. Defaults:
-// 100 games, seed 1, every teams/adv/*.txt but all.txt, showdown/ (0.11.11;
+// 100 games, seed 1, every teams/ou/*.txt, showdown/ (0.11.11;
 // build it first with `node build` there). Each team goes through Showdown's
 // gen3ou validator, as in real play: it sets the IVs a Hidden Power type
 // needs. Teams it rejects are skipped (9 of 327 on 0.11.11, Quick Claw among
@@ -71,8 +71,8 @@ function parseArgs(argv) {
     opts[key] = typeof opts[key] === 'number' ? +argv[++i] : argv[++i];
   }
   if (!opts.files.length) {
-    const dir = path.join(__dirname, '../../teams/adv');
-    opts.files = fs.readdirSync(dir).filter(f => f.endsWith('.txt') && f !== 'all.txt')
+    const dir = path.join(__dirname, '../teams/ou');
+    opts.files = fs.readdirSync(dir).filter(f => f.endsWith('.txt'))
       .sort().map(f => path.join(dir, f));
   }
   return opts;

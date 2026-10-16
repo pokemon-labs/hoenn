@@ -4,7 +4,7 @@
 // as handled if use_move runs its effect (detail::handled); everything
 // else only uses PP.
 //
-// Usage: coverage team files...   (leave out all.txt, which repeats them)
+// Usage: coverage team files...
 
 #include <algorithm>
 #include <cstdio>

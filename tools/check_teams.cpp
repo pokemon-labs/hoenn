@@ -1,6 +1,6 @@
 // Parses every team in the given Showdown export files and builds a battle
 // from each one, reporting the teams that fail. Run by the `check_teams` test
-// on PKMN_TEAMS_DIR, or by hand: check_teams ../teams/adv/*.txt
+// on PKMN_TEAMS_DIR, or by hand: check_teams teams/ou/*.txt
 //
 // `--expect NAME` (repeatable) names a team that should fail. The exit status
 // is 0 only if exactly the expected teams fail.

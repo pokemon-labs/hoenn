@@ -1,0 +1,593 @@
+=== [gen3ou] Umbry ===
+
+Breloom @ Leftovers
+Ability: Effect Spore
+EVs: 252 Atk / 4 SpD / 252 Spe
+Jolly Nature
+- Spore
+- Focus Punch
+- Mach Punch
+- Sky Uppercut
+
+Metagross @ Leftovers
+Ability: Clear Body
+EVs: 252 HP / 224 Atk / 32 SpD
+Adamant Nature
+- Meteor Mash
+- Earthquake
+- Rock Slide
+- Explosion
+
+Salamence @ Leftovers
+Ability: Intimidate
+EVs: 116 HP / 220 SpA / 164 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Hydro Pump
+- Dragon Claw
+- Fire Blast
+- Hidden Power [Grass]
+
+Tyranitar @ Black Glasses
+Ability: Sand Stream
+EVs: 208 HP / 96 SpA / 204 Spe
+Quiet Nature
+- Pursuit
+- Brick Break
+- Fire Blast
+- Crunch
+
+Scizor @ Salac Berry
+Ability: Swarm
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Swords Dance
+- Endure
+- Reversal
+- Hidden Power [Bug]
+
+Starmie @ Leftovers
+Ability: Natural Cure
+EVs: 148 HP / 208 SpA / 152 Spe
+Timid Nature
+IVs: 0 Atk
+- Ice Beam
+- Recover
+- Thunderbolt
+- Hydro Pump
+
+=== [gen3ou] Cyberodin StarZap ===
+
+Zapdos @ Leftovers
+Ability: Pressure
+EVs: 252 HP / 44 Def / 140 SpA / 72 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Thunderbolt
+- Hidden Power [Grass]
+- Roar
+- Thunder Wave
+
+Tyranitar @ Leftovers
+Ability: Sand Stream
+EVs: 252 HP / 188 Atk / 12 Def / 56 Spe
+Adamant Nature
+- Rock Slide
+- Earthquake
+- Hidden Power [Bug]
+- Focus Punch
+
+Skarmory @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 4 Def / 252 SpD
+Careful Nature
+IVs: 0 Atk
+- Spikes
+- Protect
+- Toxic
+- Roar
+
+Blissey @ Leftovers
+Ability: Natural Cure
+EVs: 252 Def / 252 SpA / 4 Spe
+Bold Nature
+- Seismic Toss
+- Ice Beam
+- Soft-Boiled
+- Toxic
+
+Starmie @ Leftovers
+Ability: Natural Cure
+EVs: 248 HP / 44 Def / 216 Spe
+Timid Nature
+IVs: 0 Atk
+- Surf
+- Psychic
+- Rapid Spin
+- Recover
+
+Swampert @ Leftovers
+Ability: Torrent
+EVs: 248 HP / 36 Atk / 176 Def / 44 SpD / 4 Spe
+Relaxed Nature
+- Earthquake
+- Ice Beam
+- Protect
+- Hydro Pump
+
+=== [gen3ou] Lantern good ===
+
+EverythingButFloat (Tyranitar) @ Lum Berry
+Ability: Sand Stream
+EVs: 196 HP / 24 Atk / 176 SpA / 112 Spe
+Rash Nature
+- Fire Blast
+- Ice Beam
+- Brick Break
+- Pursuit
+
+No Capes! (Skarmory) @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 196 SpD / 60 Spe
+Careful Nature
+IVs: 0 Atk
+- Spikes
+- Toxic
+- Taunt
+- Counter
+
+Just Keep Swimming (Lanturn) @ Leftovers
+Ability: Volt Absorb
+EVs: 8 HP / 88 Def / 168 SpA / 84 SpD / 160 Spe
+Modest Nature
+IVs: 0 Atk
+- Hydro Pump
+- Thunderbolt
+- Ice Beam
+- Confuse Ray
+
+Dragon. Not Lizard (Salamence) @ Leftovers
+Ability: Intimidate
+EVs: 104 HP / 48 Atk / 180 SpA / 176 Spe
+Mild Nature
+- Brick Break
+- Dragon Claw
+- Fire Blast
+- Hidden Power [Grass]
+
+Zero to Hero (Breloom) @ Black Belt
+Ability: Effect Spore
+EVs: 76 HP / 216 Atk / 216 Spe
+Adamant Nature
+- Spore
+- Focus Punch
+- Sky Uppercut
+- Mach Punch
+
+WALL-E (Metagross) @ Leftovers
+Ability: Clear Body
+EVs: 252 HP / 96 Atk / 72 Def / 88 Spe
+Adamant Nature
+- Meteor Mash
+- Earthquake
+- Agility
+- Explosion
+
+=== [gen3ou] Linear SPL ===
+
+TheBendyBar (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+IVs: 2 Atk / 30 Def
+- Thunderbolt
+- Baton Pass
+- Hidden Power [Ice]
+- Thunder Wave
+
+NoNonsenseNoodle (Tyranitar) @ Liechi Berry
+Ability: Sand Stream
+EVs: 252 HP / 68 Atk / 28 SpD / 160 Spe
+Adamant Nature
+- Earthquake
+- Hidden Power [Bug]
+- Rock Slide
+- Dragon Dance
+
+TheLoopyLine (Vaporeon) @ Leftovers
+Ability: Water Absorb
+EVs: 168 HP / 52 Def / 56 SpA / 232 Spe
+Modest Nature
+IVs: 0 Atk
+- Hydro Pump
+- Roar
+- Substitute
+- Baton Pass
+
+StraightSquiggle (Heracross) @ Leftovers
+Ability: Guts
+EVs: 64 HP / 216 Atk / 228 Spe
+Adamant Nature
+- Megahorn
+- Focus Punch
+- Rock Slide
+- Brick Break
+
+TheRoundedRay (Jirachi) @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 64 Def / 100 SpA / 28 SpD / 64 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Calm Mind
+- Psychic
+- Hidden Power [Grass]
+- Fire Punch
+
+HumpyHorizon (Camerupt) @ Quick Claw
+Ability: Magma Armor
+EVs: 252 HP / 100 SpA / 112 SpD / 44 Spe
+Quiet Nature
+- Explosion
+- Substitute
+- Hidden Power [Grass]
+- Overheat
+
+=== [gen3ou] Fullpass Smeargle ===
+
+$DOGE (Smeargle) @ Quick Claw
+Ability: Own Tempo
+EVs: 80 HP / 252 SpD / 176 Spe
+Jolly Nature
+IVs: 0 Atk
+- Spore
+- Memento
+- Reflect
+- Thunder Wave
+
+SADLYSIUS IRL (Ninjask) @ Leftovers
+Ability: Speed Boost
+EVs: 244 HP / 232 SpD / 32 Spe
+Careful Nature
+IVs: 0 Atk
+- Baton Pass
+- Substitute
+- Protect
+- Swords Dance
+
+GILBERT GOTTFRIED (Vaporeon) @ Leftovers
+Ability: Water Absorb
+EVs: 248 HP / 252 Def / 8 SpD
+Bold Nature
+IVs: 0 Atk
+- Acid Armor
+- Baton Pass
+- Wish
+- Substitute
+
+BAN NOTICE (Mr. Mime) @ Leftovers
+Ability: Soundproof
+EVs: 240 HP / 116 Def / 136 SpD
+Calm Nature
+IVs: 0 Atk
+- Calm Mind
+- Substitute
+- Baton Pass
+- Encore
+
+PLAXICO BURESS (Octillery) @ Leftovers
+Ability: Suction Cups
+EVs: 12 HP / 252 SpA / 244 Spe
+Modest Nature
+IVs: 3 Atk / 30 SpA
+- Surf
+- Ice Beam
+- Substitute
+- Hidden Power [Electric]
+
+ANDREW YANG (Marowak) @ Thick Club
+Ability: Rock Head
+EVs: 12 HP / 252 Atk / 244 Spe
+Adamant Nature
+- Earthquake
+- Rock Slide
+- Double-Edge
+- Focus Punch
+
+=== [gen3ou] SPL Week 3 - vs. starmaster ===
+
+Drattak (Salamence) @ Leftovers
+Ability: Intimidate
+EVs: 1 HP
+Naive Nature
+- Dragon Claw
+- Fire Blast
+- Brick Break
+- Roar
+
+Laggron (Swampert) @ Leftovers
+Ability: Torrent
+EVs: 1 HP
+Bold Nature
+IVs: 0 Atk
+- Refresh
+- Surf
+- Protect
+- Toxic
+
+Sulfura (Moltres) @ Leftovers
+Ability: Pressure
+EVs: 1 HP
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Roar
+- Flamethrower
+- Will-O-Wisp
+- Hidden Power [Grass]
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+EVs: 1 HP
+Quiet Nature
+- Thunder
+- Ice Beam
+- Pursuit
+- Focus Punch
+
+Foretress (Forretress) @ Leftovers
+Ability: Sturdy
+EVs: 1 HP
+Careful Nature
+- Rapid Spin
+- Explosion
+- Hidden Power [Bug]
+- Spikes
+
+Leuphorie (Blissey) (F) @ Leftovers
+Ability: Natural Cure
+EVs: 1 HP
+Bold Nature
+- Wish
+- Soft-Boiled
+- Seismic Toss
+- Ice Beam
+
+=== [gen3ou] DugOff Rain [hclat edit] ===
+
+Zapdos @ Leftovers
+Ability: Pressure
+EVs: 212 SpA / 120 SpD / 176 Spe
+Modest Nature
+IVs: 2 Atk / 30 Def
+- Thunderbolt
+- Hidden Power [Ice]
+- Rain Dance
+- Thunder Wave
+
+Dugtrio @ Choice Band
+Ability: Arena Trap
+EVs: 244 Atk / 156 SpD / 108 Spe
+Jolly Nature
+IVs: 30 SpD / 30 Spe
+- Earthquake
+- Beat Up
+- Hidden Power [Bug]
+- Aerial Ace
+
+Jirachi @ Leftovers
+Ability: Serene Grace
+EVs: 248 HP / 44 Atk / 68 Def / 148 SpD
+Sassy Nature
+- Body Slam
+- Thunder
+- Hidden Power [Fighting]
+- Wish
+
+Kingdra @ Lum Berry
+Ability: Swift Swim
+EVs: 80 HP / 252 SpA / 176 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Rain Dance
+- Hydro Pump
+- Ice Beam
+- Hidden Power [Grass]
+
+Gengar @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 52 Def / 204 Spe
+Timid Nature
+- Ice Punch
+- Will-O-Wisp
+- Taunt
+- Explosion
+
+Suicune @ Leftovers
+Ability: Pressure
+EVs: 252 HP / 192 SpA / 64 Spe
+Modest Nature
+IVs: 0 Atk
+- Calm Mind
+- Surf
+- Protect
+- Substitute
+
+=== [gen3ou] Rain ===
+
+Électhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 212 SpA / 120 SpD / 176 Spe
+Modest Nature
+IVs: 2 Atk / 30 Def
+- Thunderbolt
+- Hidden Power [Ice]
+- Rain Dance
+- Thunder Wave
+
+Tropikeur (Dugtrio) @ Choice Band
+Ability: Arena Trap
+EVs: 244 Atk / 156 SpD / 108 Spe
+Jolly Nature
+IVs: 30 SpD / 30 Spe
+- Earthquake
+- Beat Up
+- Hidden Power [Bug]
+- Aerial Ace
+
+Jirachi @ Leftovers
+Ability: Serene Grace
+EVs: 248 HP / 44 Atk / 68 Def / 148 SpD
+Sassy Nature
+- Body Slam
+- Thunder
+- Hidden Power [Fighting]
+- Wish
+
+Hyporoi (Kingdra) @ Lum Berry
+Ability: Swift Swim
+EVs: 80 HP / 252 SpA / 176 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Rain Dance
+- Hydro Pump
+- Ice Beam
+- Hidden Power [Grass]
+
+Ectoplasma (Gengar) @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 52 Def / 204 Spe
+Timid Nature
+- Ice Punch
+- Will-O-Wisp
+- Mean Look
+- Explosion
+
+Suicune @ Leftovers
+Ability: Pressure
+EVs: 252 HP / 192 SpA / 64 Spe
+Modest Nature
+IVs: 0 Atk
+- Calm Mind
+- Surf
+- Protect
+- Substitute
+
+=== [gen3ou] Week 5 vs. tamahome ===
+
+Lippoutou (Jynx) @ Leftovers
+Ability: Oblivious
+EVs: 1 HP
+Timid Nature
+IVs: 0 Atk
+- Ice Beam
+- Lovely Kiss
+- Taunt
+- Calm Mind
+
+Électhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 1 HP
+Timid Nature
+IVs: 2 Atk / 30 SpA
+- Thunderbolt
+- Baton Pass
+- Substitute
+- Hidden Power [Grass]
+
+Hyporoi (Kingdra) @ Leftovers
+Ability: Swift Swim
+EVs: 1 HP
+Modest Nature
+IVs: 0 Atk
+- Substitute
+- Surf
+- Ice Beam
+- Rain Dance
+
+Triopikeur (Dugtrio) @ Choice Band
+Ability: Arena Trap
+EVs: 1 HP
+Jolly Nature
+IVs: 30 SpD / 30 Spe
+- Earthquake
+- Rock Slide
+- Aerial Ace
+- Hidden Power [Bug]
+
+Celebi @ Leftovers
+Ability: Natural Cure
+EVs: 1 HP
+Modest Nature
+IVs: 2 Atk / 30 SpA / 30 Spe
+- Giga Drain
+- Calm Mind
+- Hidden Power [Fire]
+- Baton Pass
+
+Métalosse (Metagross) @ Quick Claw
+Ability: Clear Body
+EVs: 1 HP
+Brave Nature
+- Meteor Mash
+- Hidden Power [Fire]
+- Psychic
+- Explosion
+
+=== [gen3ou] yama ===
+
+Hariyama (M) @ Leftovers
+Ability: Thick Fat
+EVs: 104 HP / 252 Def / 152 SpD
+Impish Nature
+- Brick Break
+- Knock Off
+- Rest
+- Sleep Talk
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+EVs: 252 HP / 180 SpA / 76 SpD
+Modest Nature
+IVs: 0 Atk
+- Fire Blast
+- Roar
+- Crunch
+- Pursuit
+
+Drattak (Salamence) @ Leftovers
+Ability: Intimidate
+EVs: 4 Def / 252 SpA / 252 Spe
+Rash Nature
+- Brick Break
+- Fire Blast
+- Wish
+- Dragon Claw
+
+Jirachi @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 136 Def / 76 SpA / 44 Spe
+Bold Nature
+IVs: 0 Atk
+- Calm Mind
+- Thunder
+- Ice Punch
+- Wish
+
+Celebi @ Leftovers
+Ability: Natural Cure
+EVs: 240 HP / 64 Def / 36 SpA / 136 SpD / 32 Spe
+Calm Nature
+IVs: 0 Atk
+- Psychic
+- Leech Seed
+- Perish Song
+- Recover
+
+Foretress (Forretress) @ Leftovers
+Ability: Sturdy
+EVs: 252 HP / 4 Atk / 252 SpD
+Careful Nature
+- Spikes
+- Hidden Power [Bug]
+- Rapid Spin
+- Counter
+

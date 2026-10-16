@@ -24,10 +24,10 @@ kinds of check, in priority order (CLAUDE.md, "Priorities"):
 
 | | OU | Random OU-legal | Truly random |
 |---|---|---|---|
-| Teams | `../teams/adv/*.txt` (real Smogon teams) | generated, kept only if gen3ou's validator accepts | generated, no legality check |
+| Teams | `teams/ou/*.txt` (real Smogon teams) | generated, kept only if gen3ou's validator accepts | generated, no legality check |
 | Showdown format | `gen3ou` | `gen3ou` | `gen3customgame` |
 | Strictness | highest | middle | lowest |
-| Built | yes (via `all.txt`) | no | no |
+| Built | yes | no | no |
 
 The two random environments use generators, not the step 5 group files
 (`tools/teams/group*.txt`), which stay in git history. The banned moves
@@ -67,21 +67,24 @@ dump needn't be copied into `all.txt`, and each team keeps its source.
 
 Decided (2026-10-15): every tool that takes teams takes a list of team
 files as positional arguments (one file is a list of one) and pools every
-team in them. Same behaviour in every tool. The OU environment passes the
-dump files in `../teams/adv/`, every `*.txt` but `all.txt`, which stays
-for birch. Built (2026-10-15): `showdown_traces.cjs` and
-`protocol_survey.cjs games` default to those files; the trace's game record
-carries each team's `file` beside its index there. The dumps and `all.txt`
-hold the same 327 teams (318 pass gen3ou's validator).
+team in them. Same behaviour in every tool. Built (2026-10-15); the
+trace's game record carries each team's `file` beside its index there.
+
+**The OU teams are in this repo** (the user, 2026-10-15): `teams/ou/`, a
+copy of birch's `../teams/adv/` dump files without `all.txt` (which stays
+in birch), with its README. The tools and ctest take every `*.txt` there,
+whatever its name, so a file can be added or renamed without touching
+them. Fixed in the copy, so Showdown's gen3ou validator accepts them: 13
+Pokémon with no EVs line got `EVs: 1 HP` (Showdown's own advice for 0 EVs;
+no stat changes), and the nickname `(snowlight nxc)`, which Showdown's
+importer read as a species, lost its parentheses. Open: 7 teams break
+today's gen3ou rules (Quick Claw, Soundproof, the Baton Pass clauses).
 
 Proposed:
 
 - A team is identified by (file, index in the file, title). The trace's
   game record carries both teams' identities, and every failure report
   prints them.
-- Open: the teams are in the birch repo, outside this one
-  (`pokemon-labs/hoenn`), so a fresh checkout of this repo alone (a CI
-  machine) has no OU teams. Copy them in, or check out birch too.
 - Some teams appear in more than one file (e.g. "DDSala OffCune
   PursuitMeta RestLax SDHera"). Pooled as given, they're drawn twice as
   often; no dedupe.
@@ -203,7 +206,7 @@ comparison, since the log hides some state.
   Gen I; ADV-Simulator's update about 1.4 µs. None is like for like.
   Not a pass/fail suite.
 - `coverage`: which moves on the given teams have a written mechanic
-  (100% on `teams/adv/`). Not a pass/fail suite.
+  (100% on `teams/ou/`). Not a pass/fail suite.
 
 ## Pass criteria (proposed)
 
@@ -461,4 +464,4 @@ Open:
 
 1. **Where the jobs run, and how often** (deferred by the user).
 2. **Re-setting the bars** from measured 10,000-game baselines.
-3. **The OU teams outside this repo** (Team input).
+3. **The 7 OU teams that break gen3ou's rules** (Team input).

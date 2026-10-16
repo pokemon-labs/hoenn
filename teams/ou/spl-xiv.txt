@@ -1,0 +1,628 @@
+=== [gen3ou] Voltali ===
+
+Tyranocif (Tyranitar) @ Lum Berry
+Ability: Sand Stream
+Shiny: Yes
+EVs: 236 Atk / 8 Def / 12 SpA / 252 Spe
+Lonely Nature
+IVs: 30 Def / 30 SpA
+- Dragon Dance
+- Rock Slide
+- Earthquake
+- Hidden Power [Grass]
+
+Voltali (Jolteon) @ Leftovers
+Ability: Volt Absorb
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+IVs: 2 Atk / 30 Def
+- Thunderbolt
+- Hidden Power [Ice]
+- Roar
+- Baton Pass
+
+Airmure (Skarmory) @ Leftovers
+Ability: Keen Eye
+Shiny: Yes
+EVs: 120 HP / 252 SpD / 136 Spe
+Careful Nature
+- Roar
+- Drill Peck
+- Spikes
+- Taunt
+
+Laggron (Swampert) @ Leftovers
+Ability: Torrent
+Shiny: Yes
+EVs: 248 HP / 136 Def / 48 SpA / 44 SpD / 32 Spe
+Bold Nature
+- Surf
+- Roar
+- Focus Punch
+- Protect
+
+Ectoplasma (Gengar) @ Leftovers
+Ability: Levitate
+Shiny: Yes
+EVs: 168 HP / 164 SpD / 176 Spe
+Timid Nature
+IVs: 0 Atk
+- Taunt
+- Will-O-Wisp
+- Ice Punch
+- Destiny Bond
+
+Drattak (Salamence) @ Leftovers
+Ability: Intimidate
+Shiny: Yes
+EVs: 8 HP / 168 Atk / 192 SpD / 140 Spe
+Adamant Nature
+- Dragon Dance
+- Hidden Power [Flying]
+- Earthquake
+- Rock Slide
+
+=== [gen3ou] Kingdra ===
+
+Electhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 208 SpA / 120 SpD / 180 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA
+- Thunderbolt
+- Thunder Wave
+- Hidden Power [Grass]
+- Baton Pass
+
+Triopikeur (Dugtrio) @ Choice Band
+Ability: Arena Trap
+EVs: 244 Atk / 156 SpD / 108 Spe
+Jolly Nature
+- Earthquake
+- Beat Up
+- Hidden Power [Bug]
+- Aerial Ace
+
+Hyporoi (Kingdra) @ Leftovers
+Ability: Swift Swim
+Shiny: Yes
+EVs: 184 HP / 252 SpA / 72 Spe
+Modest Nature
+IVs: 0 Atk
+- Substitute
+- Surf
+- Ice Beam
+- Rain Dance
+
+Métalosse (Metagross) @ Choice Band
+Ability: Clear Body
+Shiny: Yes
+EVs: 248 HP / 176 Atk / 68 Def / 16 Spe
+Adamant Nature
+- Meteor Mash
+- Earthquake
+- Rock Slide
+- Explosion
+
+Kaorine (Claydol) @ Leftovers
+Ability: Levitate
+EVs: 248 HP / 216 Atk / 16 Def / 28 SpD
+Relaxed Nature
+- Earthquake
+- Psychic
+- Rapid Spin
+- Explosion
+
+Ectoplasma (Gengar) @ Leftovers
+Ability: Levitate
+Shiny: Yes
+EVs: 248 HP / 60 SpD / 200 Spe
+Timid Nature
+- Ice Punch
+- Explosion
+- Thunderbolt
+- Will-O-Wisp
+
+=== [gen3ou] Heracross ===
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+Shiny: Yes
+EVs: 252 HP / 188 Atk / 16 Def / 52 Spe
+Adamant Nature
+- Rock Slide
+- Focus Punch
+- Earthquake
+- Hidden Power [Bug]
+
+Staross (Starmie) @ Leftovers
+Ability: Natural Cure
+Shiny: Yes
+EVs: 252 HP / 8 Def / 40 SpA / 32 SpD / 176 Spe
+Timid Nature
+IVs: 0 Atk
+- Surf
+- Thunder Wave
+- Recover
+- Rapid Spin
+
+Laggron (Swampert) @ Leftovers
+Ability: Torrent
+Shiny: Yes
+EVs: 168 HP / 252 SpA / 88 Spe
+Modest Nature
+- Surf
+- Ice Beam
+- Earthquake
+- Curse
+
+Electhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 248 HP / 228 SpD / 32 Spe
+Calm Nature
+IVs: 2 Atk / 30 SpA
+- Hidden Power [Grass]
+- Thunderbolt
+- Baton Pass
+- Thunder Wave
+
+Scarhino (Heracross) @ Leftovers
+Ability: Guts
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Megahorn
+- Focus Punch
+- Rock Slide
+- Substitute
+
+Jirachi @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 176 Def / 80 SpD
+Relaxed Nature
+- Wish
+- Protect
+- Body Slam
+- Fire Punch
+
+=== [gen3ou] Celebi ===
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+Shiny: Yes
+EVs: 252 HP / 188 Atk / 16 Def / 52 Spe
+Adamant Nature
+- Rock Slide
+- Focus Punch
+- Earthquake
+- Hidden Power [Bug]
+
+Staross (Starmie) @ Leftovers
+Ability: Natural Cure
+Shiny: Yes
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+IVs: 0 Atk
+- Surf
+- Ice Beam
+- Thunderbolt
+- Rapid Spin
+
+Airmure (Skarmory) @ Leftovers
+Ability: Keen Eye
+Shiny: Yes
+EVs: 240 HP / 240 SpD / 28 Spe
+Calm Nature
+- Taunt
+- Toxic
+- Drill Peck
+- Spikes
+
+Laggron (Swampert) @ Leftovers
+Ability: Torrent
+Shiny: Yes
+EVs: 248 HP / 136 Def / 48 SpA / 44 SpD / 32 Spe
+Bold Nature
+- Surf
+- Ice Beam
+- Focus Punch
+- Protect
+
+Ptéra (Aerodactyl) @ Liechi Berry
+Ability: Rock Head
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Substitute
+- Rock Slide
+- Earthquake
+- Double-Edge
+
+Celebi @ Leftovers
+Ability: Natural Cure
+EVs: 76 HP / 252 SpA / 180 Spe
+Modest Nature
+IVs: 2 Atk / 30 SpA / 30 Spe
+- Leech Seed
+- Hidden Power [Fire]
+- Psychic
+- Giga Drain
+
+=== [gen3ou] Feuforêve ===
+
+Airmure (Skarmory) (M) @ Leftovers
+Ability: Keen Eye
+Shiny: Yes
+EVs: 252 HP / 4 Def / 252 SpD
+Careful Nature
+- Spikes
+- Drill Peck
+- Roar
+- Protect
+
+Libégon (Flygon) (M) @ Leftovers
+Ability: Levitate
+Shiny: Yes
+EVs: 248 HP / 220 Def / 40 Spe
+Impish Nature
+- Earthquake
+- Hidden Power [Rock]
+- Toxic
+- Protect
+
+Leuphorie (Blissey) @ Leftovers
+Ability: Natural Cure
+Shiny: Yes
+EVs: 252 Def / 252 SpA / 4 SpD
+Modest Nature
+IVs: 0 Atk
+- Seismic Toss
+- Ice Beam
+- Aromatherapy
+- Soft-Boiled
+
+Electhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 224 HP / 252 SpD / 32 Spe
+Calm Nature
+IVs: 0 Atk
+- Thunderbolt
+- Roar
+- Rest
+- Sleep Talk
+
+Sulfura (Moltres) @ Leftovers
+Ability: Pressure
+EVs: 100 HP / 136 SpA / 56 SpD / 216 Spe
+Modest Nature
+IVs: 0 Atk
+- Flamethrower
+- Protect
+- Toxic
+- Rest
+
+Feuforêve (Misdreavus) (F) @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+IVs: 0 Atk
+- Toxic
+- Thunderbolt
+- Perish Song
+- Rest
+
+=== [gen3ou] ToxDug ===
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+Shiny: Yes
+EVs: 252 HP / 16 Def / 136 SpA / 104 Spe
+Modest Nature
+- Substitute
+- Focus Punch
+- Flamethrower
+- Toxic
+
+Ectoplasma (Gengar) @ Leftovers
+Ability: Levitate
+Shiny: Yes
+EVs: 248 HP / 44 Def / 112 SpD / 104 Spe
+Timid Nature
+- Will-O-Wisp
+- Explosion
+- Giga Drain
+- Ice Punch
+
+Leuphorie (Blissey) @ Leftovers
+Ability: Natural Cure
+Shiny: Yes
+EVs: 4 HP / 252 Def / 252 SpA
+Modest Nature
+- Mimic
+- Seismic Toss
+- Soft-Boiled
+- Ice Beam
+
+Laggron (Swampert) @ Leftovers
+Ability: Torrent
+Shiny: Yes
+EVs: 252 HP / 176 Def / 40 SpA / 40 SpD
+Bold Nature
+IVs: 0 Atk
+- Refresh
+- Surf
+- Toxic
+- Protect
+
+Triopikeur (Dugtrio) @ Choice Band
+Ability: Arena Trap
+Shiny: Yes
+EVs: 252 Atk / 24 SpD / 232 Spe
+Adamant Nature
+IVs: 30 SpD / 30 Spe
+- Earthquake
+- Hidden Power [Bug]
+- Aerial Ace
+- Screech
+
+Kaorine (Claydol) @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 16 Atk / 224 Def / 16 SpD
+Careful Nature
+- Rapid Spin
+- Explosion
+- Shadow Ball
+- Refresh
+
+=== [gen3ou] Ludicolo ===
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+Shiny: Yes
+EVs: 248 HP / 176 SpA / 84 Spe
+Modest Nature
+IVs: 0 Atk
+- Pursuit
+- Flamethrower
+- Crunch
+- Counter
+
+Airmure (Skarmory) @ Leftovers
+Ability: Keen Eye
+Shiny: Yes
+EVs: 240 HP / 244 SpD / 24 Spe
+Careful Nature
+IVs: 0 Atk
+- Spikes
+- Roar
+- Protect
+- Toxic
+
+Métalosse (Metagross) @ Leftovers
+Ability: Clear Body
+Shiny: Yes
+EVs: 168 HP / 236 Atk / 12 Def / 92 Spe
+Adamant Nature
+- Meteor Mash
+- Earthquake
+- Rock Slide
+- Agility
+
+Kaorine (Claydol) @ Leftovers
+Ability: Levitate
+EVs: 236 HP / 176 Atk / 96 Spe
+Adamant Nature
+- Earthquake
+- Explosion
+- Rock Slide
+- Rapid Spin
+
+Leuphorie (Blissey) @ Leftovers
+Ability: Natural Cure
+Shiny: Yes
+EVs: 252 Def / 252 SpA / 4 Spe
+Modest Nature
+IVs: 0 Atk
+- Soft-Boiled
+- Ice Beam
+- Seismic Toss
+- Thunder Wave
+
+Ludicolo @ Leftovers
+Ability: Swift Swim
+Shiny: Yes
+EVs: 164 HP / 252 SpA / 92 Spe
+Modest Nature
+IVs: 0 Atk
+- Rain Dance
+- Surf
+- Ice Beam
+- Leech Seed
+
+=== [gen3ou] BoomDug ===
+
+Métalosse (Metagross) @ Leftovers
+Ability: Clear Body
+Shiny: Yes
+EVs: 252 HP / 8 Def / 220 SpA / 28 Spe
+Modest Nature
+- Psychic
+- Hidden Power [Fire]
+- Explosion
+- Ice Punch
+
+Kaorine (Claydol) @ Leftovers
+Ability: Levitate
+EVs: 252 HP / 68 Atk / 96 Def / 92 SpA
+Relaxed Nature
+- Hidden Power [Fire]
+- Psychic
+- Rapid Spin
+- Explosion
+
+Leuphorie (Blissey) @ Leftovers
+Ability: Natural Cure
+Shiny: Yes
+EVs: 4 HP / 252 Def / 252 SpA
+Modest Nature
+IVs: 0 Atk / 30 Spe
+- Sing
+- Ice Beam
+- Seismic Toss
+- Soft-Boiled
+
+Ronflex (Snorlax) @ Leftovers
+Ability: Immunity
+Shiny: Yes
+EVs: 96 HP / 56 Atk / 136 Def / 80 SpA / 140 SpD
+Brave Nature
+- Body Slam
+- Counter
+- Self-Destruct
+- Flamethrower
+
+Triopikeur (Dugtrio) @ Choice Band
+Ability: Arena Trap
+Shiny: Yes
+EVs: 252 Atk / 24 SpD / 232 Spe
+Adamant Nature
+IVs: 30 SpD / 30 Spe
+- Earthquake
+- Hidden Power [Bug]
+- Aerial Ace
+- Rock Slide
+
+Ectoplasma (Gengar) @ Leftovers
+Ability: Levitate
+Shiny: Yes
+EVs: 248 HP / 44 Def / 40 SpD / 176 Spe
+Timid Nature
+- Will-O-Wisp
+- Explosion
+- Giga Drain
+- Ice Punch
+
+=== [gen3ou] Chapignon ===
+
+Electhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 232 HP / 108 Def / 92 SpD / 76 Spe
+Timid Nature
+IVs: 2 Atk / 30 SpA
+- Thunderbolt
+- Agility
+- Baton Pass
+- Hidden Power [Grass]
+
+Suicune @ Leftovers
+Ability: Pressure
+Shiny: Yes
+EVs: 252 HP / 224 Def / 32 Spe
+Bold Nature
+IVs: 0 Atk
+- Calm Mind
+- Rest
+- Sleep Talk
+- Surf
+
+Métalosse (Metagross) @ Choice Band
+Ability: Clear Body
+Shiny: Yes
+EVs: 168 HP / 216 Atk / 12 Def / 112 Spe
+Adamant Nature
+- Meteor Mash
+- Earthquake
+- Sleep Talk
+- Explosion
+
+Ronflex (Snorlax) @ Leftovers
+Ability: Immunity
+Shiny: Yes
+EVs: 52 HP / 252 Atk / 68 Def / 136 SpD
+Adamant Nature
+- Curse
+- Earthquake
+- Shadow Ball
+- Self-Destruct
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+Shiny: Yes
+EVs: 248 HP / 232 SpA / 28 Spe
+Modest Nature
+- Pursuit
+- Crunch
+- Flamethrower
+- Focus Punch
+
+Chapignon (Breloom) @ Leftovers
+Ability: Effect Spore
+Shiny: Yes
+EVs: 252 Atk / 4 Def / 252 Spe
+Jolly Nature
+IVs: 1 HP
+- Substitute
+- Leech Seed
+- Focus Punch
+- Spore
+
+=== [gen3ou] EndPert ===
+
+Electhor (Zapdos) @ Leftovers
+Ability: Pressure
+EVs: 248 HP / 228 SpD / 32 Spe
+Calm Nature
+IVs: 2 Atk / 30 SpA
+- Hidden Power [Grass]
+- Thunderbolt
+- Baton Pass
+- Thunder Wave
+
+Tyranocif (Tyranitar) @ Leftovers
+Ability: Sand Stream
+Shiny: Yes
+EVs: 252 HP / 188 Atk / 16 Def / 52 Spe
+Adamant Nature
+- Rock Slide
+- Focus Punch
+- Earthquake
+- Hidden Power [Bug]
+
+Laggron (Swampert) @ Salac Berry
+Ability: Torrent
+Shiny: Yes
+EVs: 4 Def / 252 SpA / 252 Spe
+Timid Nature
+IVs: 0 Atk
+- Substitute
+- Surf
+- Ice Beam
+- Endeavor
+
+Kaorine (Claydol) @ Leftovers
+Ability: Levitate
+EVs: 92 HP / 176 Atk / 240 Spe
+Adamant Nature
+- Explosion
+- Earthquake
+- Rapid Spin
+- Psychic
+
+Métalosse (Metagross) @ Leftovers
+Ability: Clear Body
+Shiny: Yes
+EVs: 168 HP / 236 Atk / 12 Def / 92 Spe
+Adamant Nature
+- Meteor Mash
+- Earthquake
+- Rock Slide
+- Agility
+
+Ronflex (Snorlax) @ Leftovers
+Ability: Immunity
+Shiny: Yes
+EVs: 52 HP / 252 Atk / 68 Def / 136 SpD
+Adamant Nature
+- Curse
+- Earthquake
+- Shadow Ball
+- Self-Destruct
+

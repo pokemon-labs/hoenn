@@ -14,7 +14,7 @@
 // some lines are unreachable in gen3 singles.
 //
 // `games` plays N random games of FORMAT (gen3ou over the teams of every
-// TEAM_FILE, pooled, by default every teams/adv/*.txt but all.txt; or
+// TEAM_FILE, pooled, by default every teams/ou/*.txt; or
 // gen3randombattle with generated teams) with random legal choices, and
 // prints each distinct message shape with its count. Shapes replace
 // Pokémon, HP, numbers, moves and most item names with placeholders and keep
@@ -134,8 +134,8 @@ function playGames(format, games, PS, files) {
   let teams = null;
   if (format === 'gen3ou') {
     if (!files.length) {
-      const dir = path.join(__dirname, '../../teams/adv');
-      files = fs.readdirSync(dir).filter(f => f.endsWith('.txt') && f !== 'all.txt')
+      const dir = path.join(__dirname, '../teams/ou');
+      files = fs.readdirSync(dir).filter(f => f.endsWith('.txt'))
         .sort().map(f => path.join(dir, f));
     }
     const species = Dex.mod('gen3').species;
