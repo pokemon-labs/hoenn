@@ -505,12 +505,15 @@ struct ActivePokemon {
   Move disabled_move;       // DisableStruct
   Move encored_move;        // DisableStruct
   Move last_move;           // gLastMoves: Disable, Encore, Spite, Mimic
-  Move last_landed_move;    // gLastLandedMoves: Conversion 2
+  // Showdown's lastMoveUsed (Conversion 2), set as each move starts
+  // (useMoveInner), called ones included; None since the switch-in. Its
+  // type as used: Weather Ball's and Hidden Power's.
+  Move last_used_move;
   Move last_resulting_move; // gLastResultingMoves: Protect's reset
   Move last_printed_move;   // gLastPrintedMoves: Sketch
   Move last_taken_move;     // lastTakenMove: Mirror Move
   Type types[2];
-  Type last_hit_type;       // gLastHitByType: Conversion 2
+  Type last_used_type;
   Ability ability;
   Boosts boosts;
   Volatiles volatiles;
@@ -542,6 +545,10 @@ struct ActivePokemon {
   // switch-in, counted as each starts (runMove), so an action a faint
   // cancelled doesn't count. Fake Out fails above 1.
   uint8_t move_actions;
+  // Hidden Power's power (30-70) and type (Fighting..Dark): the Pokémon's
+  // own, or the target's after Transform (Showdown's hpPower and hpType).
+  uint8_t hidden_power;
+  Type hidden_power_type;
   // Showdown's duration 2, for the volatiles that a turn's move renews and
   // whose duration otherwise runs out at that turn's residuals: bit 0 for the
   // lock (lockedmove or rollout), bit 1 for furycutter (RENEWED_*).
@@ -553,12 +560,13 @@ struct ActivePokemon {
 
   constexpr bool valid() const {
     if (!detail::valid(species) || !detail::valid(types[0]) ||
-        !detail::valid(types[1]) || !detail::valid(last_hit_type) ||
+        !detail::valid(types[1]) || !detail::valid(last_used_type) ||
+        !detail::valid(hidden_power_type) ||
         !detail::valid(ability)) {
       return false;
     }
     for (Move m : {locked_move, choice_move, wrapped_move, disabled_move,
-                   encored_move, last_move, last_landed_move,
+                   encored_move, last_move, last_used_move,
                    last_resulting_move, last_printed_move, last_taken_move}) {
       if (!detail::valid(m)) return false;
     }

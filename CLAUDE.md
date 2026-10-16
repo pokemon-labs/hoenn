@@ -1084,11 +1084,51 @@ adapted (see Interface).
   "Protocol"). Same results: seed 7 197 of 200, seed 8 992 of 1000
   (groups 1-5 and the guard), every failure a Beat Up or Rock Blast rare
   branch. A mutation (`[eat]` and Pressure's `[silent]`) fails 41 of 50.
-- **Resume here:** plan step 5, group 8 (copying, calling, swapping): not
-  started. Trace each in the decomp, check Showdown's gen3, build
-  `tools/teams/group8.txt`, then check it as group 7 (4-way sharded
-  `check_showdown`, soak, check_chance, the teams/adv baseline in
-  `scratch/g6b/b0-2.jsonl`).
+- **Resume here (2026-10-15):** plan step 5, group 8 committed (all 16 moves).
+  Layout decided
+  with the user: `Action` gained `metronome` and `assist` (`MovePick`,
+  bytewise u16; Actions 141 B), Conversion's type goes in `variable` (+1);
+  `ActivePokemon` gained `hidden_power`/`hidden_power_type` (Transform
+  copies them; still 824 B). Following Showdown: Conversion 2 reads
+  `last_used_move`/`last_used_type` (lastMoveUsed, set in `cancel()`;
+  replaced the decomp's write-only landed fields); Mirror Move reads
+  `last_taken_move` as attackedBy (`MoveState::attacked`, set when
+  `try_hit` passes), kept only if `mirrors()` (knows Mirror Move or
+  Metronome), whose roll `try_hit` then records; called moves go through
+  `call_move` (Sleep Talk too; `MoveState::from` is the `[from]`). New log
+  messages: `-transform`, `-nothing`, Activate Sketch and Skill Swap,
+  ItemFrom::Recycle. Assist is banned in gen3ou: `tools/teams/group8_assist.txt`
+  is for soak/check_chance only. Deviation: Recycle fails after Knock Off.
+  Done: debug ctest passes; 300-game debug soaks on both files clean.
+  `check_showdown` on `scratch/g8/t1-4.jsonl` (seeds 801-804, 50 games
+  each): 40/200 at first, 196/200 after these fixes (2026-10-15), all
+  following Showdown: the guard compares the active (transformed) species;
+  Sketch is gen4's (fails into a Substitute, keeps the slot's PP Ups, logs
+  `move: Mimic`; `Activate::Sketch` removed); an immunity ability cures
+  after every switch-in (`arrive`: Ditto's Limber, a returning Insomnia,
+  Trace); Lum Berry eats as soon as a status lands (`inflict`, Showdown's
+  onAfterSetStatus; not for a Synchronize holder, whose Lum waits as
+  before); a Pokémon leaving clears the foe's `last_taken_move`
+  (clearVolatile drops the source's lastMove, so Mirror Move fails).
+  `check_showdown` now forces Metronome's pick from Showdown's `[from]
+  Metronome` line through Calc (two picks plus rolls exceeded the cap; only
+  the pick is forced). Later, as Showdown: Synchronize passes back only
+  the status its holder took (`MoveState::synchronized`); multi-hit moves
+  recompute effectiveness per hit; `mirrors()` also counts Mimic, Sketch and
+  Transform; Bide's start rolls accuracy against the user's own stages; the
+  contact abilities come after the self drops, Knock Off and Thief.
+  `check_showdown` skips a stale choicelock without a Choice Band.
+  **10k results (2026-10-15, seeds 701-704, 1M cap, `scratch/run_all.sh`,
+  output in `scratch/all/`)**: group 1 9943, 2 9915 (before the
+  Synchronize fix; recheck in `scratch/all/g2b/`), 3 9998, 4 9982, 5 9996,
+  6 9947, 7 9988, 8 9718; teams/adv seed 8 992/1000. Soaks clean.
+  check_chance: 1 collision each in groups 1, 2, 4 (all reproduce at
+  6fdcd51) and 8 (game 7159328670391257150, turn 50), undiagnosed.
+  **Next:** read the group 2 recheck; group 8's failures (Mirror Move,
+  Encore + Metronome, choice sets, Trick, Lum not curing Smeargle; ~70%
+  log-only); the 4 collisions; group 6's leftovers (Leftovers order under
+  paralysis, 34 log-only; Grudge's -activate when the KO ends the battle;
+  Focus Punch vs confusion).
   Group 7 done (2026-10-15), as Showdown's gen3: Mist and Safeguard
   (`screen`), Mud Sport and Water Sport (gen4 volatiles on the user, in
   `self_volatile`), Magic Coat (bounces in `try_hit` after the roll and

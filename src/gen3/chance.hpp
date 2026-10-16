@@ -138,9 +138,8 @@ namespace pkmn::gen3 {
 //   counter says the effect ends or continues.
 //
 // Out of scope: doubles targeting (util:181-233, 3017, 3838-3875), running
-// (util:434-466), obedience (util:3945-4019), Pickup, catching, Metronome
-// and Mirror Move's random pick (singles has one candidate), Conversion and
-// Conversion 2, and Roar's level check (bsc:7172, which only draws when the
+// (util:434-466), obedience (util:3945-4019), Pickup, catching, Mirror
+// Move's random pick (singles has one candidate), and Roar's level check (bsc:7172, which only draws when the
 // user is lower level; Smogon is all level 100). OHKO moves (banned by OHKO
 // Clause) draw only their accuracy, in Action::hit.
 //
@@ -237,6 +236,12 @@ namespace pkmn::gen3 {
 // Spite                   2-5 PP, 1/4 each            1     bsc:8333
 // Present, Magnitude,     as Showdown (see            1     bsc:8615, 8672,
 //   Psywave               rolls::variable)                   7936
+// Conversion, Conversion  a type, as Showdown         1     shares variable:
+//   2                     (rolls::conversion)                one called move
+// Metronome               uniform over 336 moves      1     as Showdown
+// Assist                  a party move, by count      1     as Showdown;
+//                                                            Metronome can
+//                                                            call it
 //
 // Per player, end of turn
 // -----------------------
@@ -289,6 +294,21 @@ struct HitDraws {
   friend constexpr bool operator==(const HitDraws&, const HitDraws&) = default;
 };
 
+// A move drawn by Metronome or Assist, kept bytewise so Action has no
+// padding (the chance key is its bytes). A typed Hidden Power is the
+// generic Move::HiddenPower: the caller's own type.
+struct MovePick {
+  uint8_t bytes[2];
+
+  constexpr Move get() const { return Move(bytes[0] | bytes[1] << 8); }
+  constexpr void set(Move m) {
+    bytes[0] = uint8_t(uint16_t(m) & 0xFF);
+    bytes[1] = uint8_t(uint16_t(m) >> 8);
+  }
+
+  friend constexpr bool operator==(const MovePick&, const MovePick&) = default;
+};
+
 // The draws that belong to one player's action in an update. Every field is
 // 0 when nothing was drawn; otherwise it is the outcome.
 struct Action {
@@ -320,7 +340,10 @@ struct Action {
   uint8_t spite;         // PP removed, 2-5 (bsc:8333)
   uint8_t variable;      // by move: Present 1 heal, 2-4 for 40, 80, 120
                          // power; Magnitude 4-10; Psywave 50-150 (% of
-                         // the level). rolls::variable
+                         // the level), rolls::variable; Conversion and
+                         // Conversion 2 the type + 1, rolls::conversion
+  MovePick metronome;    // the move Metronome calls
+  MovePick assist;       // the move Assist calls
 
   // End of turn.
   Optional future_hit; // Future Sight or Doom Desire's accuracy, on the
@@ -374,8 +397,8 @@ static_assert(sizeof(HitDraws) == 6);
 // The most hits one move execution draws for (Beat Up's six).
 inline constexpr uint8_t MAX_HITS = std::size(Action{}.hits);
 static_assert(MAX_HITS == 6);
-static_assert(sizeof(Action) == 65);
-static_assert(sizeof(Actions) == 3 + 2 * 65);
+static_assert(sizeof(Action) == 69);
+static_assert(sizeof(Actions) == 3 + 2 * 69);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 

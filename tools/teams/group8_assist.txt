@@ -1,0 +1,55 @@
+=== [gen3ou] group8 assist ===
+
+Delcatty @ Leftovers
+Ability: Cute Charm
+EVs: 252 HP / 4 Atk / 252 Spe
+Jolly Nature
+- Assist
+- Wish
+- Baton Pass
+- Return
+
+Persian @ Silk Scarf
+Ability: Limber
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Assist
+- Return
+- Shadow Ball
+- Hypnosis
+
+Togetic @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Metronome
+- Mirror Move
+- Wish
+- Thunder Wave
+
+Gengar @ Leftovers
+Ability: Levitate
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Dream Eater
+- Hypnosis
+- Skill Swap
+- Thunderbolt
+
+Skarmory @ Leftovers
+Ability: Keen Eye
+EVs: 252 HP / 252 Def / 4 Spe
+Impish Nature
+- Spikes
+- Whirlwind
+- Drill Peck
+- Counter
+
+Smeargle @ Lum Berry
+Ability: Own Tempo
+EVs: 252 HP / 4 Def / 252 Spe
+Jolly Nature
+- Sketch
+- Spore
+- Spikes
+- Baton Pass

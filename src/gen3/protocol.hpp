@@ -56,6 +56,8 @@
 //   EndItem      ident, item, EndItemFrom [, of for KnockOff and Thief]
 //   Ability      ident, ability, AbilityFrom [, old ability, of for Trace
 //                and RolePlay]
+//   Transform    source, target
+//   Nothing      -
 //   None         ends the update's messages
 //
 // The species, moves, items and abilities are the engine's enum values.
@@ -230,6 +232,7 @@ enum class Activate : uint8_t {
   MindReader, // |move: Mind Reader|[of] P
   Snatch,     // |move: Snatch|[of] P
   Trick,      // |move: Trick|[of] P
+  SkillSwap,  // |Skill Swap|||[of] P (gen 4 and earlier name no ability)
   // + a move, then of: |move: M|[of] P (a binding move's start)
   Bound,
   // + a number: |move: Magnitude|N
@@ -243,7 +246,7 @@ constexpr bool activate_move(Activate a) {
          a == Activate::Bound;
 }
 constexpr bool activate_of(Activate a) {
-  return (a >= Activate::Attract && a <= Activate::Trick) || a == Activate::Bound;
+  return (a >= Activate::Attract && a <= Activate::SkillSwap) || a == Activate::Bound;
 }
 
 // -start's effect. Those marked + carry more bytes after the effect.
@@ -359,7 +362,8 @@ enum class WeatherFrom : uint8_t {
 enum class ItemFrom : uint8_t {
   Thief, // |[from] move: Thief|[of] P, + of
   Covet, // |[from] move: Covet|[of] P, + of
-  Trick, // |[from] move: Trick
+  Trick,   // |[from] move: Trick
+  Recycle, // |[from] move: Recycle
 };
 
 // -enditem's form: the item lost.
@@ -918,15 +922,17 @@ template <typename L> void weather_ability(L& log, gen3::Weather w, Ability a, I
   }
 }
 
-// -item: Thief's and Covet's `of` is the Pokémon robbed; Trick has none.
+// -item: Thief's and Covet's `of` is the Pokémon robbed; Trick and Recycle
+// have none.
 template <typename L> void item(L& log, ID id, Item i, ItemFrom from, ID of = NO_ID) {
   if constexpr (L::enabled) {
-    assert((from != ItemFrom::Trick) == (of != NO_ID));
+    const bool has_of = from == ItemFrom::Thief || from == ItemFrom::Covet;
+    assert(has_of == (of != NO_ID));
     log.write(ArgType::Item);
     log.write_byte(id.bits);
     log.write_byte(uint8_t(i));
     log.write_byte(uint8_t(from));
-    if (from != ItemFrom::Trick) log.write_byte(of.bits);
+    if (has_of) log.write_byte(of.bits);
   }
 }
 
@@ -967,6 +973,20 @@ void ability_copy(L& log, ID id, Ability a, Ability old, AbilityFrom from, ID of
     log.write_byte(uint8_t(old));
     log.write_byte(of.bits);
   }
+}
+
+// -transform|P|Q (Transform).
+template <typename L> void transform(L& log, ID id, ID target) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::Transform);
+    log.write_byte(id.bits);
+    log.write_byte(target.bits);
+  }
+}
+
+// -nothing (Splash).
+template <typename L> void nothing(L& log) {
+  if constexpr (L::enabled) log.write(ArgType::Nothing);
 }
 
 template <typename L> void turn(L& log, uint16_t n) {

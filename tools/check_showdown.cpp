@@ -65,7 +65,28 @@ using namespace pkmn::gen3::names;
 
 namespace {
 
-using Observed = Options<protocol::FixedLog, Chance<>, NullCalc>;
+using Observed = Options<protocol::FixedLog, Chance<>, Calc>;
+
+// Metronome's pick, read from Showdown's move line ([from] Metronome) and
+// forced through Calc: a random search can't find two picks (1/336 each)
+// plus their rolls within the try cap. Only the pick is forced.
+void force_metronome(const json::Value& log, Calc& calc) {
+  for (const json::Value& l : log.array) {
+    const std::string& line = l.string;
+    if (!line.starts_with("|move|p") || line.find("|[from] Metronome") == std::string::npos) {
+      continue;
+    }
+    const Player p = line[7] == '1' ? Player::P1 : Player::P2;
+    const size_t a = line.find('|', 6) + 1, b = line.find('|', a);
+    const std::string_view name(line.data() + a, b - a);
+    for (uint16_t i = 1; i < CARTRIDGE_MOVES; i++) {
+      if (display::MOVE_NAMES[i] == name && detail::metronome_can_call(Move(i))) {
+        calc.overrides.get(p).metronome.set(Move(i));
+        break;
+      }
+    }
+  }
+}
 
 // A log unit: one line, or a |split| triplet as one.
 using Unit = std::vector<std::string>;
@@ -361,6 +382,12 @@ std::string active_mismatch(const Battle& battle, Player p,
         std::string_view(v.name) == "choicelock") {
       continue;
     }
+    // A lock whose band was traded or knocked away stays in Showdown until
+    // the holder's next DisableMove, inert.
+    if (std::string_view(v.name) == "choicelock" && a.choice_move == Move::None &&
+        !detail::holds(battle.side(p), HoldEffect::ChoiceBand)) {
+      continue;
+    }
     bool theirs = false;
     for (const json::Value& n : sa["volatiles"].array) theirs |= n.string == v.name;
     if (v.has(a) != theirs) {
@@ -466,7 +493,10 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
     for (uint8_t slot = 1; slot <= mons.size(); slot++) {
       const json::Value& m = mons[slot - 1];
       const Pokemon& p = battle.sides[s].get(slot);
-      const std::string_view id = species_id(p.species);
+      // Showdown's species is the active one, which Transform changes.
+      const bool active = slot == 1 && !p.fainted() && battle.turn > 0;
+      const std::string_view id =
+          species_id(active ? battle.sides[s].active.species : p.species);
       bool pp = true;
       for (size_t i = 0; i < m[4].size(); i++) {
         pp = pp && p.moves[i].pp == m[4][i].integer();
@@ -668,6 +698,7 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
       protocol::Writer writer{buffer.data(), buffer.size(), 0};
       Observed o{protocol::fixed_log(writer), {}, {}};
       o.chance.durations = durations;
+      force_metronome(step["log"], o.calc);
       const Result result = update(copy, x, y, o);
       std::string w = mismatch(copy, result, battle.request.phase, step, next);
       // The log lines this try matches before its first difference, and

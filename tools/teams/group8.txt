@@ -1,0 +1,217 @@
+=== [gen3ou] group8 callers ===
+
+Clefable @ Leftovers
+Ability: Cute Charm
+EVs: 252 HP / 252 Def / 4 SpA
+Bold Nature
+- Metronome
+- Soft-Boiled
+- Calm Mind
+- Ice Beam
+
+Togetic @ Leftovers
+Ability: Serene Grace
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Metronome
+- Mirror Move
+- Wish
+- Thunder Wave
+
+Persian @ Silk Scarf
+Ability: Limber
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Fake Out
+- Return
+- Shadow Ball
+- Hypnosis
+
+Ludicolo @ Leftovers
+Ability: Rain Dish
+EVs: 252 HP / 4 Def / 252 SpA
+Modest Nature
+- Nature Power
+- Surf
+- Leech Seed
+- Rain Dance
+
+Pidgeot @ Leftovers
+Ability: Keen Eye
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Mirror Move
+- Return
+- Aerial Ace
+- Quick Attack
+
+Gengar @ Leftovers
+Ability: Levitate
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Dream Eater
+- Hypnosis
+- Skill Swap
+- Thunderbolt
+
+=== [gen3ou] group8 swappers ===
+
+Alakazam @ Choice Band
+Ability: Synchronize
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Trick
+- Role Play
+- Skill Swap
+- Psychic
+
+Porygon2 @ Lum Berry
+Ability: Trace
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Conversion 2
+- Recycle
+- Recover
+- Ice Beam
+
+Starmie @ Leftovers
+Ability: Natural Cure
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Camouflage
+- Surf
+- Thunderbolt
+- Recover
+
+Kecleon @ Choice Band
+Ability: Color Change
+EVs: 252 HP / 252 Atk / 4 Def
+Adamant Nature
+- Trick
+- Return
+- Shadow Ball
+- Metronome
+
+Ditto @ Leftovers
+Ability: Limber
+EVs: 252 HP / 4 Def / 252 Spe
+Jolly Nature
+- Transform
+
+Smeargle @ Lum Berry
+Ability: Own Tempo
+EVs: 252 HP / 4 Def / 252 Spe
+Jolly Nature
+- Sketch
+- Spore
+- Spikes
+- Baton Pass
+
+=== [gen3ou] group8 misc ===
+
+Porygon @ Chesto Berry
+Ability: Trace
+EVs: 252 HP / 4 Def / 252 SpA
+Modest Nature
+- Rest
+- Recycle
+- Ice Beam
+- Thunderbolt
+
+Gardevoir @ Leftovers
+Ability: Trace
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Skill Swap
+- Dream Eater
+- Hypnosis
+- Teleport
+
+Gyarados @ Leftovers
+Ability: Intimidate
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Dragon Dance
+- Earthquake
+- Hidden Power Flying
+- Splash
+
+Delcatty @ Leftovers
+Ability: Cute Charm
+EVs: 252 HP / 4 Atk / 252 Spe
+Jolly Nature
+- Thunder Wave
+- Wish
+- Baton Pass
+- Return
+
+Shiftry @ Leftovers
+Ability: Chlorophyll
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Nature Power
+- Explosion
+- Swords Dance
+- Shadow Ball
+
+Houndoom @ Leftovers
+Ability: Flash Fire
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Flamethrower
+- Crunch
+- Will-O-Wisp
+- Pursuit
+
+=== [gen3ou] group8 copiers ===
+
+Porygon2 @ Leftovers
+Ability: Trace
+EVs: 252 HP / 4 Def / 252 SpA
+Modest Nature
+- Conversion
+- Conversion 2
+- Thunderbolt
+- Ice Beam
+
+Swellow @ Choice Band
+Ability: Guts
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Mirror Move
+- Return
+- Aerial Ace
+- Quick Attack
+
+Hypno @ Leftovers
+Ability: Insomnia
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Psychic
+- Role Play
+- Dream Eater
+- Hypnosis
+
+Ditto @ Leftovers
+Ability: Limber
+EVs: 252 HP / 4 Def / 252 Spe
+Jolly Nature
+- Transform
+
+Smeargle @ Salac Berry
+Ability: Own Tempo
+EVs: 252 HP / 4 Def / 252 Spe
+Jolly Nature
+- Sketch
+- Spore
+- Belly Drum
+- Transform
+
+Togetic @ Leftovers
+Ability: Hustle
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Metronome
+- Encore
+- Softboiled
+- Seismic Toss

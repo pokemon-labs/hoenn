@@ -282,8 +282,8 @@ void check_moves() {
     CHECK(b.sides[0].active.moves[1].pp == b.sides[0].get(1).moves[1].pp);
     CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack, 3) - 1);
     CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
-    // Splash targets its user, so its moveend overwrites last_landed_move.
-    CHECK(b.sides[1].active.last_taken_move == Move::QuickAttack);
+    // Mirror Move's record is kept only where it can be read.
+    CHECK(b.sides[1].active.last_taken_move == Move::None);
   }
   {
     // A Ground move into a Flying type: no effect, no draws, PP used.
@@ -647,13 +647,10 @@ void check_stat_moves() {
   // Swords Dance from +5 gains one stage.
   CHECK(after(dancer, 2, [](Battle& b) { b.sides[0].active.boosts.atk = 5; })
             .sides[0].active.boosts.atk == 6);
-  // Dragon Dance at +6 Attack still raises Speed, but the move counts as
-  // missed (no landed move); at +6 in both it fails.
+  // Dragon Dance at +6 Attack still raises Speed; at +6 in both it fails.
   {
     Battle b = after(dancer, 1, [](Battle& b) { b.sides[0].active.boosts.atk = 6; });
     CHECK(b.sides[0].active.boosts.atk == 6 && b.sides[0].active.boosts.spe == 1);
-    CHECK(b.sides[0].active.last_landed_move == detail::UNAVAILABLE);
-    CHECK(after(dancer, 1, none).sides[0].active.last_landed_move == Move::DragonDance);
     b = after(dancer, 1, [](Battle& b) {
       b.sides[0].active.boosts.atk = 6;
       b.sides[0].active.boosts.spe = 6;

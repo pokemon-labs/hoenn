@@ -297,6 +297,14 @@ class Formatter {
     case ArgType::OHKO:
       out.push_back("|-ohko");
       return;
+    case ArgType::Nothing:
+      out.push_back("|-nothing");
+      return;
+    case ArgType::Transform: {
+      const ID source{r.byte()};
+      out.push_back("|-transform|" + ident(source) + "|" + ident(ID{r.byte()}));
+      return;
+    }
     case ArgType::HitCount: {
       const ID id{r.byte()};
       out.push_back("|-hitcount|" + ident(id) + "|" + std::to_string(r.byte()));
@@ -393,6 +401,7 @@ class Formatter {
       case A::MindReader: s += "move: Mind Reader"; break;
       case A::Snatch: s += "move: Snatch"; break;
       case A::Trick: s += "move: Trick"; break;
+      case A::SkillSwap: s += "Skill Swap||"; break;
       case A::Bound: s += "move: " + move_name(Move(r.u16())); break;
       case A::Magnitude: s += "move: Magnitude|" + std::to_string(r.byte()); break;
       case A::Spite: {
@@ -702,6 +711,7 @@ class Formatter {
       case F::Thief: s += "|[from] move: Thief|[of] " + ident(ID{r.byte()}); break;
       case F::Covet: s += "|[from] move: Covet|[of] " + ident(ID{r.byte()}); break;
       case F::Trick: s += "|[from] move: Trick"; break;
+      case F::Recycle: s += "|[from] move: Recycle"; break;
       }
       out.push_back(s);
       return;

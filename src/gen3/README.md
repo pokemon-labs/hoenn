@@ -829,8 +829,8 @@ the changes.
 | `gBattleStruct->choicedMove` | `choice_move` | `Move` | Choice Band lock (util:981–1119) |
 | `gBattleStruct->wrappedMove` | `wrapped_move` | `Move` | the wrap residual's message (util:1595–1612), so the log |
 | `gLastMoves` | `last_move` | `Move` | Disable, Encore, Spite, Mimic (bsc:7848–8337) |
-| `gLastLandedMoves` | `last_landed_move` | `Move` | Conversion 2 (bsc:8076) |
-| `gLastHitByType` | `last_hit_type` | `Type` | Conversion 2 (bsc:8096) |
+| (Showdown's `lastMoveUsed`) | `last_used_move` | `Move` | Conversion 2, as Showdown |
+| (its type as used) | `last_used_type` | `Type` | Conversion 2 |
 | `gLastHitBy` | — | | dropped: Conversion 2 reads it only to find the foe (bsc:8082) |
 | `gLastResultingMoves` | `last_resulting_move` | `Move` | Protect's consecutive-use reset (bsc:6506) |
 | `gLastPrintedMoves` | `last_printed_move` | `Move` | Sketch (bsc:8148) |
