@@ -1830,7 +1830,7 @@ void check_screens_and_power() {
     Battle b = started({attacker}, {IDLE});
     setup(b);
     Observed o{};
-    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, 0, Optional::None};
+    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, 0, Optional::None, Optional::None};
     update(b, Choice::move(slot), Choice::move(1), o);
     const Pokemon& t = b.sides[1].get(1);
     return t.stats.hp - t.hp;

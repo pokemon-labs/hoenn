@@ -273,6 +273,10 @@ is the same and only the messages differ.
 | Pain Split | the HP change counts as damage | not damage (Counter, Focus Punch) |
 | Thief and Covet | can't take Enigma Berry or Mail | can |
 | Imprison under Pressure | costs extra PP | doesn't |
+| King's Rock | 10%, once more after a multi-hit loop | 10% per hit (Beat Up too), doubled by Serene Grace |
+| Shell Bell | an eighth of the last hit's HP, Substitute included | an eighth of all hits on the target itself |
+| Leppa Berry | at the end of the turn | as soon as a slot reaches 0 PP |
+| Flavor berries | also right after a hit | at the end of the turn only |
 | Nightmare | no Protect check | Protect blocks it |
 | Leech Seed, Taunt, Encore vs Protect/evasion | fail before the accuracy draw | draw first, so a miss is logged (log only) |
 | Quick Claw activation | — | not logged by Showdown's gen3 (log only) |
@@ -399,7 +403,8 @@ roll, `adjustnormaldamage`'s survival checks, `datahpupdate`, the recoil of
 `Effect::Recoil`, `tryfaintmon` and `moveend`'s cases. Per-action state is a
 `MoveState` on the stack. Status effects have their own functions behind
 the same canceler. Follow Me and Helping Hand, the only unwritten effects
-(doubles only), run the canceler and use PP, then `moveend`.
+(doubles only), run the canceler and use PP, then `moveend`; Helping Hand
+logs `[notarget]` and `-notarget`, as Showdown's singles.
 
 Where it departs from the decomp, or from the draws the decomp makes:
 
@@ -630,9 +635,8 @@ Decided (2026-10-08):
   recorded (CLAUDE.md, "Chance").
 - **`-anim` is the last move line** (Battle.addMove): `[miss]` amends it
   and `[still]` removes it (Battle.attrLastMove, `sim/battle.ts:3121`), in
-  the formatter. `-mustrecharge` and `-notarget` have no site yet: no
-  recharge move is on `teams/ou/`, and a singles target can't be gone
-  when a move runs. `-ohko` follows a lethal OHKO hit, or any OHKO hit on
+  the formatter. `-mustrecharge` has no site yet: no recharge move is on
+  `teams/ou/`. `-notarget` is Helping Hand's, with no ally to target. `-ohko` follows a lethal OHKO hit, or any OHKO hit on
   a Substitute (gen4 Substitute's onTryPrimaryHit).
 - **Faints are queued** (`FaintQueue` in the log, not in `Battle`): Showdown
   queues a faint at 0 HP and writes the queue at fixed points (after each

@@ -207,6 +207,21 @@ class Formatter {
       s += "|[still]";
       return;
     }
+    case ArgType::LastNoTarget: {
+      // attrLastMove('[notarget]') on a move line whose target was null.
+      if (last_move_ == SIZE_MAX) return;
+      assert(last_move_ < out.size());
+      std::string& s = out[last_move_];
+      size_t bar = 0;
+      for (int i = 0; i < 3; i++) bar = s.find('|', bar + 1);
+      const size_t next = s.find('|', bar + 1);
+      s.replace(bar + 1, next == std::string::npos ? std::string::npos : next - bar - 1, "null");
+      s += "|[notarget]";
+      return;
+    }
+    case ArgType::NoTarget:
+      out.push_back("|-notarget|" + ident(ID{r.byte()}));
+      return;
     case ArgType::LastMiss:
       if (last_move_ == SIZE_MAX) return;
       assert(last_move_ < out.size());
@@ -685,9 +700,12 @@ class Formatter {
       case H::None: break;
       case H::Silent: after = "|[silent]"; break;
       case H::Drain: after = "|[from] drain|[of] " + ident(ID{r.byte()}); break;
-      case H::Item:
+      case H::Item: {
         after = "|[from] item: " + std::string(display::ITEM_NAMES[r.byte()]);
+        const ID of{r.byte()};
+        if (of != protocol::NO_ID) after += "|[of] " + ident(of);
         break;
+      }
       case H::Ability: {
         const Ability a = Ability(r.byte());
         const ID of{r.byte()};

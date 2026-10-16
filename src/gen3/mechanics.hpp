@@ -270,6 +270,19 @@ constexpr bool secondary(Battle& battle, Player p, uint8_t i, uint32_t chance,
   return coin(battle, forced, field, chance, 100, options);
 }
 
+// The attacker's King's Rock flinch on hit `i`, `chance` of 100 (util:3763).
+// Called only when the flinch could take hold.
+template <typename O>
+constexpr bool kings_rock(Battle& battle, Player p, uint8_t i, uint32_t chance,
+                          O& options) {
+  assert(chance > 0 && chance < 100 && i < MAX_HITS);
+  Optional forced = Optional::None;
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].kings_rock;
+  Optional* field = nullptr;
+  if constexpr (detail::CHANCE<O>) field = &options.chance.actions.get(p).hits[i].kings_rock;
+  return coin(battle, forced, field, chance, 100, options);
+}
+
 // Triple Kick's accuracy check before hit `i` (1 or 2), on `calc` of 100
 // outcomes (Showdown's multiaccuracy; the decomp's accuracycheck inside
 // BattleScript_TripleKickLoop, bs1:1397). A miss ends the loop. Actions
@@ -1173,6 +1186,24 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
     unconfuse();
     break;
   }
+  case HoldEffect::RestorePp: {
+    // Leppa Berry, as Showdown's (onUpdate, data/items.ts:3360): once a
+    // move slot is at 0 PP, 10 PP back to the first such slot, up to its
+    // maximum (a Transformed or Mimicked slot's maximum is taken from its
+    // PP Ups too, unverified against Showdown). The decomp waits for the
+    // end of the turn (ITEMEFFECT_NORMAL); Showdown eats it at once.
+    uint8_t slot = 0;
+    while (slot < 4 && (a.moves[slot].id == Move::None || a.moves[slot].pp != 0)) slot++;
+    if (slot == 4) return false;
+    use_item(battle, player, options);
+    MoveSlot& ms = a.moves[slot];
+    const uint8_t max = max_pp(ms.id, ms.pp_ups);
+    ms.pp = uint8_t(max < 10 ? max : 10);
+    if (!a.volatiles.transformed && !(a.mimicked & (1 << slot))) mon.moves[slot].pp = ms.pp;
+    protocol::activate_with(options.log, protocol::ident(battle, player),
+                            protocol::Activate::Leppa, ms.id);
+    break;
+  }
   case HoldEffect::CureAttract: {
     // Mental Herb (gen4 onUpdate): useItem's -enditem, removeVolatile's
     // silent -end, then its own.
@@ -1756,6 +1787,8 @@ struct MoveState {
   uint8_t slot;      // gCurrMovePos, 0-3, or NO_SLOT
   uint8_t result;    // gMoveResultFlags (MoveResult)
   uint16_t hp_dealt; // gHpDealt: HP the target or its Substitute lost
+  uint16_t total;    // HP the target itself lost to every hit (Showdown's
+                     // totalDamage, which Shell Bell reads)
   bool self;         // the target is the user (MOVE_TARGET_USER)
   bool no_pp;        // HITMARKER_NO_PPDEDUCT (Struggle)
   bool obeys;        // HITMARKER_OBEYS: passed the attack canceler
@@ -1797,6 +1830,9 @@ struct MoveState {
   // loop (moveendto MOVEEND_NEXT_TARGET), or after a single hit's
   // secondaries, so moveend doesn't run them again.
   bool contact_done;
+  // A multi-hit loop ran King's Rock per hit (flinch_item), so moveend
+  // doesn't run it again.
+  bool kings_rock_done;
   // gBattleStruct->changedItems for the user: the item Thief or Covet took,
   // given to the user at MOVEEND_CHANGED_ITEMS. None when nothing was taken.
   Item stolen;
@@ -2460,6 +2496,7 @@ constexpr uint16_t hp_update(Battle& battle, Player target, uint32_t damage,
   const uint16_t dealt = mon.hp > damage ? uint16_t(damage) : mon.hp;
   mon.hp = uint16_t(mon.hp - dealt);
   m.damaged = true;
+  m.total = uint16_t(m.total + dealt);
   // Future Sight's hit, at the end of the turn, has no Turn: no Focus Punch
   // is left to read it.
   if (m.turn != nullptr) {
@@ -3432,8 +3469,8 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
   case Ability::FlameBody: s = Secondary::Burn; break;
   case Ability::CuteCharm: {
     ActivePokemon& a = side.active;
-    const Gender g1 = user.gender;
-    const Gender g2 = target_mon.gender;
+    const Gender g1 = user.personality.gender();
+    const Gender g2 = target_mon.personality.gender();
     // As Showdown, a holder that faints to the hit still attracts.
     if (a.ability == Ability::Oblivious || a.volatiles.infatuated ||
         g1 == Gender::None || g2 == Gender::None || g1 == g2) {
@@ -3513,6 +3550,32 @@ template <typename O> constexpr void ability_immunity(Battle& battle, O& options
   }
 }
 
+// King's Rock (ItemBattleEffects' ITEMEFFECT_KINGSROCK_SHELLBELL, util:3763),
+// as Showdown's gen3 King's Rock (data/mods/gen3/items.ts): a 10% flinch
+// secondary added to the moves the decomp flags, so it follows the
+// secondaries' rules. Serene Grace doubles it (its onModifyMove runs after
+// the item's); the decomp's draw ignores Serene Grace. Hit `i` must have
+// taken the target's own HP; a Substitute, Shield Dust, Inner Focus or a
+// target that has already moved stops it.
+template <typename O>
+constexpr void flinch_item(Battle& battle, Player player, const MoveState& m,
+                           uint8_t i, O& options) {
+  const Side& side = battle.side(player);
+  if (m.release || !holds(side, HoldEffect::Flinch) || !m.damaged ||
+      !(get(m.move).flags & Flag::KingsRockAffected)) {
+    return;
+  }
+  Side& target_side = battle.side(foe(player));
+  ActivePokemon& t = target_side.active;
+  if (target_side.get(1).fainted() || !m.first || t.volatiles.flinched ||
+      t.ability == Ability::ShieldDust || t.ability == Ability::InnerFocus) {
+    return;
+  }
+  const uint32_t chance = item_data(side.get(1).item).param *
+                          (side.active.ability == Ability::SereneGrace ? 2u : 1u);
+  if (rolls::kings_rock(battle, player, i, chance, options)) t.volatiles.flinched = true;
+}
+
 // Cmd_moveend (bsc:4210) with moveendall: the cases in the decomp's order.
 template <typename O>
 constexpr void moveend(Battle& battle, Player player, MoveState& m,
@@ -3567,7 +3630,21 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
   }
 
-  // TODO: MOVEEND_KINGSROCK_SHELLBELL (ItemBattleEffects).
+  // MOVEEND_KINGSROCK_SHELLBELL: King's Rock for a single hit, then Shell
+  // Bell, as Showdown's (onAfterMoveSecondarySelf, data/items.ts:5656): an
+  // eighth of the HP the move took from the target itself (not its
+  // Substitute) over all its hits, at least 1. The decomp reads gHpDealt
+  // (the last hit, Substitute included). Bide's release calls tryMoveHit
+  // directly, so neither item acts there.
+  if (!m.kings_rock_done) flinch_item(battle, player, m, 0, options);
+  Pokemon& user = side.get(1);
+  if (!m.release && m.total != 0 && holds(side, HoldEffect::ShellBell) &&
+      !user.fainted() && user.hp != user.stats.hp) {
+    const uint32_t h = m.total / item_data(user.item).param;
+    heal(user, h == 0 ? 1 : h);
+    protocol::heal_item(options.log, protocol::ident(battle, player), user, user.item,
+                        protocol::ident(battle, foe(player)));
+  }
 
   // MOVEEND_SUBSTITUTE
   for (Side& s : battle.sides) {
@@ -4163,6 +4240,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
         secondary(battle, player, m, options, i);
         synchronize(battle, defender, m, options);
       }
+      flinch_item(battle, player, m, i, options);
       defrost(battle, player, m, options);
       ability_on_damage(battle, player, m, i, options);
       for (const Player p : {Player::P1, Player::P2}) {
@@ -4174,6 +4252,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     if (effect == Effect::TripleKick) rolls::kicks(player, hits, options);
     m.damaged = damaged;
     m.contact_done = true;
+    m.kings_rock_done = true;
     // Gen3's tryMoveHit prints no faint here: they wait for the end of
     // runMove, after AfterMove (Charge's -end).
     protocol::hit_count(options.log, protocol::ident(battle, defender), hits);
@@ -5606,8 +5685,10 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
     m.hp_dealt = hp_update(battle, defender, d, m, options);
     log_hit(battle, player, m, options);
     rage(battle, player, m, options);
+    flinch_item(battle, player, m, i, options);
     m.damaged |= damaged;
   }
+  m.kings_rock_done = true;
   protocol::hit_count(options.log, protocol::ident(battle, defender), i);
   faint_target(battle, player, m.chosen, options);
   moveend(battle, player, m, options);
@@ -6202,8 +6283,8 @@ constexpr void attract(Battle& battle, Player player, MoveState& m, O& options) 
   pp_reduce(battle, player, m);
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
-  const Gender g1 = battle.side(player).get(1).gender;
-  const Gender g2 = battle.side(target).get(1).gender;
+  const Gender g1 = battle.side(player).get(1).personality.gender();
+  const Gender g2 = battle.side(target).get(1).personality.gender();
   const bool immune = g1 == Gender::None || g2 == Gender::None || g1 == g2;
   const bool fails = t.volatiles.infatuated || t.ability == Ability::Oblivious;
   if (!try_hit(battle, player, m, {.immune = immune, .matters = !fails}, options)) {
@@ -6990,12 +7071,16 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Trick) return trick(battle, player, m, options);
   if (effect == Effect::Recycle) return recycle(battle, player, m, options);
 
-  // Follow Me and Helping Hand (doubles only) are left unwritten: the move
-  // only uses its PP (the attack canceler, attackstring and ppreduce, then
-  // moveend).
+  // Follow Me and Helping Hand (doubles only) only use their PP in singles
+  // (the attack canceler, attackstring and ppreduce, then moveend). Log, as
+  // Showdown's singles: Follow Me's move line alone; Helping Hand, with no
+  // ally to target, [notarget] and -notarget.
   if (cancel(battle, player, m, options)) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
+    if (effect == Effect::HelpingHand) {
+      protocol::no_target(options.log, protocol::ident(battle, player));
+    }
   }
   moveend(battle, player, m, options);
 }
@@ -7205,8 +7290,6 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
 // the HP berries and the pinch berries need move_turn false, so they act
 // only once per end of turn; on the cartridge and in Showdown's gen3 mod
 // (onResidual, data/mods/gen3/items.ts) they don't act right after a hit.
-// TODO: Leppa Berry (RESTORE_PP) and the flavor berries (CONFUSE_*, which
-// read the nature); none is on teams/ou/.
 template <typename O>
 constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
                              O& options) {
@@ -7225,6 +7308,29 @@ constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
     heal(mon, item.param);
     protocol::heal_item(options.log, protocol::ident(battle, player), mon, held);
     return;
+  case HoldEffect::ConfuseSpicy:
+  case HoldEffect::ConfuseDry:
+  case HoldEffect::ConfuseSweet:
+  case HoldEffect::ConfuseBitter:
+  case HoldEffect::ConfuseSour: {
+    // Figy, Wiki, Mago, Aguav and Iapapa (TRY_EAT_CONFUSE_BERRY, util:3213):
+    // at half HP or less, an eighth of the max HP, then confusion if the
+    // nature dislikes the flavor. As Showdown's gen3 (data/mods/gen3/
+    // items.ts onResidual, the gen6 mod's onEat): -enditem [eat], -heal,
+    // then addVolatile('confusion'), which Own Tempo and an existing
+    // confusion stop silently; Safeguard doesn't, the holder being the
+    // source.
+    if (move_turn || mon.hp > mon.stats.hp / 2) return;
+    use_item(battle, player, options);
+    heal(mon, fraction(mon, item.param));
+    protocol::heal_item(options.log, protocol::ident(battle, player), mon, held);
+    const Flavor f = Flavor(uint8_t(item.effect) - uint8_t(HoldEffect::ConfuseSpicy));
+    if (dislikes(mon.personality.nature(), f) && a.ability != Ability::OwnTempo &&
+        a.volatiles.confusion == 0) {
+      confuse(battle, player, options);
+    }
+    return;
+  }
   case HoldEffect::Leftovers:
     if (!move_turn && mon.hp != mon.stats.hp) {
       heal(mon, fraction(mon, 16));

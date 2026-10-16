@@ -297,8 +297,8 @@ path.
 
 ## Status (2026-10-16)
 
-Every move is written except Follow Me and Helping Hand (doubles only: a
-no-op that uses PP, where Showdown's singles logs a failure), and so is
+Every move and held item is written (Follow Me and Helping Hand, doubles
+only, use PP and log as Showdown's singles), and so is
 the log (opcodes, the formatter, Showdown's omniscient stream; README
 "Protocol"). Work now is the test framework (`testing.md`, "Implementation"),
 then fixing what it finds; there is no further plan.
@@ -308,9 +308,6 @@ environment (`run_env.py ou_legal`): the generator is done; next the
 1,000-game exploratory run, ranking its gaps by frequency.
 
 **Not written:**
-- Held items: Leppa Berry, the flavor berries (Figy, Wiki, Mago, Aguav,
-  Iapapa), King's Rock, Shell Bell (TODOs in `mechanics.hpp`). None is on
-  `teams/ou/`; all are gen3ou-legal.
 - `min_ko_roll`, Calc's `Summaries`, the search adaptation.
 
 **Open:**

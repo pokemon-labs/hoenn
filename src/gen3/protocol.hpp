@@ -9,6 +9,7 @@
 //
 //   Move         source, move u16, target, MoveFrom [, move u16 if From]
 //   LastStill, LastMiss, LastNoTarget    (amend the last Move)
+//   NoTarget     ident
 //   Miss         source, target
 //   Fail         ident, Fail [, ability for Unboost and Ability]
 //   Immune       ident, Immune [, ability for Ability and Confusion]
@@ -136,7 +137,7 @@ enum class Heal : uint8_t {
   None,
   Silent,
   Drain,   // + of
-  Item,    // + item
+  Item,    // + item, of (0 for none: Shell Bell's [of] is the target)
   Ability, // + ability, of (0 for none)
   Wish,    // + the wisher's party position
   Ingrain,
@@ -419,6 +420,16 @@ void move(L& log, ID source, Move m, ID target, MoveFrom from = MoveFrom::None,
 
 template <typename L> void last_still(L& log) { log.write(ArgType::LastStill); }
 
+// A move with no target (Helping Hand in singles): the move line's target
+// becomes null with [notarget], then -notarget (Showdown's useMoveInner).
+template <typename L> void no_target(L& log, ID id) {
+  if constexpr (L::enabled) {
+    log.write(ArgType::LastNoTarget);
+    log.write(ArgType::NoTarget);
+    log.write_byte(id.bits);
+  }
+}
+
 // A missed move: [miss] on the move line, then -miss (the order of
 // Showdown's tryMoveHit, data/mods/gen3/scripts.ts:383). Perish Song's
 // misses have no [miss] (`attr` false).
@@ -444,7 +455,7 @@ void switched(L& log, ArgType type, ID id, const Pokemon& mon,
     log.write(type);
     log.write_byte(id.bits);
     log.template write_int<uint16_t>(uint16_t(mon.species));
-    log.write_byte(uint8_t(mon.gender));
+    log.write_byte(uint8_t(mon.personality.gender()));
     log.write_byte(mon.level);
     detail::hp(log, mon);
     log.write_byte(uint8_t(from));
@@ -1082,13 +1093,15 @@ template <typename L> void heal_drain(L& log, ID id, const Pokemon& mon, ID of) 
   }
 }
 
-template <typename L> void heal_item(L& log, ID id, const Pokemon& mon, Item item) {
+template <typename L>
+void heal_item(L& log, ID id, const Pokemon& mon, Item item, ID of = NO_ID) {
   if constexpr (L::enabled) {
     log.write(ArgType::Heal);
     log.write_byte(id.bits);
     detail::hp(log, mon);
     log.write_byte(uint8_t(Heal::Item));
     log.write_byte(uint8_t(item));
+    log.write_byte(of.bits);
   }
 }
 

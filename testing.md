@@ -522,7 +522,17 @@ turn, each measured before its bars are fixed.
    unmatched: Fake Out against Focus Punch (2), the toxic stage across a
    double replacement (1), 5 undiagnosed. Bar set to 99.9% (2026-10-16).
 7. Random OU-legal: the generator, a measured run, its bar. Generator
-   done (2026-10-16); next the 1,000-game exploratory run.
+   done (2026-10-16). Exploratory run (2026-10-16, seed
+   3112126714767284292, 1,000 games): 405 of 987 matched (41%), 582
+   unmatched (86 by the log alone); soak 10,000 and check_chance clean.
+   By the first known gap in Showdown's log at the failure: Shell Bell 104,
+   the flavor berries 389 (Figy 92, Wiki 82, Mago 78, Aguav 74, Iapapa
+   63), Helping Hand 68, Leppa 1; 20 others, mostly White Herb (8: fired
+   before the move, or not at all) and Focus Energy (5), the rest single. With the items and
+   Helping Hand's log written, the same seed matches 967 of 988 (97.9%):
+   21 unmatched (6 by the log alone), White Herb 9, Focus Energy 6, 6
+   single (an HP difference twice, a PP one, a drain heal, boosts, a
+   request).
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.
 9. CI, later: a gating workflow, then the reporting one.

@@ -230,6 +230,30 @@ constexpr bool valid(Species s) { return uint16_t(s) < SPECIES; }
 
 enum class Gender : uint8_t { None, Male, Female };
 
+// Gender and nature in one byte (both come from the personality value on the
+// cartridge): the gender in bits 0-1, the nature in bits 2-6. The stats
+// already include the nature; only the flavor berries read it.
+struct Personality {
+  uint8_t bits;
+
+  static constexpr Personality init(Gender g, Nature n) {
+    return {uint8_t(uint8_t(g) | uint8_t(n) << 2)};
+  }
+
+  constexpr Gender gender() const { return Gender(bits & 0b11); }
+  constexpr Nature nature() const { return Nature(bits >> 2); }
+
+  constexpr bool valid() const {
+    return uint8_t(gender()) <= uint8_t(Gender::Female) && uint8_t(nature()) < NATURES;
+  }
+
+  friend constexpr bool operator==(Personality, Personality) = default;
+};
+
+static_assert(sizeof(Personality) == 1);
+static_assert(Personality::init(Gender::Female, Nature::Quirky).nature() == Nature::Quirky);
+static_assert(Personality::init(Gender::Female, Nature::Quirky).gender() == Gender::Female);
+
 // The six stats, in the decomp's order. In a Pokemon, `hp` is max HP.
 struct Stats {
   uint16_t hp;
@@ -367,7 +391,7 @@ struct Pokemon {
   Item item;
   Ability ability;
   uint8_t happiness;
-  Gender gender;
+  Personality personality;
   uint8_t hidden_power;
   Type hidden_power_type; // Fighting..Dark, not Normal or Mystery
 
@@ -382,7 +406,7 @@ struct Pokemon {
       return false;
     }
     if (level < 1 || level > 100 || stats.hp == 0 || hp > stats.hp) return false;
-    if (uint8_t(gender) > uint8_t(Gender::Female)) return false;
+    if (!personality.valid()) return false;
     if (!status.valid()) return false;
     if (hidden_power < 30 || hidden_power > 70 ||
         !detail::valid(hidden_power_type) ||

@@ -217,15 +217,11 @@ namespace pkmn::gen3 {
 //                                                            (moveendto
 //                                                            MOVEEND_NEXT_
 //                                                            TARGET)
-// King's Rock             10/100                      6     util:3763. Per hit,
-//                                                            plus once more
-//                                                            after the multi-hit
-//                                                            loop (moveendfrom
-//                                                            IMMUNITY_ABILITIES
-//                                                            re-runs case 12).
-//                                                            At most one can
-//                                                            matter: a flinch
-//                                                            is set once.
+// King's Rock             10/100 (x2 Serene Grace,    6     util:3763; per hit
+//                         as Showdown)                       as Showdown's
+//                                                            secondaries (Beat
+//                                                            Up too); none
+//                                                            after a flinch
 // Secondary effect        chance/100 (x2 Serene       2     bsc:2923; once
 //                         Grace)                             in the decomp,
 //                                                            per hit as
@@ -290,6 +286,12 @@ struct HitDraws {
                        // secondaries run per hit (Twineedle's poison on
                        // either hit), so it's per hit. A single hit uses
                        // hits[0].
+  Optional kings_rock; // the attacker's King's Rock flinch, per hit as
+                       // Showdown's secondaries (util:3763 draws once more
+                       // after a multi-hit loop). Per hit so the key is
+                       // exact: a flinch on hit 1 and one on hit 3 have
+                       // different probabilities. Drawn only while the
+                       // flinch can still take hold.
 
   friend constexpr bool operator==(const HitDraws&, const HitDraws&) = default;
 };
@@ -332,8 +334,6 @@ struct Action {
                          // checks: a count below 3 with the target still
                          // standing means the next check missed)
   HitDraws hits[6];       // MAX_HITS
-  Optional kings_rock;   // True = flinched. A flinch is set at most once and
-                         // which draw set it doesn't change state.
   uint8_t tri_attack;    // 1 burn, 2 freeze, 3 paralysis (bsc:2601)
   uint8_t switch_target; // the SLOT Roar or Whirlwind drags in, 2-6
                          // (bsc:7346)
@@ -393,12 +393,12 @@ struct Actions {
   friend constexpr bool operator==(const Actions&, const Actions&) = default;
 };
 
-static_assert(sizeof(HitDraws) == 6);
+static_assert(sizeof(HitDraws) == 7);
 // The most hits one move execution draws for (Beat Up's six).
 inline constexpr uint8_t MAX_HITS = std::size(Action{}.hits);
 static_assert(MAX_HITS == 6);
-static_assert(sizeof(Action) == 69);
-static_assert(sizeof(Actions) == 3 + 2 * 69);
+static_assert(sizeof(Action) == 75);
+static_assert(sizeof(Actions) == 3 + 2 * 75);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 

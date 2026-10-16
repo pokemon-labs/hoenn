@@ -141,7 +141,7 @@ constexpr std::optional<gen3::Pokemon> init_pokemon(const Pokemon& p) {
   out.item = p.item;
   out.ability = p.ability;
   out.happiness = p.happiness;
-  out.gender = p.gender;
+  out.personality = Personality::init(p.gender, p.nature);
   out.hidden_power = hp.power;
   out.hidden_power_type = get(hp.move).type;
   assert(out.valid());
