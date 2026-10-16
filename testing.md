@@ -399,6 +399,14 @@ suite for everything a forced one covers.
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
+- **Trace copying Truant** (1 of the random OU-legal exploratory run,
+  2026-10-16; left as a gap by decision). Showdown's `truantTurn` is a
+  Pokemon property that only Truant's own onSwitchIn resets, so a Pokémon
+  that Traces Truant carries the value from its last Truant stint and may
+  loaf or act on its first turn by that history. We follow the cartridge
+  (the counter cleared at switch-in), which would need a per-party bit to
+  change.
+
 - **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
   2026-10-16). Showdown runs Focus Punch's lost focus before the flinch:
   `|move|...|Focus Punch||[still]`, then `|cant|...|Focus Punch|Focus
