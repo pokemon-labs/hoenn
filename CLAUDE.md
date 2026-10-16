@@ -270,7 +270,7 @@ src/
   format.hpp          binary log -> Showdown's text lines
   calc.hpp            Calc and NullCalc (overrides); min_ko_roll    (todo)
 tools/
-  generate.py         one-off data generator from pokeemerald/
+  generate.py         one-off data generator from the decomp
   check_data.cpp      static_asserts on the generated tables
   check_teams.cpp     parses teams/ou/ and builds a battle from each
   check_damage.cpp    damage.hpp against damage_cases.inc
@@ -292,9 +292,8 @@ tools/
   protocol_survey.cjs Showdown's gen3 log messages (README, "Protocol")
 ```
 
-`pokeemerald/` is a depth-1 clone of pret/pokeemerald on the local branch
-`battle-only` (`a23e37a`), stripped to battle code, not pushed, ignored by
-this repo.
+The decomp is pret/pokeemerald at `731ad5b`, outside the repo; decomp
+citations are to that commit, and `tools/generate.py` takes its path.
 `showdown/` is a symlink to the pinned Showdown checkout
 (`SHOWDOWN_COMMIT`, `c046106`, 0.11.11), which `tools/run_env.py` keeps
 fetched and built in `.showdown/<hash>/`; both are ignored. Cite it by
