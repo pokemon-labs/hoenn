@@ -303,9 +303,15 @@ the log (opcodes, the formatter, Showdown's omniscient stream; README
 "Protocol"). Work now is the test framework (`testing.md`, "Implementation"),
 then fixing what it finds; there is no further plan.
 
-**Next:** `testing.md` Implementation step 7, the random OU-legal
-environment (`run_env.py ou_legal`): the generator is done; next the
-1,000-game exploratory run, ranking its gaps by frequency.
+**Next:** `testing.md` Implementation step 7, random OU-legal. The
+exploratory run's gaps are fixed (988 of 989; the last, Trace copying
+Truant, is a known gap by decision). The 10,000-game run that sets the bar
+was started 2026-10-16 at engine `36ed3cc`, seed 17554437607677572831, into
+`build/runs/ou_legal-20261016-105917-17554437607677572831/`; when its
+`summary.txt` is there, report the rate, sort any failures
+(`python3 build/runs/classify.py RUN_DIR`, untracked: replays each failure
+and tallies known gaps), propose the bar a safe margin under the rate (as
+OU's), then step 8.
 
 **Not written:**
 - `min_ko_roll`, Calc's `Summaries`, the search adaptation.
