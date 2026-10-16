@@ -2,8 +2,8 @@
 // the Quick Claw and speed-tie rolls with Chance and Calc, trapping, faint
 // requests and resuming, the turn cap, and a random self-play soak over the
 // given team files (every update keeps the battle valid; debug asserts the
-// rest). Also the plain hits, Struggle, fainting and Spikes (plan step 3);
-// moves the engine doesn't handle yet only use PP.
+// rest). Also the plain hits, Struggle, fainting, Spikes and a few move
+// scenarios.
 //
 // Usage: check_frame [team files...]
 

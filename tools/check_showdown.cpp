@@ -1,4 +1,4 @@
-// The realizability test (CLAUDE.md, "Testing"): replays Showdown games
+// The realizability test (testing.md): replays Showdown games
 // from tools/showdown_traces.cjs and checks that some branch of ours
 // produces each step.
 //
@@ -18,7 +18,7 @@
 // volatiles in VOLATILES, each side's Spikes and screens, the weather, and a replacement request comes before or after
 // the residuals as Showdown's (its |upkeep). Without the log, state the guard leaves out can drift: a
 // failure can come from an earlier step that matched the wrong branch. The log comparison replaces the guard as the messages are
-// written (CLAUDE.md, "Testing"). A game stops at its first failure, since
+// written (testing.md). A game stops at its first failure, since
 // we can't stay in step with Showdown after it.
 //
 // The log: our binary log through gen3/format.hpp against the step's raw
@@ -125,7 +125,7 @@ std::string kind(const std::string& line) {
 }
 
 // The message types written so far, compared on both sides: group 1, the
-// frame, group 2, the hit results, groups 3 to 5 (CLAUDE.md, "Next session").
+// frame, group 2, the hit results, groups 3 to 5 (src/gen3/README.md, "Protocol").
 const std::set<std::string> LOGGED = {
     "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",

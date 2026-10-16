@@ -171,6 +171,67 @@ entries here are the exceptions.
   them; the decomp uses `GetWhoStrikesFirst` at the start
   (main:3841) and battler-ID order for replacements (util:1880).
 
+### Turn frame
+
+From `gBattleMainFunc` (`battle_main.c`), reshaped where Showdown differs.
+`update` (`mechanics.hpp`) is one `switch (request.phase)` whose cases fall
+through in turn order, so the order is written once; a resumed case first
+does its replacement. `Phase` must be declared in that order (asserted).
+Internal steps return a `Flow` (`std::optional<Result>`): empty continues,
+a value (a request or the end of the battle) is returned.
+
+| Phase | Who chooses | Resume at |
+|---|---|---|
+| `None` | both | a new turn: selection, order, Focus Punch, the actions |
+| `BatonPass` | the user's side `Switch`, the other `Pass` | finish the switch-in, then action `Request::next` |
+| `FaintAfterAction` | either side or both | the end of the turn |
+| `FaintAfterResiduals` | either side or both | the next turn |
+
+- **Start (turn 0), as libpkmn.** A built battle has no active Pokémon
+  (`valid()` enforces it). The first `update` (both Pass) sends in SLOT 1 on
+  each side; they arrive in speed order (no Quick Claw, a random tie), and
+  the battle is at turn 1.
+- **Selection and order.** `Request` keeps what must not be recomputed on
+  resume: each player's action as resolved at selection (Encore, the Choice
+  Band lock, Struggle), who goes first, and the turn's one Quick Claw draw,
+  made lazily at the first comparison it can change and reused by the
+  end-of-turn order. Switches go first, in speed order with Quick Claw; then
+  priority, Quick Claw, Speed, a random tie. Two Quick Claw holders that
+  both proc are a speed tie.
+- **A faint ends the actions** (Gen IV differs). The replacement's
+  `cancelallactions` (bsc:5850) cancels everything still queued, so a faster
+  Explosion, or a switch-in dying to Spikes, denies the foe its move. The
+  replacement takes that turn's residuals. Baton Pass doesn't cancel the
+  foe's action: its request resumes at it.
+- **The end of turn** (`end_of_turn`): `field_residuals` (side timers, Wish,
+  weather and its damage), the per-Pokémon stages (`battler_stage`), the
+  future attacks, Perish Song's count, the lock and Disable timers, then an
+  `item_cure` pass (Showdown's Update) and the residual faints'
+  replacements, which skip the turn's residuals. The per-Pokémon stages
+  run in Showdown's order: every gen3 residual has order 10, so with unequal
+  Speeds (Quick Claw counting) the faster Pokémon takes all of its stages
+  first; on a Speed tie they interleave by subOrder, a coin per stage,
+  recorded only where the two orders give different states
+  (`stage_order_matters`).
+- **The battle can end mid-residuals**, as Showdown checks after every
+  handler (`sim/battle.ts:569`): if both last Pokémon would die to separate
+  residuals, the first to faint loses. Sand, hail and Perish Song hit both
+  first, so both last fainting there is a tie, as is both last fainting in
+  one action (Explosion included: `Cmd_checkteamslost`, bsc:3563, and
+  Showdown's `checkWin` before gen 4).
+- **Spikes** (`spikes()`, `Cmd_switchineffects`, bsc:5180) hit every
+  switch-in: voluntary, replacement, Baton Pass, Roar's drag. They come
+  before the switch-in ability and item, which a Spikes faint skips; that
+  faint raises another request in the same phase. When both sides replace
+  at once, both enter, then each takes Spikes and its switch-in effects in
+  speed order, and a first arrival that faints cancels the second's
+  switch-in effects (`arrive_both`).
+- **Sleep Clause and Freeze Clause** (Smogon's mods, always on) are
+  compile-time rules with no field. A foe's sleep fails while a living
+  Pokémon on the target's side sleeps from the foe (`sleep_clause`; Rest
+  doesn't count), for sleep moves after the accuracy check, Yawn and Effect
+  Spore alike.
+
 ### Showdown and the cartridge disagree
 
 A shortlist of the visible differences found so far; we follow Showdown in
@@ -336,9 +397,9 @@ and `BattleScript_EffectHit` (bs1:236): the attack canceler
 `Cmd_attackcanceler`, bsc:915), accuracy, `ppreduce`, crit, damage, the
 roll, `adjustnormaldamage`'s survival checks, `datahpupdate`, the recoil of
 `Effect::Recoil`, `tryfaintmon` and `moveend`'s cases. Per-action state is a
-`MoveState` on the stack. Only plain hits (`plain_hit()`) and
-`Effect::Recoil` run it; every other effect runs the canceler and uses PP,
-then `moveend` (decided for step 3).
+`MoveState` on the stack. Status effects have their own functions behind
+the same canceler. Follow Me and Helping Hand, the only unwritten effects
+(doubles only), run the canceler and use PP, then `moveend`.
 
 Where it departs from the decomp, or from the draws the decomp makes:
 
@@ -370,12 +431,6 @@ Where it departs from the decomp, or from the draws the decomp makes:
 - **`MOVE_UNAVAILABLE` is `Move::None`** until the generator has a sentinel
   (CLAUDE.md, "Open"). It's what `gLastMoves` and `gLastLandedMoves` record
   for a move that was stopped, which matters to Encore, Disable and Mimic.
-- **Not yet** (plan step 4, `TODO` in the code): the per-turn `ProtectStruct`
-  (Protect, Endure, Magic Coat, Snatch, Counter's and Mirror Coat's damage),
-  which would live on `update`'s stack (decision 2); confusion's
-  infliction (the canceler is written); Bide; Soundproof; Destiny Bond;
-  the absorbing abilities; the moves that hit semi-invulnerable targets;
-  `moveend`'s ability and item dispatchers; Truant's end-of-turn toggle.
 - *(open, an optimization)* When every roll KOs (or every roll breaks the
   Substitute), the roll can't change state, so it needn't be drawn. Skipping
   it would shrink search's chance nodes a lot, but it changes what the
@@ -403,7 +458,7 @@ play reaches what's common, not everything; Lock-On, Uproar, Thrash, Bide,
 Future Sight, Hail and Disable come from the static scan only.
 
 Redone (2026-10-08) on `showdown/` (0.11.11, `c046106`), which the
-realizability test pins (CLAUDE.md, Testing): the static scan, and 3,000
+realizability test pins (`testing.md`): the static scan, and 3,000
 gen3 OU games over the OU teams on each version with the same seed. The
 table below follows 0.11.11, which differs from 0.11.10 in:
 
@@ -591,7 +646,7 @@ Decided (2026-10-08):
 
 `helpers.hpp` builds a battle from `helpers::Pokemon` sets, as libpkmn's
 `helpers.zig`: every move gets 3 PP Ups, and the battle starts at turn 0 with
-no active Pokémon (see CLAUDE.md, "Turn phases"). `showdown.hpp` parses
+no active Pokémon ("Turn frame"). `showdown.hpp` parses
 Showdown exports into those sets; its header lists where it departs from
 Showdown's importer (a mismatched `Hidden Power [T]` is an error; Return with
 Frustration gets 255 happiness; Cute Charm is male when it can be).
@@ -649,14 +704,14 @@ main = `src/battle_main.c`.
    - `FaintClearSetData` (main:3264) clears most `ProtectStruct` flags but not
      the damage taken; a normal switch and Baton Pass clear none.
 3. **`request`** holds the phase, the next action (Baton Pass only), who moves
-   first and each player's queued action resolved at selection (CLAUDE.md,
-   "Turn phases").
+   first and each player's queued action resolved at selection ("Turn
+   frame").
 4. **Switch-in works like libpkmn's:** copy stats, species, moves, ability and
    types from `pokemon[]` and zero the rest of `ActivePokemon`. This matches
    the decomp's rule that switch-in discards Transform, Trace, Skill Swap,
    Forecast and Color Change.
 5. **Baton Pass's switch-in is its own function:** the normal switch-in, then
-   restore what passes (CLAUDE.md, "Tricky mechanics").
+   restore what passes (`baton_pass_in`).
 6. **Volatiles are named fields** in one `Volatiles` struct: a `bool` per
    flag, a `uint8_t` per small counter, each named after and citing its decomp
    constant. About 274 decomp uses touch one flag; the 8 that combine flags

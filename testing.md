@@ -42,22 +42,53 @@ consumer (`soak`, `check_chance`, the trace script) reads files as now.
 Each file starts with a comment giving the mode, the seed and the Showdown
 commit, so a generated team keeps its provenance.
 
-- **Random OU-legal.** Per slot: a species uniform over those gen3ou allows,
-  four moves from its learnset, one of its abilities, an item, random EVs
-  (multiples of 4, at most 510), a nature, level 100. Species Clause holds.
-  The team goes through gen3ou's validator; rejected teams are redrawn, up
-  to a cap. Uniform rather than usage-weighted, for coverage.
-  `gen3randombattle` won't do: its levels vary by species and its sets
-  are curated.
+- **Random OU-legal** (drafted 2026-10-16; the open choices below await
+  the user). Uniform rather than usage-weighted, for coverage.
+  `gen3randombattle` won't do: its levels vary by species and its sets are
+  curated.
+  - Per slot: a species uniform over the 374 gen3ou allows (mostly NFE, LC
+    and PU); 4 distinct moves from its learnset with its prevolutions'
+    (Smeargle: every move Sketch can copy; fewer than 4 if that's all it
+    learns); one of its abilities, uniform; random IVs 0-31 (so Hidden
+    Power's type varies); all 510 EVs in random multiples of 4, at most 252
+    per stat; a nature, uniform; level 100.
+  - Validation per slot: each set goes through gen3ou's `validateSet` and
+    a rejected slot is redrawn. A scratch probe on 0.11.11 accepted 76% of
+    naive sets (rejections: Sand Veil, Soundproof, OHKO moves, Swagger,
+    impossible egg and event combinations), so redrawing whole teams would
+    keep only about 19%. Then `validateTeam` for the team clauses (Species
+    Clause, the Baton Pass clauses), redrawing the team up to a cap.
+  - **Open: the item pool.** Showdown's gen3 has 106 holdable items; the
+    engine's `Item` has the 75 with an effect, so Poké Balls, stones,
+    fossils, Mail and the plain berries don't parse. Recommended: draw from
+    the engine's 74 (Quick Claw is banned) plus no item about 10% of the
+    time (empty hands for Thief and Covet); adding the no-effect items to
+    the tables can come later. They matter only to Thief, Trick, Knock Off
+    and Recycle, which already handle any item.
+  - **Open: where teams come from.** Recommended: `run_env.py` generates a
+    fresh pool per run from the run seed (size in `criteria.toml`, default
+    2,000 teams) into the run directory, and all three suites read that
+    file, as fresh seeds intend. Each file starts with a comment giving the
+    mode, the seed and the Showdown commit (both parsers skip text before
+    the first `===`). The alternative is a committed fixed pool.
+  - **Open: the order.** Recommended: the generator, then a 1,000-game
+    exploratory run to rank the gaps by frequency, fix them, then the
+    10,000-game run that sets the bar. The alternative is writing the
+    known gaps first.
+  - Known gaps it will reach: the unwritten items (Leppa, the flavor
+    berries, King's Rock, Shell Bell; the last two can act on most
+    hits), and Follow Me and Helping Hand, which Showdown's singles logs
+    as a failure (lines unchecked) where the engine only uses PP (state
+    the same, log only).
 - **Truly random.** As Showdown's `ExhaustiveRunner`
   (`showdown/sim/tools/exhaustive-runner.ts`), which libpkmn's fuzz uses:
   cycle through pools of every species, move, ability and item so each
   appears, with no legality check. Level 100.
   - Before the first run, audit what this can reach that OU never does
     (unverified which of these the engine handles): ability/species pairs
-    that don't exist, Follow Me and Helping Hand (unwritten, so a no-op
-    using PP; check what Showdown's singles does), Quick Claw (the trace
-    script bans it, Showdown's gen3 doesn't log it), and whatever
+    that don't exist, Follow Me and Helping Hand (also in random
+    OU-legal, above), Quick Claw (the trace script bans it, Showdown's
+    gen3 doesn't log it), and whatever
     `gen3customgame` allows that gen3ou doesn't.
 
 ## Team input
@@ -388,6 +419,12 @@ Showdown change closes gets crossed off here.
   order, 1 game); Leech Seed (Showdown draws accuracy before the
   Substitute and already-seeded checks, so it can log a miss where we
   fail; state the same).
+- **check_chance collision, undiagnosed** (2026-10-15, before the
+  terminal-state rule; not terminal): `check_chance --replay
+  15040563541741120241 tools/teams/group3.txt` (Pelipper mirror, turn 111:
+  P1 first, Toxic hits, P2's Surf crits; P2's fresh toxic ticks in one
+  sample and not the other, same `Actions`). Suspects: the end-of-turn
+  `item_cure` pass, the residual Speed-tie order.
 - **Unexamined:** 2 crit + crit + freeze Porygon2 games and 1 crit + freeze
   + Lum game in group 8 (rare branches?).
 - **Still open from group 6:** Grudge's `-activate` when the KO ends the
@@ -480,7 +517,8 @@ turn, each measured before its bars are fixed.
    (14 of 16 shards, the rest OOM-killed) matched 8709 of 8714. The
    unmatched: Fake Out against Focus Punch (2), the toxic stage across a
    double replacement (1), 5 undiagnosed. Bar set to 99.9% (2026-10-16).
-7. Random OU-legal: the generator, a measured run, its bar.
+7. Random OU-legal: the generator, a measured run, its bar. Design
+   drafted (Generators), open choices awaiting the user.
 8. Truly random: the audit (Generators), the generator, a measured run,
    its bar.
 9. CI, later: a gating workflow, then the reporting one.

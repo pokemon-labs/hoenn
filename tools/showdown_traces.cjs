@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Plays seeded gen3 OU games in Pokémon Showdown with random legal choices
-// and writes them as JSONL traces, for the realizability test (CLAUDE.md,
-// "Testing"). Showdown picks every choice, so nothing here needs the engine;
+// and writes them as JSONL traces, for the realizability test (testing.md,
+// "check_showdown"). Showdown picks every choice, so nothing here needs the engine;
 // check_showdown replays the traces against it.
 //
 //   node tools/showdown_traces.cjs [--games N] [--seed N]

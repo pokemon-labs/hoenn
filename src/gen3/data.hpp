@@ -135,7 +135,7 @@ static_assert(!Status{6}.valid() && Status{Status::PSN}.valid());
 
 // Where update resumes after returning a mid-turn request: every point in
 // gBattleMainFunc's turn where a Pokémon can faint, plus Baton Pass. See
-// "Turn phases" in CLAUDE.md.
+// "Turn frame" in src/gen3/README.md.
 //
 //   None                   no request: the next update starts a turn
 //   BatonPass              the Baton Pass user's side picks the recipient;

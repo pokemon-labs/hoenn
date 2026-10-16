@@ -1217,7 +1217,7 @@ constexpr bool lost(const Side& side) {
 
 // Cmd_checkteamslost (bsc:3534): both sides out is a draw (B_OUTCOME_DREW
 // is WON | LOST), whoever fainted first, Explosion included. Showdown agrees
-// for Gen III (CLAUDE.md, plan step 3).
+// for Gen III.
 constexpr Flow outcome(const Battle& battle) {
   const bool l1 = lost(battle.sides[0]);
   const bool l2 = lost(battle.sides[1]);
@@ -1491,8 +1491,6 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   assert(slot >= 2 && slot <= 6);
   assert(side.get(slot).species != Species::None && !side.get(slot).fainted());
 
-  // TODO(plan step 4): Pursuit on the switching target (bs1:3088). Not on
-  // Baton Pass (Showdown's skipBeforeSwitchOutEventFlag).
   // switchoutabilities (bsc:9590): Natural Cure, as Showdown's onSwitchOut.
   // A cured sleep is public, so its count resets before the SLOTs swap.
   Pokemon& out = side.get(1);
@@ -1706,7 +1704,7 @@ template <typename O> constexpr Result start(Battle& battle, O& options) {
 // The decomp's MOVE_UNAVAILABLE (0xFFFF), which gLastMoves and
 // gLastLandedMoves record for a move that was stopped. TODO: a sentinel in
 // the generator (CLAUDE.md, "Open"); until then None stands in, which only
-// matters to Encore, Disable, Mimic and the like (plan step 4).
+// matters to Encore, Disable, Mimic and the like.
 inline constexpr Move UNAVAILABLE = Move::None;
 
 // MOVE_EFFECT_* bytes this code applies, in the decomp's numbering order.
@@ -1781,7 +1779,7 @@ struct MoveState {
   // Past the accuracy check and TryHit on the foe: Showdown's gotAttacked
   // (gen3 scripts.ts:464), which Mirror Move reads (last_taken_move).
   bool attacked;
-  // Pursuit on a target switching out (pursue()): double power, and it
+  // Pursuit on a target switching out (pursues()): double power, and it
   // can't miss.
   bool pursuing;
   // Bide's release on its third turn (bide()): no move line, no PP.
@@ -2033,7 +2031,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
   }
 
   // CANCELER_TRUANT. The counter toggles at the end of each turn
-  // (ABILITYEFFECT_ENDTURN, util:2640). TODO(plan step 4): that toggle.
+  // (ABILITYEFFECT_ENDTURN, util:2640; battler_stage).
   if (a.ability == Ability::Truant && a.truant) {
     cant(protocol::Cant::Truant);
     abort_move(battle, player, options);
@@ -2610,7 +2608,7 @@ constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
 // The effects whose script is BattleScript_EffectHit, maybe after setting a
 // move effect or a hit marker: the plain hits (Quick Attack and Vital Throw
 // differ only in the table; Pursuit only when the target switches,
-// TODO(plan step 4)), Effect::Recoil (MOVE_EFFECT_RECOIL_25, bs1:897), the
+// pursues()), Effect::Recoil (MOVE_EFFECT_RECOIL_25, bs1:897), the
 // status and flinch secondaries (secondary_of), Hidden Power
 // (hiddenpowercalc, bs1:1740), Thunder and Sky Uppercut (IGNORE_ON_AIR) and
 // Earthquake (bs1:1834: PP before accuracy, which changes nothing in
@@ -3538,7 +3536,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   ability_immunity(battle, options);
   synchronize(battle, player, m, options);
 
-  // MOVEEND_CHANGED_ITEMS (Thief and Covet; Trick is TODO(plan step 4)),
+  // MOVEEND_CHANGED_ITEMS (Thief and Covet; Trick swaps in trick()),
   // which the decomp runs after MOVEEND_CHOICE_MOVE, so a Choice Band taken
   // with Thief doesn't lock its new holder. Showdown's lock comes after the
   // move (gen4 items.ts onAfterMove) and locks it into Thief; this follows
@@ -3569,7 +3567,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
   }
 
-  // TODO(plan step 4): MOVEEND_KINGSROCK_SHELLBELL (ItemBattleEffects).
+  // TODO: MOVEEND_KINGSROCK_SHELLBELL (ItemBattleEffects).
 
   // MOVEEND_SUBSTITUTE
   for (Side& s : battle.sides) {
@@ -6992,9 +6990,9 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (effect == Effect::Trick) return trick(battle, player, m, options);
   if (effect == Effect::Recycle) return recycle(battle, player, m, options);
 
-  // TODO(plan step 4): every other effect. Until then the move only uses
-  // its PP (decided): the attack canceler, attackstring and ppreduce, then
-  // moveend.
+  // Follow Me and Helping Hand (doubles only) are left unwritten: the move
+  // only uses its PP (the attack canceler, attackstring and ppreduce, then
+  // moveend).
   if (cancel(battle, player, m, options)) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
@@ -7207,8 +7205,8 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
 // the HP berries and the pinch berries need move_turn false, so they act
 // only once per end of turn; on the cartridge and in Showdown's gen3 mod
 // (onResidual, data/mods/gen3/items.ts) they don't act right after a hit.
-// TODO(plan step 4): Leppa Berry (RESTORE_PP) and the flavor berries
-// (CONFUSE_*, which read the nature); none is on the teams.
+// TODO: Leppa Berry (RESTORE_PP) and the flavor berries (CONFUSE_*, which
+// read the nature); none is on teams/ou/.
 template <typename O>
 constexpr void item_end_turn(Battle& battle, Player player, bool move_turn,
                              O& options) {

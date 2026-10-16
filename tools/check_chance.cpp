@@ -1,4 +1,4 @@
-// The chance-key test (CLAUDE.md, "Testing"): the choices and Chance's
+// The chance-key test (testing.md): the choices and Chance's
 // Actions must determine the resulting state exactly, as search keys its
 // chance nodes by them.
 //
