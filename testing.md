@@ -146,14 +146,22 @@ damage-roll or the sleep-end record is caught.
   About 0.1-0.3% of keys stay uncompared: the hidden ends (sleep,
   confusion, binding) aren't forceable, so their replays can land
   elsewhere.
-- **Probability calibration:** per pair, each key's free count fits its
-  probability (Chernoff, 1e-10), the keys' sum is at most 1, and held-out
+- **Probability calibration:** per pair, each key expected at least once
+  in the free samples has a count that fits its probability (Chernoff,
+  1e-10), the keys' sum is at most 1, and held-out
   draws landing on unfound keys fit 1 − sum. Over the run, held-out hits
   are binned by key probability (powers of 2, plus "unseen") and each
   bin's count must have a tail chance of at least 1e-7: a normal tail
   with the exact variance when that is at least 100, else Poisson
   (decided 2026-10-16; a z-test called a 2% event in a bin expecting
-  0.02 hits z 7.0). The per-pair tests alone are too weak (they
+  0.02 hits z 7.0). Keys expected less than once are left to the bins
+  (decided 2026-10-16): Beat Up's ~3e7 keys repeat some unlikely key by
+  chance. Diagnosed on a five-hit key at 4.6e-8 seen 2 of 128 times
+  (`check_chance --samples 128 --replay 7066941967204212297
+  teams/ou/*.txt`, turn 9): the hits' crits and rolls were independent
+  and uniform, and over 2M rounds of 128 the old test fired 204 times
+  against 182 predicted for correct probabilities. Crits drawn at 1/16
+  but reported at 1/4 or 1/32 still fail the bins (p < 1e-8). The per-pair tests alone are too weak (they
   missed rolls reported at 1/17). Because samples go through
   `randomize_hidden`, this checks it against the reported probabilities
   (consistency, not truth). Mutations caught: crits at 1/4, rolls at
@@ -357,13 +365,6 @@ suite for everything a forced one covers.
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
-- **Beat Up's probabilities** (the first OU 10,000-game run, 2026-10-16,
-  undiagnosed): a five-hit key reported at 4.6e-8 came up in 2 of 128 free
-  samples (`check_chance --samples 128 --replay 7066941967204212297
-  teams/ou/*.txt`, turn 9). The 2^-22 calibration bin's z 7.0 in that
-  run was the z-test's fault (a 2% event), not this.
-  Either the hits' draws aren't independent or what is recorded isn't
-  what is drawn.
 - **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
   2026-10-16). Showdown runs Focus Punch's lost focus before the flinch:
   `|move|...|Focus Punch||[still]`, then `|cant|...|Focus Punch|Focus
@@ -475,7 +476,8 @@ turn, each measured before its bars are fixed.
    (2026-10-16, seed 8981393492580689921, 11.5 minutes): 9943 of 9946
    counted games (99.97%), 54 multi-hit games left out, 0 choice-set
    mismatches; soak 100,000 games clean; check_chance 0 collisions, but
-   the probabilities fail (Beat Up, Known engine gaps). An earlier run
+   the probabilities fail (the z-test and a Beat Up false positive, both
+   fixed 2026-10-16; Probability calibration). An earlier run
    (14 of 16 shards, the rest OOM-killed) matched 8709 of 8714. The
    unmatched: Fake Out against Focus Punch (2), the toxic stage across a
    double replacement (1), 5 undiagnosed. Bar set to 99.9% (2026-10-16).

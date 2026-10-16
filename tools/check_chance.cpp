@@ -368,10 +368,12 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
       for (const auto& [key, e] : seen) {
         total += e.value.probability;
         if (e.total == 1) stats.untested++;
-        // One sighting of an unlikely key isn't evidence: a move like Beat
-        // Up has about 10^9 keys, so some key that unlikely turns up.
-        const bool once = e.free == 1 && samples * e.value.probability < 1;
-        if (!once && tail(e.free, samples, e.value.probability) < ALPHA) {
+        // A key expected less than once isn't tested alone: Beat Up has
+        // about 3e7 keys, so some unlikely key turns up, even twice, by
+        // chance (testing.md, "Probability calibration"). The pooled
+        // calibration bins still test such keys.
+        const bool rare = samples * e.value.probability < 1;
+        if (!rare && tail(e.free, samples, e.value.probability) < ALPHA) {
           std::printf("game %llu, turn %u: key seen %u of %u free samples, "
                       "probability %g\n",
                       (unsigned long long)game_seed, battle.turn, e.free,
