@@ -293,11 +293,13 @@ comparison, since the log hides some state.
 
 ### Others
 
-- `bench` (release, null log, Chance on, Calc off): about 0.94M
-  updates/s on the OU teams (2026-10-15; `6c22ace`, before step 5, gives
-  1.46M on this machine today, so the 3.2M recorded then wasn't like for
-  like); `tools/libpkmn_bench.zig` about 9.0M/s for libpkmn's
-  Gen I; ADV-Simulator's update about 1.4 µs. None is like for like.
+- `bench` (release, null log, Chance on, Calc off): about 1.93M
+  updates/s on the OU teams (2026-10-16, `47a807a`, 100,000 battles; GCC
+  15.2, idle machine). `9adccd4` gives about 2.0M on the same day, so its
+  recorded 0.94M was a bad measurement, not the engine. 10,000-battle runs
+  vary by about 6%; compare commits on the same day, interleaved.
+  `tools/libpkmn_bench.zig` about 8.8M/s for libpkmn's Gen I (2026-10-16);
+  ADV-Simulator's update about 1.4 µs. None is like for like.
   Not a pass/fail suite.
 - `coverage`: which moves on the given teams have a written mechanic
   (100% on `teams/ou/`). Not a pass/fail suite.

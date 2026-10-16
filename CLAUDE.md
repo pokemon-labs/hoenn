@@ -312,8 +312,8 @@ has its generator, runner and a 1,000-game exploratory run, and testing is
 paused there by the user (TESTING.md, "Implementation" step 8): open are
 its four chance collisions and one sum failure (TESTING.md, "Known engine
 gaps"), the log-only mismatches, and the 10,000-game run.
-1. Run `bench` (release) for drift, then `min_ko_roll`, Calc's
-   `Summaries` and the search adaptation.
+1. `min_ko_roll`, Calc's `Summaries` and the search adaptation
+   (`bench` checked for drift 2026-10-16; TESTING.md, "Others").
 `build/runs/classify.py`'s KNOWN list is out of date.
 
 **Not written:**
