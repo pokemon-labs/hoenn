@@ -3770,8 +3770,8 @@ constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
 // The target's rage onHit (Showdown's base rage condition,
 // data/moves.ts:14570): each hit of a non-Status move from the foe on the
 // Pokémon itself (not its Substitute) raises its Attack, a plain boost, so
-// -boost 0 at +6. It comes with the move's own onHit, before the self
-// effects, secondaries and contact abilities. The decomp's MOVEEND_RAGE
+// -boost 0 at +6. It comes after the move's own onHit and the drain,
+// before the self effects, secondaries and contact abilities. The decomp's MOVEEND_RAGE
 // runs once, in moveend.
 template <typename O>
 constexpr void rage(Battle& battle, Player player, const MoveState& m, O& options) {
@@ -4330,10 +4330,6 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     if (a.fury_cutter < 5) a.fury_cutter++;
     a.renewed |= ActivePokemon::RENEWED_FURY_CUTTER;
   }
-  if (effect != Effect::MultiHit && effect != Effect::DoubleHit &&
-      effect != Effect::Twineedle && effect != Effect::TripleKick) {
-    rage(battle, player, m, options);
-  }
   if (effect == Effect::Smellingsalt && m.damaged && !target.fainted() &&
       target.status.paralyzed()) {
     protocol::cure_status(options.log, protocol::ident(battle, defender), target.status);
@@ -4363,6 +4359,14 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       protocol::heal_drain(options.log, protocol::ident(battle, player), user,
                            protocol::ident(battle, defender));
     }
+  }
+
+  // Rage, after the drain (spreadDamage) and the move's own onHit
+  // (Smelling Salt's cure): runMoveEffects runs the move's Hit, then the
+  // target's.
+  if (effect != Effect::MultiHit && effect != Effect::DoubleHit &&
+      effect != Effect::Twineedle && effect != Effect::TripleKick) {
+    rage(battle, player, m, options);
   }
 
   // Hyper Beam, Blast Burn, Hydro Cannon and Frenzy Plant
