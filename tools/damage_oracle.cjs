@@ -11,7 +11,7 @@
 'use strict';
 const path = require('path');
 const PS = process.argv[2] ||
-  path.join(__dirname, '../../ADV-Simulator/tools/showdown-oracle/node_modules/pokemon-showdown');
+  path.join(__dirname, '../../birch/ADV-Simulator/tools/showdown-oracle/node_modules/pokemon-showdown');
 const {Battle, Teams} = require(PS);
 
 const set = (species, item, ability, nature, evs, move, ivs) =>

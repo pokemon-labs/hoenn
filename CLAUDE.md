@@ -130,7 +130,7 @@ competitive play, not cartridge-exact behaviour for every input.
   `src/battle_util.c` (end of turn, abilities, items),
   `src/battle_script_commands.c`, `data/battle_scripts_1.s`. Cite them as
   main:N, util:N, bsc:N, bs1:N.
-- **ADV-Simulator** (`../ADV-Simulator`) shows what has to be handled and is
+- **ADV-Simulator** (`../birch/ADV-Simulator`) shows what has to be handled and is
   a differential oracle in testing.
 - **Don't write mechanics from Showdown's source.** Use it for Smogon's
   clauses and for the team format, which aren't cartridge mechanics.
@@ -143,7 +143,7 @@ competitive play, not cartridge-exact behaviour for every input.
 
 Keep libpkmn's shape, as C++ templates and plain functions. Names and
 signatures are ours. birch still runs on ADV-Simulator, in two ways (both
-under `../cpp/include/`):
+under `../birch/cpp/include/`):
 - **Its C-style API** (`pkmn_gen3_*`): `search/mcts.h`, `search/data.h`,
   `search/poke-engine-evaluate.h`, `gen3/parse.h`, `util/`. Search calls
   update, choices, reseed and `randomize_hidden`. It keys chance nodes on the
@@ -1148,7 +1148,7 @@ adapted (see Interface).
 - Speed, for reference: about 1.1M `update`/s in the release soak (random
   choices, Chance and Calc on, one thread). Not yet compared like for like
   with ADV-Simulator (its 19k is MCTS iterations/s) or libpkmn.
-- The fix to one team in `../teams/adv/` (Leer Mence's Forretress lost its
+- The fix to one team in `../birch/teams/adv/` (Leer Mence's Forretress lost its
   `IVs: 3 Atk`) is uncommitted in the birch repo.
 
 **Open:**
@@ -1171,5 +1171,6 @@ adapted (see Interface).
   silently.
 - `HoldEffect` `param` means something different per effect; read the decomp
   per effect.
-- birch's `.gitignore` lists `rewrite/pokeemerald/` but not `rewrite/`;
-  decide whether birch ignores this repo or tracks it as a submodule.
+- This repo moved out of birch (`birch/rewrite/`) to `~/hoenn` on
+  2026-10-16; birch is its sibling, `../birch`. Run outputs in
+  `build/runs/` from before then print the old paths.

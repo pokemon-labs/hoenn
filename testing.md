@@ -71,7 +71,7 @@ team in them. Same behaviour in every tool. Built (2026-10-15); the
 trace's game record carries each team's `file` beside its index there.
 
 **The OU teams are in this repo** (the user, 2026-10-15): `teams/ou/`, a
-copy of birch's `../teams/adv/` dump files without `all.txt` (which stays
+copy of birch's `teams/adv/` (`../birch/teams/adv/`) dump files without `all.txt` (which stays
 in birch), with its README. The tools and ctest take every `*.txt` there,
 whatever its name, so a file can be added or renamed without touching
 them. Fixed in the copy, so Showdown's gen3ou validator accepts them: 13
