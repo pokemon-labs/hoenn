@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (39 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (40 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -469,15 +469,9 @@ suite for everything a forced one covers.
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
-- **Weather damage order with Quick Claw** (log only; 20 of the
-  2026-10-17 truly random run's 25 log-only failures, likely most of
-  them). Showdown sorts the weather's eachEvent by `pokemon.speed`, which
-  `updateSpeed` sets before the residuals with the turn's Quick Claw roll
-  (`sim/battle.ts:2818`); we order the weather by plain Speed and draw no
-  roll for it. Fixing it means one roll shared by the weather's order
-  (unrecorded) and the residual order (recorded when it matters).
-- **Other log-only mismatches, truly random** (2026-10-17, one or two
-  each, undiagnosed): Shell Bell's heal against the attacker's faint,
+- **Log-only mismatches, truly random** (2026-10-17, one or two
+  each, undiagnosed; 5 of the 10,000-game run's 25, the other 20 the
+  weather order, fixed): Shell Bell's heal against the attacker's faint,
   Wonder Guard's `-immune` without `[from]`, Bide's `-end` against a
   faint, Truant's `cant` against paralysis.
 
@@ -668,6 +662,14 @@ turn, each measured before its bars are fixed.
    mod drops Minimize's onAccuracy, and gen3 inherits that), 4 games;
    Perish Song started on a Soundproof user (gen7's Soundproof drops the
    user check; the decomp skips it too), 1. All 5 then match.
+   Of the 25 log-only, 20 were the weather's damage order with a Quick
+   Claw holder (every one had one): Showdown's `updateSpeed` applies the
+   turn's roll before all the residuals, Wish and the weather included.
+   Fixed: the residuals draw the roll first if the move order didn't,
+   order Wish and the weather by it, and record it only if the battler
+   pass needs it (`residual_speeds`). All 20 then match; a 10% run (seed
+   3573881441079700720) matched 960 of 960, log included, chance clean.
+   5 log-only remain (Known gaps).
    The 90% bar is not re-set.
 9. CI, later: a gating workflow, then the reporting one.
 

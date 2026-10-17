@@ -310,8 +310,9 @@ then fixing what it finds; there is no further plan.
 
 **Next** (agreed 2026-10-16). Steps 1-7 are done; step 8 (truly random)
 passed its 10,000-game run (2026-10-17, chance clean, 99.83% on the
-state). Its 16 state failures are diagnosed (11 known gaps, 5 fixed);
-open are its 25 log-only failures and re-setting its bar (TESTING.md,
+state). Its 16 state failures are diagnosed (11 known gaps, 5 fixed),
+and 20 of its 25 log-only ones fixed (the weather order with Quick Claw);
+open are the other 5 and re-setting its bar (TESTING.md,
 "Implementation" step 8, "Known engine gaps").
 1. `min_ko_roll`, Calc's `Summaries` and the search adaptation
    (`bench` checked for drift 2026-10-16; TESTING.md, "Others").

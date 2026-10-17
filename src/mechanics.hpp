@@ -128,23 +128,31 @@ constexpr void observe(O& options, uint64_t num, uint64_t den) {
 // 13107/65536, just under.
 
 // The turn's Quick Claw draw: one u16 serves both holders and both orders of
-// the turn (main:4013). Drawn once, kept in the request.
-template <typename O> constexpr bool quick_claw(Battle& battle, O& options) {
-  Optional& drawn = battle.request.quick_claw;
-  if (drawn != Optional::None) return drawn == Optional::True;
-
+// the turn (main:4013). Drawn once, kept in the request. The residuals draw
+// it before they know whether it matters (residual_speeds), so the draw
+// (quick_claw_draw) and its record (quick_claw_keep) are apart.
+template <typename O> constexpr bool quick_claw_draw(Battle& battle, O& options) {
   Optional forced = Optional::None;
   if constexpr (detail::CALC<O>) forced = options.calc.overrides.turn.quick_claw;
   assert(forced <= Optional::False);
-  const bool proc = forced != Optional::None
-                        ? forced == Optional::True
-                        : battle.rng.chance(1, 5);
+  return forced != Optional::None ? forced == Optional::True : battle.rng.chance(1, 5);
+}
 
+template <typename O>
+constexpr void quick_claw_keep(Battle& battle, bool proc, O& options) {
+  assert(battle.request.quick_claw == Optional::None);
   if constexpr (detail::CHANCE<O>) {
     record(options.chance.actions.turn.quick_claw, optional(proc));
     observe(options, proc ? 1 : 4, 5);
   }
-  drawn = optional(proc);
+  battle.request.quick_claw = optional(proc);
+}
+
+template <typename O> constexpr bool quick_claw(Battle& battle, O& options) {
+  const Optional drawn = battle.request.quick_claw;
+  if (drawn != Optional::None) return drawn == Optional::True;
+  const bool proc = quick_claw_draw(battle, options);
+  quick_claw_keep(battle, proc, options);
   return proc;
 }
 
@@ -784,11 +792,13 @@ constexpr Player first(Battle& battle, const Speeds& s, O& options) {
 // interact): Speed, and on a tie a coin that isn't recorded, since its
 // outcome can't matter to the state (CLAUDE.md, "Chance"). Showdown orders
 // them by Speed with a random tie.
-constexpr Player log_order(Battle& battle) {
-  const uint32_t a = speed(battle, Player::P1);
-  const uint32_t b = speed(battle, Player::P2);
+constexpr Player speed_order(Battle& battle, uint32_t a, uint32_t b) {
   if (a != b) return a > b ? Player::P1 : Player::P2;
   return battle.rng.chance(1, 2) ? Player::P1 : Player::P2;
+}
+
+constexpr Player log_order(Battle& battle) {
+  return speed_order(battle, speed(battle, Player::P1), speed(battle, Player::P2));
 }
 
 // SetActionsAndBattlersTurnOrder (main:4756): a switch goes before a move;
@@ -7488,7 +7498,8 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
 // (BattleScript_DamagingWeatherLoop, bs1:3205) and stop once the battle is
 // over (bs1:3219).
 template <typename O>
-constexpr Flow field_residuals(Battle& battle, O& options) {
+constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
+                               O& options) {
   // ENDTURN_REFLECT, LIGHT_SCREEN, MIST, SAFEGUARD (util:1218-1311): each
   // is one pass over both sides. Showdown's gen4 orders agree (1-4, before
   // Wish's 7 and the weather's 8). Log: SideEnd when one runs out. A side
@@ -7514,8 +7525,9 @@ constexpr Flow field_residuals(Battle& battle, O& options) {
   count_down(&SideConditions::safeguard, SC::Safeguard);
 
   // ENDTURN_WISH (util:1312): it lands on whoever is active, healing half of
-  // its max HP (trywish, bsc:9311), unless it has fainted.
-  const Player first = log_order(battle);
+  // its max HP (trywish, bsc:9311), unless it has fainted. `s1` and `s2`
+  // are the residual Speeds, with Quick Claw (residual_speeds).
+  const Player first = speed_order(battle, s1, s2);
   for (const Player p : {first, foe(first)}) {
     Side& side = battle.side(p);
     SideConditions& c = side.conditions;
@@ -7558,8 +7570,8 @@ constexpr Flow field_residuals(Battle& battle, O& options) {
     return std::nullopt;
   }
   // Showdown's weather hurts the Pokémon in its own Speed order (eachEvent,
-  // sim/battle.ts:470), with a tie coin of its own.
-  const Player order = log_order(battle);
+  // sim/battle.ts:470), with Quick Claw and a tie coin of its own.
+  const Player order = speed_order(battle, s1, s2);
   for (const Player p : {order, foe(order)}) {
     Side& side = battle.side(p);
     const ActivePokemon& a = side.active;
@@ -7923,41 +7935,62 @@ constexpr Flow battler_pass(Battle& battle, Player first, O& options) {
 
 // Quick Claw in the residual order, as Showdown: updateSpeed before the
 // residuals (sim/battle.ts:2818) gives a holder 65535 Speed on a turn its
-// roll succeeded (gen3 getActionSpeed, data/mods/gen3/scripts.ts:18). The
-// decomp's ENDTURN_ORDER uses the turn's draw too (util:1209). `s1` and `s2`
-// are the Speeds before the residuals, raised here if the roll succeeded.
-// The roll is the turn's one draw (rolls::quick_claw); if the move order
-// didn't need it, it is drawn here only if it changes the comparison, and
-// recorded only if the two orders give different states: both passes are
-// run on copies. A Speed tie on either side would need the stage coins
-// too, so it is recorded. Over-approximated: if both Pokémon draw in the
-// pass (Shed Skin, Starf Berry, Yawn's sleep length), the copies take the
-// draws in a different order and can differ only by that.
+// roll succeeded (gen3 getActionSpeed, data/mods/gen3/scripts.ts:18), for
+// every residual handler, Wish and the weather included. The decomp's
+// ENDTURN_ORDER uses the turn's draw too (util:1209). `s1` and `s2` are the
+// Speeds before the residuals, raised here if the roll succeeded. The roll
+// is the turn's one draw; if the move order didn't need it, it is drawn
+// here if it changes the comparison, and returned as pending: Wish and the
+// weather use it, and keep_residual_quick_claw records it after them if the
+// battler pass needs it.
+struct ResidualSpeeds {
+  bool pending;  // drawn here, not yet recorded
+  bool proc;
+  bool tie;      // a Speed tie with or without Quick Claw
+};
+
 template <typename O>
-constexpr void residual_quick_claw(Battle& battle, uint32_t& s1, uint32_t& s2,
-                                   bool q1, bool q2, O& options) {
-  if (!q1 && !q2) return;
+constexpr ResidualSpeeds residual_speeds(Battle& battle, uint32_t& s1, uint32_t& s2,
+                                         O& options) {
+  ResidualSpeeds r{false, false, false};
+  const bool q1 = holds(battle.sides[0], HoldEffect::QuickClaw);
+  const bool q2 = holds(battle.sides[1], HoldEffect::QuickClaw);
+  if (!q1 && !q2) return r;
   const uint32_t t1 = q1 ? UINT32_MAX : s1;
   const uint32_t t2 = q2 ? UINT32_MAX : s2;
   const auto cmp = [](uint32_t x, uint32_t y) { return (x > y) - (x < y); };
-  if (cmp(s1, s2) == cmp(t1, t2)) return;
-  Optional drawn = battle.request.quick_claw;
+  if (cmp(s1, s2) == cmp(t1, t2)) return r;
+  r.tie = s1 == s2 || t1 == t2;
+  const Optional drawn = battle.request.quick_claw;
   if (drawn == Optional::None) {
-    bool matters = s1 == s2 || t1 == t2;
-    if (!matters) {
-      matters = orders_differ(battle, options, [](Battle& b, auto& o, Player p) {
-        return battler_pass(b, p, o);
-      });
-    }
-    // An unrecorded draw stays out of the request, which a residual
-    // faint's request keeps past the update (replacement_order).
-    drawn = matters ? optional(rolls::quick_claw(battle, options))
-                    : optional(battle.rng.chance(1, 5));
+    r.pending = true;
+    r.proc = rolls::quick_claw_draw(battle, options);
+  } else {
+    r.proc = drawn == Optional::True;
   }
-  if (drawn == Optional::True) {
+  if (r.proc) {
     s1 = t1;
     s2 = t2;
   }
+  return r;
+}
+
+// A pending draw is recorded only if the two orders give different states:
+// both passes are run on copies. A Speed tie on either side would need the
+// stage coins too, so it is recorded. Over-approximated: if both Pokémon
+// draw in the pass (Shed Skin, Starf Berry, Yawn's sleep length), the
+// copies take the draws in a different order and can differ only by that.
+// An unrecorded draw stays out of the request, which a residual faint's
+// request keeps past the update (replacement_order).
+template <typename O>
+constexpr void keep_residual_quick_claw(Battle& battle, const ResidualSpeeds& r,
+                                        O& options) {
+  if (!r.pending) return;
+  const bool matters =
+      r.tie || orders_differ(battle, options, [](Battle& b, auto& o, Player p) {
+        return battler_pass(b, p, o);
+      });
+  if (matters) rolls::quick_claw_keep(battle, r.proc, options);
 }
 
 // Perish Song's count for p's active Pokémon, as Showdown (decided
@@ -8184,12 +8217,9 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   // Boost doesn't reorder them.
   uint32_t s1 = speed(battle, Player::P1);
   uint32_t s2 = speed(battle, Player::P2);
-  const bool q1 = holds(battle.sides[0], HoldEffect::QuickClaw);
-  const bool q2 = holds(battle.sides[1], HoldEffect::QuickClaw);
-  if (Flow over = field_residuals(battle, options)) return over;
-  // Wish and the weather order by plain Speed: their order changes only the
-  // log, and the roll isn't drawn for them.
-  residual_quick_claw(battle, s1, s2, q1, q2, options);
+  const ResidualSpeeds rs = residual_speeds(battle, s1, s2, options);
+  if (Flow over = field_residuals(battle, s1, s2, options)) return over;
+  keep_residual_quick_claw(battle, rs, options);
   const Player faster = s1 > s2 ? Player::P1 : Player::P2;
   if (s1 != s2) {
     if (Flow over = battler_pass(battle, faster, options)) return over;
