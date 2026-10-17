@@ -2421,7 +2421,6 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   const Side& side = battle.side(player);
   const ActivePokemon& a = side.active;
   const Side& foe_side = battle.side(foe(player));
-  const ActivePokemon& f = foe_side.active;
   const MoveData& data = get(m.move);
   const Weather weather = effective_weather(battle);
 
@@ -2438,10 +2437,6 @@ constexpr uint32_t accuracy(const Battle& battle, Player player,
   if (data.effect == Effect::Ohko) {
     return 30u + side.get(1).level - foe_side.get(1).level;
   }
-  // Stomp, Astonish, Needle Arm and Extrasensory into a minimized target, as
-  // Showdown's minimize condition (onAccuracy, its gen3 minimize flags); the
-  // decomp only doubles their damage.
-  if (f.volatiles.minimized && data.effect == Effect::FlinchMinimizeHit) return 100;
   if ((weather == Weather::Rain && data.effect == Effect::Thunder) ||
       data.effect == Effect::AlwaysHit || data.effect == Effect::VitalThrow) {
     return 100;
@@ -5795,11 +5790,12 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
 // BattleScript_EffectPerishSong (bs1:1567), as Showdown's Perish Song
 // (data/moves.ts onHitField): after the canceler, attackstring and
 // ppreduce, every active Pokémon without a count gets 3, except a
-// semi-invulnerable one, which it misses, and a Soundproof one other than
-// the user. It fails only if nothing was missed, blocked or started. The
-// decomp's Cmd_trysetperishsong (bsc:8508) skips the user's Soundproof too,
-// ignores semi-invulnerability, and fails when every Pokémon is Soundproof
-// or counting. Pressure takes an extra PP (pressure_applies; the decomp's
+// semi-invulnerable one, which it misses, and a Soundproof one, the user
+// included (gen7's Soundproof, which gen3 inherits, drops the user check:
+// data/mods/gen7/abilities.ts:100). It fails only if nothing was missed,
+// blocked or started. The decomp's Cmd_trysetperishsong (bsc:8508) ignores
+// semi-invulnerability, and fails when every Pokémon is Soundproof or
+// counting. Pressure takes an extra PP (pressure_applies; the decomp's
 // PressurePPLoseOnUsingPerishSong agrees). Log, in Showdown's onHitField
 // order: per Pokémon a Miss, an Immune for Soundproof or Start perish3
 // [silent]; then FieldActivate if one started, or Fail.
@@ -5818,7 +5814,7 @@ constexpr void perish_song(Battle& battle, Player player, MoveState& m,
     if (p != player && a.volatiles.semi_invulnerable()) {
       protocol::miss(options.log, protocol::ident(battle, player), id, false);
       result = true;
-    } else if (p != player && a.ability == Ability::Soundproof) {
+    } else if (a.ability == Ability::Soundproof) {
       protocol::immune(options.log, id, protocol::Immune::Ability, Ability::Soundproof);
       result = true;
     } else if (!a.volatiles.perish_song) {

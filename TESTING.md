@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (37 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (39 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -488,7 +488,8 @@ Showdown change closes gets crossed off here.
   only Truant's own onSwitchIn resets, so a Pokémon that gains Truant
   carries the value from its last Truant stint and may loaf or act on its
   first turn by that history. We follow the cartridge (the counter cleared
-  at switch-in), which would need a per-party bit to change.
+  at switch-in), which would need a per-party bit to change. 10 of the 16
+  state failures of the truly random 10,000-game run (2026-10-17).
 
 - **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
   2026-10-16). Showdown runs Focus Punch's lost focus before the flinch:
@@ -659,6 +660,14 @@ turn, each measured before its bars are fixed.
    failures replayed with every fix: 329 match, 25 by the log alone
    (Known gaps), 16 on the state, unclassified (mostly a PP one off,
    Truant-like; some HP, Torment, Rage, Perish Song, a future attack).
+   The 16 diagnosed (2026-10-17): 10 the Truant gap (Trace 8, Transform
+   1, Skill Swap 1; `closest try` often names the foe, but the one that
+   differs is the Pokémon that gained Truant), 1 Fake Out against Focus
+   Punch (Known gaps), and two engine bugs, fixed: Stomp, Astonish,
+   Needle Arm and Extrasensory never missed a minimized target (gen5's
+   mod drops Minimize's onAccuracy, and gen3 inherits that), 4 games;
+   Perish Song started on a Soundproof user (gen7's Soundproof drops the
+   user check; the decomp skips it too), 1. All 5 then match.
    The 90% bar is not re-set.
 9. CI, later: a gating workflow, then the reporting one.
 
