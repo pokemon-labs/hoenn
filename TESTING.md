@@ -710,8 +710,8 @@ turn, each measured before its bars are fixed.
    233 (Sleep Talk called Nature Power in Showdown; README says Showdown
    bans it). Replays: `build/release/check_showdown --game N --seed S
    build/runs/ou_legal-20261017-105138-13371653129572777382/tracesK.jsonl`,
-   commands in that run's `summary.txt`; first try `--tries 20000000` to
-   rule out a rare branch.
+   commands in that run's `summary.txt`. All 3 still fail at 20M tries,
+   so they aren't rare branches.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions
