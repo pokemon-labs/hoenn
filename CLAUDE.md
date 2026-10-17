@@ -313,8 +313,8 @@ passed its 10,000-game run (2026-10-17, chance clean, 99.83% on the
 state). Its failures were diagnosed and fixed or filed as known gaps; a
 second run at 05e74fd matched 99.90% with the log counted, and its bar is
 now 99.8% (TESTING.md, "Implementation" step 8, "Known engine gaps").
-Random OU-legal rerun at 6d50b7f: 99.91%; 3 of its 9 failures are not
-yet diagnosed (TESTING.md, step 8's last paragraph).
+Random OU-legal rerun at 6d50b7f: 99.91%; its 9 failures are all
+diagnosed, 3 of them fixed since (TESTING.md, step 8's last paragraph).
 1. `min_ko_roll`, Calc's `Summaries` and the search adaptation
    (`bench` checked for drift 2026-10-16; TESTING.md, "Others").
 `build/runs/classify.py`'s KNOWN list is out of date.

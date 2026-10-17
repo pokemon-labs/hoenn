@@ -176,14 +176,14 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (47 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (50 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
 run it came from. Replayed at the commit before its fix, each game fails,
 and the games for later fixes fail with it. Games are renumbered within
 the file, and the search seed depends on the game number, so a renumbered
-game must be checked again. The worst step needs about 15,000 of the
+game must be checked again. The worst step needs about 72,000 of the
 1,000,000 tries.
 
 Adding one: take the failing game from the run's traces, keep the header
@@ -704,14 +704,13 @@ turn, each measured before its bars are fixed.
    out, 9 unmatched (2 log-only), soak and check_chance clean. The 9: 4
    the Truant gap (games 1, 239, 354, 398), 1 the Endless Battle Clause
    (game 13, Known gaps), 1 a rare branch (game 237 matches at 1,035,635
-   tries, just over the cap), and 3 not yet diagnosed: game 440 (a
-   Sharpedo damage and a Mawile switch against a Pelipper faint), game
-   610 (Stockpile's `-end` against Kirlia's faint, likely log-only), game
-   233 (Sleep Talk called Nature Power in Showdown; README says Showdown
-   bans it). Replays: `build/release/check_showdown --game N --seed S
-   build/runs/ou_legal-20261017-105138-13371653129572777382/tracesK.jsonl`,
-   commands in that run's `summary.txt`. All 3 still fail at 20M tries,
-   so they aren't rare branches.
+   tries, just over the cap), and 3 more, all fixed (2026-10-17, one
+   fixture game each): game 233, Sleep Talk can call Nature Power (gen4's
+   flags, which gen3 inherits, drop nosleeptalk; the README had cited the
+   base flags); game 610, log-only, a Spit Up that Metronome calls ends
+   Stockpile (runMove's AfterMove is the last called move's); game 440,
+   log-only, a pursuer that Rough Skin KOs faints after the target's
+   switch line, not before. All three games match.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions
