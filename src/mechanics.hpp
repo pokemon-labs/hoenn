@@ -1056,9 +1056,12 @@ constexpr void deduct_pp(Battle& battle, Player player, uint8_t slot, uint8_t n)
 // lastMove: Sleep Talk for a move it called) loses all its PP, unless the
 // user's own faint came first (Explosion). The loss waits for the end of
 // moveend (`grudge`, MoveState::grudge).
+//
+// `bonded_hp` keeps the user's HP before Destiny Bond takes it, for Shell
+// Bell's log (moveend).
 template <typename O>
 constexpr void faint_target(Battle& battle, Player player, Move used, bool& grudge,
-                            O& options) {
+                            uint16_t& bonded_hp, O& options) {
   const Player defender = foe(player);
   if (!battle.side(defender).get(1).fainted()) return;
   const bool bond = battle.side(defender).active.volatiles.destiny_bond;
@@ -1077,6 +1080,7 @@ constexpr void faint_target(Battle& battle, Player player, Move used, bool& grud
   faint(battle, defender, options);
   Pokemon& user = battle.side(player).get(1);
   if (bond && !user.fainted()) {
+    bonded_hp = user.hp;
     user.hp = 0;
     faint(battle, player, options);
   }
@@ -1891,6 +1895,9 @@ struct MoveState {
   // The target fainted under Grudge (faint_target): the used move loses its
   // PP at the end of moveend, Showdown's faintMessages after the move.
   bool grudge;
+  // The user's HP before the foe's Destiny Bond took it (faint_target), or
+  // 0.
+  uint16_t bonded_hp;
   // This turn's ProtectStruct; set by use_move, null only for the
   // residuals' MoveState, which never reads it.
   Turn* turn;
@@ -1982,12 +1989,15 @@ constexpr void lock_renew(Battle& battle, Player player) {
   battle.side(player).active.renewed |= ActivePokemon::RENEWED_LOCK;
 }
 
-// Ends p's Bide: its onEnd's silent -end, and the lock.
+// Ends p's Bide: its onEnd's silent -end, and the lock. Showdown's
+// removeVolatile does nothing at 0 HP (sim/pokemon.ts:2036), so a
+// confusion self-KO logs no -end.
 template <typename O>
 constexpr void end_bide(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   a.volatiles.bide = 0;
   a.volatiles.multiple_turns = false;
+  if (battle.side(player).get(1).fainted()) return;
   protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::BideSilent);
 }
 
@@ -3690,14 +3700,20 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   // eighth of the HP the move took from the target itself (not its
   // Substitute) over all its hits, at least 1. The decomp reads gHpDealt
   // (the last hit, Substitute included). Bide's release calls tryMoveHit
-  // directly, so neither item acts there.
+  // directly, so neither item acts there. A user that Destiny Bond took
+  // still heals in Showdown's log, whose faintMessages come after; the
+  // state keeps it at 0.
   if (!m.kings_rock_done) flinch_item(battle, player, m, 0, options);
   Pokemon& user = side.get(1);
+  const uint16_t hp = user.fainted() ? m.bonded_hp : user.hp;
   if (!m.release && m.total != 0 && holds(side, HoldEffect::ShellBell) &&
-      !user.fainted() && user.hp != user.stats.hp) {
+      hp != 0 && hp != user.stats.hp) {
     const uint32_t h = m.total / item_data(user.item).param;
-    heal(user, h == 0 ? 1 : h);
-    protocol::heal_item(options.log, protocol::ident(battle, player), user, user.item,
+    Pokemon healed = user;
+    healed.hp = hp;
+    heal(healed, h == 0 ? 1 : h);
+    if (!user.fainted()) user.hp = healed.hp;
+    protocol::heal_item(options.log, protocol::ident(battle, player), healed, user.item,
                         protocol::ident(battle, foe(player)));
   }
 
@@ -4130,6 +4146,12 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // move with no effect draws no crit, and its accuracy roll changes only
   // the log (try_hit).
   m.result |= matchup(battle, player, h);
+  // Wonder Guard is Showdown's TryHit, so its -immune names it, even where
+  // a type immunity would also stop the move, but not where only Dream
+  // Eater's own check does (its onTryHit asks the type chart alone,
+  // data/mods/gen4/abilities.ts:553).
+  const bool wonder_guard = (m.result & MoveResult::NO_EFFECT) &&
+                            foe_side.active.ability == Ability::WonderGuard;
   // Dream Eater: Showdown's gen4 onTryImmunity (which gen3 inherits), a
   // natural immunity unless the target sleeps with no Substitute.
   if (effect == Effect::DreamEater &&
@@ -4137,10 +4159,6 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     m.result |= MoveResult::DOESNT_AFFECT_FOE;
   }
   const bool affects = !(m.result & MoveResult::NO_EFFECT);
-  // Wonder Guard is Showdown's TryHit, so its -immune names it, even where
-  // a type immunity would also stop the move.
-  const bool wonder_guard =
-      !affects && foe_side.active.ability == Ability::WonderGuard;
   // Brick Break breaks screens even into a Ghost type on the cartridge
   // (removelightscreenreflect before typecalc). Showdown's onTryHit runs in
   // moveHit, which an immunity or Wonder Guard never reaches
@@ -4431,11 +4449,13 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     uint16_t drain = m.damaged ? uint16_t(m.hp_dealt / 2) : uint16_t((m.hp_dealt + 1) / 2);
     if (drain == 0) drain = 1;
     // Dream Eater's own script skips Liquid Ooze (bs1:434), as Showdown's
-    // (data/mods/gen4/abilities.ts:255).
+    // (data/mods/gen4/abilities.ts:255), whose instafaint damage writes the
+    // faints at once, the user's first.
     if (foe_side.active.ability == Ability::LiquidOoze && effect != Effect::DreamEater) {
       passive_damage(battle, player, drain, options);
       protocol::damage_ability(options.log, protocol::ident(battle, player), user,
                                Ability::LiquidOoze, protocol::ident(battle, defender));
+      if (user.fainted()) protocol::faints_last_first(options.log);
     } else if (user.hp != user.stats.hp) {
       heal(user, drain);
       protocol::heal_drain(options.log, protocol::ident(battle, player), user,
@@ -4648,7 +4668,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // tryfaintmon
-  faint_target(battle, player, m.chosen, m.grudge, options);
+  faint_target(battle, player, m.chosen, m.grudge, m.bonded_hp, options);
   moveend(battle, player, m, options);
   if (effect == Effect::Explosion) faint(battle, player, options);
 }
@@ -5793,7 +5813,7 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
   }
   m.kings_rock_done = true;
   protocol::hit_count(options.log, protocol::ident(battle, defender), i);
-  faint_target(battle, player, m.chosen, m.grudge, options);
+  faint_target(battle, player, m.chosen, m.grudge, m.bonded_hp, options);
   moveend(battle, player, m, options);
 }
 

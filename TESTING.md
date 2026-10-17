@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (40 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (44 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -469,11 +469,6 @@ suite for everything a forced one covers.
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
-- **Log-only mismatches, truly random** (2026-10-17, one or two
-  each, undiagnosed; 5 of the 10,000-game run's 25, the other 20 the
-  weather order, fixed): Shell Bell's heal against the attacker's faint,
-  Wonder Guard's `-immune` without `[from]`, Bide's `-end` against a
-  faint, Truant's `cant` against paralysis.
 
 - **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
   OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
@@ -669,7 +664,15 @@ turn, each measured before its bars are fixed.
    order Wish and the weather by it, and record it only if the battler
    pass needs it (`residual_speeds`). All 20 then match; a 10% run (seed
    3573881441079700720) matched 960 of 960, log included, chance clean.
-   5 log-only remain (Known gaps).
+   Of the other 5, 4 were fixed (2026-10-17): Shell Bell's heal before a
+   Destiny Bond faint (2; the attacker's HP before the bond is kept for
+   the log), Bide's `-end` on a confusion self-KO (removeVolatile does
+   nothing at 0 HP), Dream Eater into an awake Wonder Guard (a plain
+   `-immune`: Wonder Guard asks the type chart alone). The fifth is the
+   Truant gap (Skill Swap), visible only in the log because paralysis
+   also stopped the move. A second 10% run (seed 6772585141917448290)
+   found Liquid Ooze's instafaint on a drain move (the user's faint
+   first, as Leech Seed's already was), fixed.
    The 90% bar is not re-set.
 9. CI, later: a gating workflow, then the reporting one.
 
