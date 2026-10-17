@@ -7690,6 +7690,35 @@ inline constexpr Stage STAGES[] = {
     Stage::Uproar,    Stage::Timers,
 };
 
+// The HP p's handler takes in a damage stage, or 0 if it deals none, before
+// the handler runs: toxic's counter steps before its damage, and Bind's
+// hidden counter ticks first, so a Pokémon freed now or whose binder has gone
+// takes none. battler_stage and stage_order_matters both use it.
+constexpr uint32_t stage_damage(const Battle& battle, Player player, Stage stage) {
+  const Side& side = battle.side(player);
+  const ActivePokemon& a = side.active;
+  const Volatiles& v = a.volatiles;
+  const Pokemon& mon = side.get(1);
+  if (mon.fainted()) return 0;
+  switch (stage) {
+  case Stage::Status:
+    if (mon.status.badly_poisoned()) {
+      const uint32_t toxic = a.toxic != ActivePokemon::MAX_TOXIC ? a.toxic + 1u : a.toxic;
+      return fraction(mon, 16) * toxic;
+    }
+    return mon.status.poisoned() || mon.status.burned() ? fraction(mon, 8) : 0;
+  case Stage::Nightmare:
+    return v.nightmare && mon.status.asleep() ? fraction(mon, 4) : 0;
+  case Stage::Curse:
+    return v.cursed ? fraction(mon, 4) : 0;
+  case Stage::Bind:
+    return v.wrapped >= 2 && !v.wrapper_gone ? fraction(mon, 16) : 0;
+  default:
+    assert(false && "not a damage stage");
+    return 0;
+  }
+}
+
 // One stage of DoBattlerEndTurnEffects for p's active Pokémon. A Pokémon
 // that has fainted skips it, as each case checks its HP. Returns the end of
 // the battle if a residual KO ends it.
@@ -7799,31 +7828,28 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     return outcome(battle);
   }
 
-  case Stage::Status:
+  case Stage::Status: {
     // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's
     // counter, at most 15, times 1/16; 1/8. One status, so one handler.
-    if (!alive()) return std::nullopt;
-    if (mon.status.poisoned() && !mon.status.badly_poisoned()) {
-      return hurt(fraction(mon, 8), protocol::Damage::Poison);
-    }
-    if (mon.status.badly_poisoned()) {
-      if (a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
-      return hurt(fraction(mon, 16) * a.toxic, protocol::Damage::Poison);
-    }
-    if (mon.status.burned()) return hurt(fraction(mon, 8), protocol::Damage::Burn);
-    return std::nullopt;
+    const uint32_t n = stage_damage(battle, player, stage);
+    if (n == 0) return std::nullopt;
+    if (mon.status.badly_poisoned() && a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
+    return hurt(n, mon.status.burned() ? protocol::Damage::Burn : protocol::Damage::Poison);
+  }
 
   case Stage::Nightmare:
     // ENDTURN_NIGHTMARES (util:1553): 1/4 while asleep, else it ends.
     if (!v.nightmare || !alive()) return std::nullopt;
-    if (mon.status.asleep()) return hurt(fraction(mon, 4), protocol::Damage::Nightmare);
+    if (mon.status.asleep()) {
+      return hurt(stage_damage(battle, player, stage), protocol::Damage::Nightmare);
+    }
     v.nightmare = false;
     return std::nullopt;
 
   case Stage::Curse:
     // ENDTURN_CURSE (util:1574): 1/4.
     if (!v.cursed || !alive()) return std::nullopt;
-    return hurt(fraction(mon, 4), protocol::Damage::Curse);
+    return hurt(stage_damage(battle, player, stage), protocol::Damage::Curse);
 
   case Stage::Bind: {
     // ENDTURN_WRAP (util:1585), as Showdown's partiallytrapped (gen4 mod:
@@ -7836,6 +7862,7 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     // still resamples the counter). Log: End Bound, or End BoundSilent, or
     // Damage Bound.
     if (v.wrapped == 0 || !alive()) return std::nullopt;
+    const uint32_t n = stage_damage(battle, player, stage);
     v.wrapped--;
     const bool freed = v.wrapped == 0;
     if constexpr (CHANCE<O>) {
@@ -7858,7 +7885,8 @@ constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
     }
     // A faint clears the volatiles: the log's move is read first.
     const Move by = a.wrapped_move;
-    passive_damage(battle, player, fraction(mon, 16), options);
+    assert(n != 0);
+    passive_damage(battle, player, n, options);
     protocol::damage_bound(options.log, id, mon, by);
     protocol::faints(options.log);
     return outcome(battle);
@@ -7981,7 +8009,7 @@ constexpr bool orders_differ(const Battle& battle, const O& options, F run) {
 }
 
 template <typename O>
-constexpr bool stage_order_matters(const Battle& battle, Stage stage,
+constexpr bool stage_orders_differ(const Battle& battle, Stage stage,
                                    const O& options) {
   if (stage < Stage::LeechSeed || stage > Stage::Bind) return false;
   return orders_differ(battle, options, [stage](Battle& b, auto& o, Player p) {
@@ -7989,6 +8017,61 @@ constexpr bool stage_order_matters(const Battle& battle, Stage stage,
     if (!f) f = battler_stage(b, foe(p), stage, o);
     return f;
   });
+}
+
+// stage_orders_differ without the copies. Within a stage each handler
+// touches its own Pokémon, except through Leech Seed (the seeder's HP), the
+// battle ending after a handler, and a faint's effects on the foe, of which
+// only wrapper_gone is read here, by Bind. So:
+// - Leech Seed: both are seeded and in (else one handler is a no-op).
+// - Status, Nightmare, Curse: both hits are lethal and both Pokémon are
+//   their side's last (the first to faint loses). Otherwise the faints, HP
+//   or Result agree; the stages draw nothing.
+// - Bind: both are bound and either hit is lethal: the other then ends
+//   silently, or isn't reached and its tick goes unrecorded.
+// Over-approximated where cheaper (mutual Leech Seed, Bind): a coin
+// recorded where it needn't be is one extra chance node; one left
+// unrecorded where it mattered would be a bug, which debug builds check
+// against the copies.
+template <typename O>
+constexpr bool stage_order_matters(const Battle& battle, Stage stage,
+                                   const O& options) {
+  const auto last = [&](Player p) {
+    const Side& side = battle.side(p);
+    const Pokemon& active = side.get(1);
+    for (const Pokemon& mon : side.pokemon) {
+      if (&mon != &active && mon.species != Species::None && !mon.fainted()) return false;
+    }
+    return true;
+  };
+  const auto lethal = [&](Player p) {
+    const uint32_t n = stage_damage(battle, p, stage);
+    return n != 0 && n >= battle.side(p).get(1).hp;
+  };
+  const Volatiles& v1 = battle.sides[0].active.volatiles;
+  const Volatiles& v2 = battle.sides[1].active.volatiles;
+  const bool in = !battle.sides[0].get(1).fainted() && !battle.sides[1].get(1).fainted();
+  bool matters = false;
+  switch (stage) {
+  case Stage::LeechSeed:
+    matters = in && v1.leech_seed && v2.leech_seed;
+    break;
+  case Stage::Status:
+  case Stage::Nightmare:
+  case Stage::Curse:
+    matters = lethal(Player::P1) && lethal(Player::P2) && last(Player::P1) &&
+              last(Player::P2);
+    break;
+  case Stage::Bind:
+    matters = in && v1.wrapped != 0 && v2.wrapped != 0 &&
+              (lethal(Player::P1) || lethal(Player::P2));
+    break;
+  default:
+    break;
+  }
+  assert(matters || !stage_orders_differ(battle, stage, options));
+  (void)options;
+  return matters;
 }
 
 // The per-Pokémon residuals with unequal Speeds: every stage of `first`'s,
