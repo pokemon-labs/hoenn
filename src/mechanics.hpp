@@ -7360,6 +7360,7 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
     After after = After::None;
     if (pursued) continue; // the pursuer's action was its Pursuit
     if (c.type() == Choice::Switch) {
+      bool survived = false;
       if (i == 0 && pursues(battle, foe(p))) {
         protocol::activate(options.log, protocol::ident(battle, p),
                            protocol::Activate::Pursuit);
@@ -7373,15 +7374,25 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
           protocol::cure_status(options.log, protocol::ident(battle, p), status,
                                 protocol::Cure::NaturalCure);
         }
-        protocol::faints(options.log);
+        if (ko) protocol::faints(options.log);
         if (ActivePokemon& f = battle.side(foe(p)).active; ko && f.volatiles.infatuated) {
           protocol::end_effect(options.log, protocol::ident(battle, foe(p)),
                                protocol::End::Attract);
           f.volatiles.infatuated = false;
         }
+        survived = !ko;
         pursued = true;
       }
-      switch_to(battle, p, c.data(), options);
+      if (survived) {
+        // The switch goes on, so a pursuer's faint (Rough Skin) prints after
+        // the switch line and before the queued runSwitch, which doesn't run
+        // if the battle ended (sim/battle.ts:2839).
+        leave(battle, p, c.data(), options);
+        protocol::faints(options.log);
+        if (!lost(battle.side(foe(p)))) arrive(battle, p, options);
+      } else {
+        switch_to(battle, p, c.data(), options);
+      }
     } else {
       after = use_move(battle, p, i == 0, turn, options);
       // Showdown's faintMessages after the move (sim/battle-actions.ts:347),
