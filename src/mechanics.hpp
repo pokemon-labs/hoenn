@@ -1899,6 +1899,8 @@ struct MoveState {
   // Showdown's activeMove after useMove, which AfterMove sees
   // (sim/battle-actions.ts:309).
   Move ran;
+  // moveend ran the AfterMove handlers (after_move).
+  bool after_move;
   // The user's HP before the foe's Destiny Bond took it (faint_target), or
   // 0.
   uint16_t bonded_hp;
@@ -3657,6 +3659,36 @@ constexpr void flinch_item(Battle& battle, Player player, const MoveState& m,
 }
 
 // Cmd_moveend (bsc:4210) with moveendall: the cases in the decomp's order.
+// The Stockpile volatile's end (its onEnd). Log: End Stockpile.
+template <typename O>
+constexpr void stockpile_end(Battle& battle, Player player, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  if (a.stockpile == 0) return;
+  a.stockpile = 0;
+  protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Stockpile);
+}
+
+// The AfterMove handlers (Showdown's runMove, sim/battle-actions.ts:311),
+// for `ran`, the last move the action called (`activeMove`): moveend's, or
+// use_move's when no moveend ran them. `charged`: the user had Charge
+// before the move.
+// - Charge's onAfterMove and onMoveAborted (self_volatile), for any move but
+//   Charge (gen8's condition, which gen3 inherits) or one that called it;
+//   not after Pursuit on a switching target, which Showdown runs with
+//   useMove, nor for a user that fainted (Showdown prints no -end then;
+//   faint() clears it).
+// - Spit Up's onAfterMove: once the move ran, hit or not, the layers go.
+template <typename O>
+constexpr void after_move(Battle& battle, Player player, const MoveState& m,
+                          Move ran, bool charged, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  if (charged && !m.pursuing && ran != Move::Charge && !battle.side(player).get(1).fainted()) {
+    a.volatiles.charged_up = false;
+    protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
+  }
+  if (m.obeys && get(ran).effect == Effect::SpitUp) stockpile_end(battle, player, options);
+}
+
 template <typename O>
 constexpr void moveend(Battle& battle, Player player, MoveState& m,
                        O& options) {
@@ -3702,6 +3734,10 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
     a.volatiles.underground = false;
     a.volatiles.underwater = false;
   }
+
+  // Showdown's AfterMove comes before the Update that cures by item.
+  after_move(battle, player, m, m.move, a.volatiles.charged_up, options);
+  m.after_move = true;
 
   // MOVEEND_ITEM_EFFECTS_ALL: ITEMEFFECT_MOVE_END's cures. The decomp
   // stops at the first Pokémon whose item acts (util:3740); Showdown's
@@ -4609,15 +4645,21 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     } else {
       const ID thief = protocol::ident(battle, player);
       const ID robbed = protocol::ident(battle, defender);
-      if (m.move == Move::Thief) {
-        protocol::end_item(options.log, robbed, target.item, protocol::EndItemFrom::Thief, thief);
-        protocol::item(options.log, thief, target.item, protocol::ItemFrom::Thief, robbed);
-      } else {
-        protocol::item(options.log, thief, target.item, protocol::ItemFrom::Covet, robbed);
-      }
-      m.stolen = target.item;
+      const Item item = target.item;
       target.item = Item::None;
       foe_side.active.choice_move = Move::None;
+      // setItem runs the new item's onStart (White Herb, as trick()) before
+      // the lines; an item it uses up isn't handed over at moveend.
+      user.item = item;
+      white_herb(battle, player, options);
+      m.stolen = user.item;
+      user.item = Item::None;
+      if (m.move == Move::Thief) {
+        protocol::end_item(options.log, robbed, item, protocol::EndItemFrom::Thief, thief);
+        protocol::item(options.log, thief, item, protocol::ItemFrom::Thief, robbed);
+      } else {
+        protocol::item(options.log, thief, item, protocol::ItemFrom::Covet, robbed);
+      }
     }
   }
 
@@ -5640,6 +5682,7 @@ constexpr void call_move(Battle& battle, Player player, MoveState& m, Move move,
   m.drag = c.drag;
   m.pass = c.pass;
   m.ran = c.ran != Move::None ? c.ran : c.move;
+  m.after_move = c.after_move;
 }
 
 // BattleScript_EffectSleepTalk (bs1:1311), as Showdown's gen3 Sleep Talk
@@ -6272,15 +6315,6 @@ constexpr void stockpile(Battle& battle, Player player, MoveState& m, O& options
   protocol::start_count(options.log, protocol::ident(battle, player), protocol::Start::Stockpile,
                         a.stockpile);
   moveend(battle, player, m, options);
-}
-
-// The Stockpile volatile's end (its onEnd). Log: End Stockpile.
-template <typename O>
-constexpr void stockpile_end(Battle& battle, Player player, O& options) {
-  ActivePokemon& a = battle.side(player).active;
-  if (a.stockpile == 0) return;
-  a.stockpile = 0;
-  protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Stockpile);
 }
 
 // Swallow (BattleScript_EffectSwallow, bs1:2167), as Showdown (gen4 mod's
@@ -7291,21 +7325,8 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   m.pursuing = pursuing;
   const bool charged = a.volatiles.charged_up;
   execute(battle, player, m, options);
-  // Charge's onAfterMove and onMoveAborted (self_volatile), for any move
-  // but Charge (gen8's condition, which gen3 inherits) or one that called
-  // it; not after Pursuit on a switching target, which Showdown runs with
-  // useMove, nor for a user that fainted (Showdown prints no -end then;
-  // faint() clears it).
-  const Move ran = m.ran != Move::None ? m.ran : m.move;
-  if (charged && !pursuing && ran != Move::Charge && !battle.side(player).get(1).fainted()) {
-    a.volatiles.charged_up = false;
-    protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
-  }
-  // Spit Up's onAfterMove (Showdown's runMove, sim/battle-actions.ts:311):
-  // once the move ran, hit or not, the layers go. A called Spit Up too: the
-  // AfterMove is the last called move's (`activeMove`, as Charge's above).
-  if (m.obeys && get(ran).effect == Effect::SpitUp) {
-    stockpile_end(battle, player, options);
+  if (!m.after_move) {
+    after_move(battle, player, m, m.ran != Move::None ? m.ran : m.move, charged, options);
   }
   assert(!(m.drag && m.pass));
   return m.drag ? After::Drag : m.pass ? After::Pass : After::None;
@@ -8076,7 +8097,7 @@ constexpr void perish_count(Battle& battle, Player player, O& options) {
 // per-Pokémon residual and before Perish Song): its duration ticks, and at
 // 0 the attack lands on whatever Pokémon is in, unless it has fainted (the
 // attack is spent; Showdown only hints). The landing is trySpreadMoveHit
-// with gen4's steps: a semi-invulnerable target is missed, then the
+// with gen4's steps: a semi-invulnerable target is missed unless locked on, then the
 // accuracy (Future Sight 90, Doom Desire 85) with the user's accuracy
 // stage only if it is still in (stages clear at a switch or faint), its
 // ability wherever it is (gen3 doesn't ignore a benched Pokémon's
@@ -8112,8 +8133,11 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
                        : protocol::benched(ID::init(user, position));
   protocol::end_effect(options.log, id, protocol::End::FutureMove, move);
   const ActivePokemon& t = side.active;
-  bool lands = !t.volatiles.semi_invulnerable();
-  if (lands && !(in && locked_on(battle, user))) {
+  // The user's Lock-On, while it's in, reaches a semi-invulnerable target
+  // too (lockon's onSourceInvulnerability, as invulnerable()).
+  const bool locked = in && locked_on(battle, user);
+  bool lands = !t.volatiles.semi_invulnerable() || locked;
+  if (lands && !locked) {
     const uint32_t calc = staged_accuracy(
         battle, player, get(move).accuracy, in ? user_side.active.boosts.acc : int8_t(0),
         user_side.pokemon[position - 1].ability, move == Move::DoomDesire);
@@ -8275,6 +8299,9 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   if (Flow over = field_residuals(battle, s1, s2, options)) return over;
   keep_residual_quick_claw(battle, rs, options);
   const Player faster = s1 > s2 ? Player::P1 : Player::P2;
+  // A log-only order: on a tie, a coin per stage on these Speeds, not the
+  // current ones (log_order), which a Speed Boost may have changed.
+  const auto coin = [&] { return speed_order(battle, s1, s2); };
   if (s1 != s2) {
     if (Flow over = battler_pass(battle, faster, options)) return over;
   } else {
@@ -8282,7 +8309,7 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
       const Player first =
           stage_order_matters(battle, stage, options)
               ? rolls::residual_tie(battle, stage == Stage::LeechSeed, options)
-              : log_order(battle);
+              : coin();
       for (const Player p : {first, foe(first)}) {
         if (Flow over = battler_stage(battle, p, stage, options)) return over;
       }
@@ -8295,19 +8322,21 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   if (s1 == s2) {
     const bool both = battle.sides[0].conditions.future_sight == 1 &&
                       battle.sides[1].conditions.future_sight == 1;
-    order = both ? rolls::residual_tie(battle, false, options) : log_order(battle);
+    order = both ? rolls::residual_tie(battle, false, options) : coin();
   }
   for (const Player p : {order, foe(order)}) {
     if (Flow over = future_attack(battle, p, options)) return over;
   }
-  const Player last = s1 != s2 ? faster : log_order(battle);
+  Player last = coin();
   for (const Player p : {last, foe(last)}) perish_count(battle, p, options);
+  last = coin();
   for (const Player p : {last, foe(last)}) {
     lock_residuals(battle, p, options);
     disable_residual(battle, p, options);
   }
   protocol::faints(options.log);
   // White Herb's residual (order 29), the last.
+  last = coin();
   for (const Player p : {last, foe(last)}) white_herb(battle, p, options);
   // Showdown's stall expires with the residuals, before a residual faint's
   // replacement: a turn without a successful Protect, Detect or Endure ends
