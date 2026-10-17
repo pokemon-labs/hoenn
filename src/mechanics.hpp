@@ -8073,7 +8073,8 @@ constexpr void perish_count(Battle& battle, Player player, O& options) {
 // abilities), and the target's evasion and modifiers (staged_accuracy);
 // Protect doesn't stop it (no protect flag), Wonder Guard lets '???'
 // through. Then the stored damage, through a Substitute, with Focus Band
-// (Action::future) but no Endure (survive()); Rage counts the hit, Bide
+// (Action::future) but no Endure (survive(); gen4's Endure skips future
+// moves, data/mods/gen4/moves.ts:434); Rage counts the hit, Bide
 // the damage. Destiny Bond doesn't take the user (its onFaint skips future
 // moves). The decomp (HandleWishPerishSongOnTurnEnd, util:1781) lands it
 // after the residual faints are replaced, with a request of its own.

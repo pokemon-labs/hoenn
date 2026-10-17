@@ -477,6 +477,15 @@ Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
 
+- **Endless Battle Clause** (1 of the random OU-legal 10,000-game run,
+  2026-10-17, game 13 of shard 0 at seed 13371653129572777382). Showdown's
+  OU formats tie (or pick a loser) past turn 100 when every side is
+  stale (`maybeTriggerEndlessBattleClause`, `sim/battle.ts:1807`):
+  per-Pokémon `staleness` from restorative berries eaten after Recycle or
+  Harvest, `volatileStaleness` from Skill Swap or Entrainment's target
+  (`sim/battle.ts:1344`). The engine has neither the clause nor the
+  state; adding it is a layout change and a format decision, left to the
+  user. Custom Game (truly random) has no clause.
 - **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
   OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
   2026-10-16; left as
@@ -492,8 +501,6 @@ Showdown change closes gets crossed off here.
   games). Showdown's Encore swaps the locked move for Metronome, runs it
   as `[from] lockedmove` without PP, and the lock's handlers keep going.
   Left as a gap (the user, 2026-10-15); comment in `use_move`.
-- **Endure and a future attack** landing the same turn: Endure doesn't
-  save the target (no `Turn` at the residuals; Showdown's would).
 - **Toxic stage across a double replacement:** Showdown keeps the
   survivor's old toxic stage (it lives on the status); ours resets in
   `enter()`. Needs a per-Pokémon counter (layout). 2 group 2 games, 1
@@ -512,7 +519,9 @@ Showdown change closes gets crossed off here.
   15040563541741120241 tools/teams/group3.txt` (Pelipper mirror, turn 111:
   P1 first, Toxic hits, P2's Surf crits; P2's fresh toxic ticks in one
   sample and not the other, same `Actions`). Suspects: the end-of-turn
-  `item_cure` pass, the residual Speed-tie order.
+  `item_cure` pass, the residual Speed-tie order. No longer reproduces
+  (2026-10-17, 0 collisions), but the seed may name another game since
+  the team input changed, so it is unconfirmed either way.
 - **Unexamined:** 2 crit + crit + freeze Porygon2 games and 1 crit + freeze
   + Lum game in group 8 (rare branches?).
 - **Still open from group 6:** Grudge's `-activate` when the KO ends the
@@ -689,6 +698,20 @@ turn, each measured before its bars are fixed.
    then fixed (2026-10-17): Showdown's focus volatile blocks the flinch
    from the start of the turn, so Focus Punch loses focus and spends its
    PP (`focusing`; README shortlist). All three games match.
+
+   Random OU-legal rerun (2026-10-17, engine `6d50b7f`, seed
+   13371653129572777382): 9914 of 9923 (99.91%), 77 multi-hit games left
+   out, 9 unmatched (2 log-only), soak and check_chance clean. The 9: 4
+   the Truant gap (games 1, 239, 354, 398), 1 the Endless Battle Clause
+   (game 13, Known gaps), 1 a rare branch (game 237 matches at 1,035,635
+   tries, just over the cap), and 3 not yet diagnosed: game 440 (a
+   Sharpedo damage and a Mawile switch against a Pelipper faint), game
+   610 (Stockpile's `-end` against Kirlia's faint, likely log-only), game
+   233 (Sleep Talk called Nature Power in Showdown; README says Showdown
+   bans it). Replays: `build/release/check_showdown --game N --seed S
+   build/runs/ou_legal-20261017-105138-13371653129572777382/tracesK.jsonl`,
+   commands in that run's `summary.txt`; first try `--tries 20000000` to
+   rule out a rare branch.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions
