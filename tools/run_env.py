@@ -13,9 +13,10 @@ drawn unless --seed is given; every shard's seed derives from it, so the run
 replays from the printed seed. --scale multiplies every game count (0.01 for
 a smoke run; the rates are noisy then).
 
-Showdown is the commit in SHOWDOWN_COMMIT (the gating run), or another
-(--showdown-commit, or --master for the reporting run), kept built in
-.showdown/<hash>/. The `showdown` symlink points at the pinned one.
+Showdown is the commit pinned in criteria.toml's [showdown] table (the
+gating run), or another (--showdown-commit, or --master for the reporting
+run), kept built in .showdown/<hash>/. The `showdown` symlink points at the
+pinned one.
 
 Exits 0 when every bar passes, 1 when one fails, 2 on a setup error.
 """
@@ -34,7 +35,6 @@ import threading
 import tomllib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHOWDOWN_URL = 'https://github.com/smogon/pokemon-showdown.git'
 MASK64 = (1 << 64) - 1
 
 
@@ -57,7 +57,7 @@ def git(*args, cwd=ROOT):
                           capture_output=True, text=True).stdout.strip()
 
 
-def showdown_checkout(commit):
+def showdown_checkout(repo, commit):
     """The built Showdown at `commit`, fetched and built on first use."""
     path = os.path.join(ROOT, '.showdown', commit)
     if os.path.exists(os.path.join(path, 'dist', 'sim', 'index.js')):
@@ -65,7 +65,7 @@ def showdown_checkout(commit):
     print(f'fetching and building Showdown {commit} in {path}', flush=True)
     os.makedirs(path, exist_ok=True)
     git('init', '-q', cwd=path)
-    git('fetch', '-q', '--depth', '1', SHOWDOWN_URL, commit, cwd=path)
+    git('fetch', '-q', '--depth', '1', repo, commit, cwd=path)
     git('checkout', '-q', 'FETCH_HEAD', cwd=path)
     subprocess.run(['npm', 'ci', '--no-audit', '--no-fund'], cwd=path,
                    check=True, stdout=subprocess.DEVNULL)
@@ -207,6 +207,7 @@ def main():
 
     with open(os.path.join(ROOT, 'tools', 'criteria.toml'), 'rb') as f:
         criteria = tomllib.load(f)
+    pin = criteria.pop('showdown')
     if args.env not in criteria:
         print(f'run_env: no environment {args.env!r} in tools/criteria.toml '
               f'(have: {", ".join(criteria)})')
@@ -221,15 +222,14 @@ def main():
         print(f'run_env: {args.env} has neither teams nor generate')
         return 2
 
-    with open(os.path.join(ROOT, 'SHOWDOWN_COMMIT')) as f:
-        pinned = f.read().strip()
+    pinned = pin['commit']
     if args.master:
-        commit = subprocess.run(['git', 'ls-remote', SHOWDOWN_URL, 'master'],
+        commit = subprocess.run(['git', 'ls-remote', pin['repo'], 'master'],
                                 check=True, capture_output=True,
                                 text=True).stdout.split()[0]
     else:
         commit = args.showdown_commit or pinned
-    sd = showdown_checkout(commit)
+    sd = showdown_checkout(pin['repo'], commit)
     if commit == pinned:
         link_pinned(sd)
     build()

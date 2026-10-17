@@ -199,7 +199,8 @@ As libpkmn's `calc.zig`. **Overrides** are an `Actions`: a nonzero field
 forces that branch, 0 rolls normally. Hidden rolls are in neither; to fix a
 sleep length, set the counter in the battle. **`Summaries`** are on hold.
 
-**`min_ko_roll(battle, player, slot, crit) -> 0..15, or 16`**: the smallest
+**`min_ko_roll(battle, player, slot, crit) -> 0..15, or 16`** (deferred
+2026-10-17, off the plan while the engine serves policy only): the smallest
 damage-roll index (0 = 85%, 15 = 100%) at which one hit from that move slot
 KOs the foe's active Pokémon, via the normal damage path without side
 effects. Ignores multi-hit; fixed-damage moves return 0 or 16.
@@ -245,7 +246,6 @@ target `hoenn` (include path `src/`, C++20). `cmake --preset debug`
 ```
 CMakeLists.txt, CMakePresets.json
 TESTING.md            the test spec, pass criteria, known gaps
-SHOWDOWN_COMMIT       the Showdown commit the tests pin
 teams/ou/             the OU teams (Smogon dumps)
 LICENSE               MIT, with credits
 src/
@@ -268,7 +268,7 @@ src/
   mechanics.hpp       update(), choices(), the roll helpers   (the frame)
   protocol.hpp        the gen3 log messages (hoenn::protocol)
   format.hpp          binary log -> Showdown's text lines
-  calc.hpp            Calc and NullCalc (overrides); min_ko_roll    (todo)
+  calc.hpp            Calc and NullCalc (overrides); min_ko_roll (deferred)
 tools/
   generate.py         one-off data generator from the decomp
   check_data.cpp      static_asserts on the generated tables
@@ -279,7 +279,7 @@ tools/
   showdown_traces.cjs seeded Showdown games as JSONL traces (+ json.hpp)
   gen_teams.cjs       seeded random teams (random OU-legal), validated
   run_env.py          one test environment's suites against its bars
-  criteria.toml       the bars per environment (run_env.py)
+  criteria.toml       the bars per environment and the Showdown pin (run_env.py)
   check_frame.cpp     the turn frame and scenarios, plus a self-play soak
   soak.cpp            long random self-play runs, replayable by seed
   bench.cpp           updates/s, null log, Chance on, or --log (release)
@@ -296,7 +296,7 @@ tools/
 The decomp is pret/pokeemerald at `731ad5b`, outside the repo; decomp
 citations are to that commit, and `tools/generate.py` takes its path.
 `showdown/` is a symlink to the pinned Showdown checkout
-(`SHOWDOWN_COMMIT`, `c046106`, 0.11.11), which `tools/run_env.py` keeps
+(`tools/criteria.toml`'s `[showdown]`, `c046106`, 0.11.11), which `tools/run_env.py` keeps
 fetched and built in `.showdown/<hash>/`; both are ignored. Cite it by
 path.
 
@@ -315,12 +315,14 @@ second run at 05e74fd matched 99.90% with the log counted, and its bar is
 now 99.8% (TESTING.md, "Implementation" step 8, "Known engine gaps").
 Random OU-legal rerun at 6d50b7f: 99.91%; its 9 failures are all
 diagnosed, 3 of them fixed since (TESTING.md, step 8's last paragraph).
-1. `min_ko_roll`, Calc's `Summaries` and the search adaptation
-   (`bench` checked for drift 2026-10-16; TESTING.md, "Others").
+Nothing further is planned. Deferred (2026-10-17; the engine serves
+policy only for now, `RL.md`): `min_ko_roll`, Calc's `Summaries` and the
+search adaptation (`bench` checked for drift 2026-10-16; TESTING.md,
+"Others").
 `build/runs/classify.py`'s KNOWN list is out of date.
 
 **Not written:**
-- `min_ko_roll`, Calc's `Summaries`, the search adaptation.
+- `min_ko_roll`, Calc's `Summaries`, the search adaptation (deferred).
 
 **Open:**
 - What `update` does with a full log buffer; `MAX_LOG_SIZE` is a

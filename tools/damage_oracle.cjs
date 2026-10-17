@@ -5,7 +5,7 @@
 //
 //   node tools/damage_oracle.cjs [path/to/pokemon-showdown] > tools/damage_cases.inc
 //
-// The default path is showdown/ (SHOWDOWN_COMMIT). Each case's attacker uses
+// The default path is showdown/ (the pin in tools/criteria.toml). Each case's attacker uses
 // its first move (or Struggle). Sets are level 100; Hidden Power sets give
 // their IVs explicitly, since Showdown's import doesn't derive them.
 'use strict';

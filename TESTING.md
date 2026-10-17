@@ -401,10 +401,10 @@ pushes yet.
 
 **Decided (2026-10-15): Showdown itself, not `@pkmn/sim`.** Gating uses
 smogon/pokemon-showdown at a pinned commit; reporting uses master. The pin
-is a file in the repo holding the full commit hash (now
-`c046106cbe075931b1ff8d8b800ff5be47a85f96`, 0.11.11), which the runner
-reads to check out and build Showdown. Bumping Showdown is a one-line
-commit. Built (2026-10-15): `SHOWDOWN_COMMIT`. The runner keeps each
+is the repo and full commit hash in `tools/criteria.toml`'s `[showdown]`
+table (now `c046106cbe075931b1ff8d8b800ff5be47a85f96`, 0.11.11; moved there
+from a `SHOWDOWN_COMMIT` file 2026-10-17), which the runner reads to check
+out and build Showdown. Bumping Showdown is a one-line commit. The runner keeps each
 commit it tests fetched and built in `.showdown/<hash>/` (ignored), and
 points the `showdown` symlink at the pinned one, so the scripts' default
 and the `showdown/...` citations follow the pin.
@@ -587,7 +587,8 @@ turn, each measured before its bars are fixed.
 2. `check_chance`'s terminal-state comparison. Done (2026-10-15).
 3. `check_showdown`'s multi-hit classification. Done (2026-10-15).
 4. The criteria file (`tools/criteria.toml`) and the Showdown pin file
-   (`SHOWDOWN_COMMIT`). Done (2026-10-15), OU only.
+   (`SHOWDOWN_COMMIT`, now criteria.toml's `[showdown]`). Done
+   (2026-10-15), OU only.
 5. The runner, `python3 tools/run_env.py ENV` (`--seed`, `--jobs`,
    `--scale` for a smoke run, `--master` or `--showdown-commit` for the
    reporting run). Done (2026-10-15). It builds both presets, shards each

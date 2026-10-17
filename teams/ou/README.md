@@ -17,7 +17,7 @@ duplicates within a file are dropped.
 | `teambuilding-competition-8-fire-offense.txt` | 93 | Teambuilding Competition Round 8 (3770678) |
 
 Edited (2026-10-15) so every team
-passes Showdown's gen3ou validator (pinned in `SHOWDOWN_COMMIT`): 13 Pokémon
+passes Showdown's gen3ou validator (pinned in `tools/criteria.toml`): 13 Pokémon
 without an EVs line have `EVs: 1 HP` (no stat changes), a nickname in
 parentheses lost them, and 7 teams that break today's rules (Quick Claw,
 Soundproof, the Baton Pass clauses) were removed. 320 teams.
