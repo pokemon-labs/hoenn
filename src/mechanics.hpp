@@ -5600,11 +5600,10 @@ constexpr void baton_pass(Battle& battle, Player player, MoveState& m,
 // nosleeptalk and charge flags, which are the decomp's list
 // (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
 // IsTwoTurnsMove) except that Showdown's gen3 Bide drops its flags
-// (data/mods/gen3/moves.ts) and Showdown adds Nature Power (its gen3 keeps
-// the base flags, data/moves.ts:12607).
+// (data/mods/gen3/moves.ts). Nature Power is allowed: gen4's flags
+// (data/mods/gen4/moves.ts:980), which gen3 inherits, drop nosleeptalk.
 constexpr bool sleep_talk_banned(Move move) {
   if (move == Move::Bide) return false;
-  if (move == Move::NaturePower) return true;
   return get(move).extra & Extra::NoSleepTalk;
 }
 

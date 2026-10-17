@@ -258,7 +258,7 @@ is the same and only the messages differ.
 | Sleep Talk's pick | skips disabled, taunted... moves; calls 0-PP moves | uniform over allowed slots; fails on 0 PP |
 | Brick Break into an immune target | breaks the screens | breaks none (its onTryHit is in moveHit) |
 | Present's heal on a Rage user | no boost (MOVEEND_RAGE needs damage) | raises its Attack (the Hit event) |
-| Sleep Talk's list | allows Nature Power; Counter and Mirror Coat work | bans Nature Power; Counter and Mirror Coat fail silently (no `beforeTurnCallback`) |
+| Sleep Talk's Counter and Mirror Coat | work | fail silently (no `beforeTurnCallback`) |
 | Statuses from contact abilities | ignore Safeguard | Safeguard blocks them |
 | Status berries at move end | only the first Pokémon | both |
 | Protect's chance after 4 uses | indexes past its 4-entry table (bsc:6514) | stays at 1/8 |
