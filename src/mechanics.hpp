@@ -2929,6 +2929,16 @@ constexpr bool can_status(const Battle& battle, Player target, Secondary s) {
   }
 }
 
+// Showdown's gen3 focuspunch volatile, from the start of a turn p chose
+// Focus Punch (beforeTurnCallback) to its residuals: its onTryAddVolatile
+// stops a flinch (data/moves.ts focuspunch condition), so Fake Out only
+// breaks the focus. The decomp sets the flinch, and the flinch stops Focus
+// Punch first.
+constexpr bool focusing(const Battle& battle, Player p) {
+  const Request& r = battle.request;
+  return r.choice[index(p)].type() == Choice::Move && r.move[index(p)] == Move::FocusPunch;
+}
+
 // Whether a move's major status `s` takes hold on p's foe: Safeguard, then
 // can_status, then Sleep Clause for a sleep.
 constexpr bool status_takes(const Battle& battle, Player player, Secondary s) {
@@ -3093,7 +3103,7 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   case Secondary::Flinch:
     // Set only if the target hasn't moved yet this turn (bsc:2685).
     matters = m.first && !t.volatiles.flinched &&
-              t.ability != Ability::InnerFocus;
+              t.ability != Ability::InnerFocus && !focusing(battle, foe(player));
     break;
   case Secondary::TriAttack:
     // Any status at all stops it before the 1/3 draw; Safeguard and the
@@ -3637,7 +3647,8 @@ constexpr void flinch_item(Battle& battle, Player player, const MoveState& m,
   Side& target_side = battle.side(foe(player));
   ActivePokemon& t = target_side.active;
   if (target_side.get(1).fainted() || !m.first || t.volatiles.flinched ||
-      t.ability == Ability::ShieldDust || t.ability == Ability::InnerFocus) {
+      t.ability == Ability::ShieldDust || t.ability == Ability::InnerFocus ||
+      focusing(battle, foe(player))) {
     return;
   }
   const uint32_t chance = item_data(side.get(1).item).param *

@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (46 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (47 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -358,8 +358,8 @@ Rationale:
 - **Truly random at 99.8%, log-only counted** (2026-10-17; set without
   the user, who asked not to be asked that session). Measured: 9665 of
   9675 counted games (99.90%, seed 717882832681552895, engine `05e74fd`),
-  11 failures, 1 log-only: 7 the Truant gap, 2 Fake Out against Focus
-  Punch, 2 since fixed (Known gaps, Implementation step 8). The known
+  11 failures, 1 log-only: 7 the Truant gap, 4 since fixed (2 of them
+  Fake Out against Focus Punch) (Known gaps, Implementation step 8). The known
   gaps, about 9 per 10,000 games, put the bar where OU-legal's is: a
   Poisson(9) count passes it 99.9% of the time. History: the first bar,
   90% on the state alone, was a guess. The log pins the branch where the
@@ -487,11 +487,6 @@ Showdown change closes gets crossed off here.
   at switch-in), which would need a per-party bit to change. 10 of the 16
   state failures of the truly random 10,000-game run (2026-10-17), 7 of
   the 11 of the next.
-
-- **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
-  2026-10-16; 1 and 2 of the truly random runs, 2026-10-17). Showdown runs Focus Punch's lost focus before the flinch:
-  `|move|...|Focus Punch||[still]`, then `|cant|...|Focus Punch|Focus
-  Punch`, and the PP is spent. We stop at the flinch and keep the PP.
 
 - **Encore on a lock Metronome called** (about 30 of 10,000 group 8
   games). Showdown's Encore swaps the locked move for Metronome, runs it
@@ -690,7 +685,10 @@ turn, each measured before its bars are fixed.
    309; MoveState::ran), and a future attack from a Pokémon no longer in
    cleared Mirror Move's last attack (the next turn drops attackedBy
    entries from inactive sources, sim/battle.ts:1707). Bar set to 99.8%
-   with log-only counted (Pass criteria).
+   with log-only counted (Pass criteria). Fake Out against Focus Punch
+   then fixed (2026-10-17): Showdown's focus volatile blocks the flinch
+   from the start of the turn, so Focus Punch loses focus and spends its
+   PP (`focusing`; README shortlist). All three games match.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions

@@ -274,6 +274,7 @@ is the same and only the messages differ.
 | 2-5 hit moves | stop after Endure or Focus Band | keep hitting |
 | Sleep or freeze on a charging Pokémon | cancels the charge at once | charge kept until the move is aborted |
 | Memento | user faints into Protect, Substitute, Fly; fails at -6/-6 | user lives if blocked; faints at -6/-6 |
+| Fake Out against Focus Punch | the flinch stops Focus Punch; no PP | no flinch (focus blocks it); Focus Punch loses focus and spends its PP |
 | Pain Split | the HP change counts as damage | not damage (Counter, Focus Punch) |
 | Thief and Covet | can't take Enigma Berry or Mail | can |
 | Imprison under Pressure | costs extra PP | doesn't |
