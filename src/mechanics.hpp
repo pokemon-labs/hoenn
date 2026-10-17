@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -7690,6 +7691,16 @@ inline constexpr Stage STAGES[] = {
     Stage::Uproar,    Stage::Timers,
 };
 
+// f(std::integral_constant<Stage, s>) for each stage s in order, until one
+// returns the end of the battle.
+template <typename F> constexpr Flow each_stage(F f) {
+  return [&]<std::size_t... I>(std::index_sequence<I...>) {
+    Flow over;
+    (void)((over = f(std::integral_constant<Stage, STAGES[I]>{})) || ...);
+    return over;
+  }(std::make_index_sequence<std::size(STAGES)>{});
+}
+
 // The HP p's handler takes in a damage stage, or 0 if it deals none, before
 // the handler runs: toxic's counter steps before its damage, and Bind's
 // hidden counter ticks first, so a Pokémon freed now or whose binder has gone
@@ -7727,9 +7738,13 @@ constexpr uint32_t stage_damage(const Battle& battle, Player player, Stage stage
 // WasUnableToUseMove (README decision 2). Uproar is its own stage, so that
 // on a Speed tie it ends before either Pokémon's Yawn; the Thrash family's
 // lock runs out after Perish Song (lock_residuals).
+//
+// Always inlined, and called through each_stage with a constant stage: the
+// switch folds away and most stages reduce to their first check. As a call,
+// its entry, exit and dispatch cost more than the stages' work.
 template <typename O>
-constexpr Flow battler_stage(Battle& battle, Player player, Stage stage,
-                             O& options) {
+[[gnu::always_inline]] constexpr Flow battler_stage(Battle& battle, Player player,
+                                                    Stage stage, O& options) {
   Side& side = battle.side(player);
   ActivePokemon& a = side.active;
   Volatiles& v = a.volatiles;
@@ -8079,9 +8094,10 @@ constexpr bool stage_order_matters(const Battle& battle, Stage stage,
 template <typename O>
 constexpr Flow battler_pass(Battle& battle, Player first, O& options) {
   for (const Player p : {first, foe(first)}) {
-    for (const Stage stage : STAGES) {
-      if (Flow over = battler_stage(battle, p, stage, options)) return over;
-    }
+    const Flow over = each_stage([&](auto s) {
+      return battler_stage(battle, p, decltype(s)::value, options);
+    });
+    if (over) return over;
   }
   return std::nullopt;
 }
@@ -8388,15 +8404,18 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   if (s1 != s2) {
     if (Flow over = battler_pass(battle, faster, options)) return over;
   } else {
-    for (const Stage stage : STAGES) {
+    const Flow over = each_stage([&](auto s) -> Flow {
+      constexpr Stage stage = decltype(s)::value;
       const Player first =
           stage_order_matters(battle, stage, options)
               ? rolls::residual_tie(battle, stage == Stage::LeechSeed, options)
               : coin();
       for (const Player p : {first, foe(first)}) {
-        if (Flow over = battler_stage(battle, p, stage, options)) return over;
+        if (Flow f = battler_stage(battle, p, stage, options)) return f;
       }
-    }
+      return std::nullopt;
+    });
+    if (over) return over;
   }
   // The future attacks, by the Speed of the Pokémon each lands on: a coin
   // on a tie if both land this turn (always recorded; either could end the
