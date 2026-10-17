@@ -7302,9 +7302,9 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
     protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
   }
   // Spit Up's onAfterMove (Showdown's runMove, sim/battle-actions.ts:311):
-  // once the move ran, hit or not, the layers go. Not after Sleep Talk's
-  // call, which runs no AfterMove of the called move.
-  if (m.obeys && m.chosen == m.move && get(m.move).effect == Effect::SpitUp) {
+  // once the move ran, hit or not, the layers go. A called Spit Up too: the
+  // AfterMove is the last called move's (`activeMove`, as Charge's above).
+  if (m.obeys && get(ran).effect == Effect::SpitUp) {
     stockpile_end(battle, player, options);
   }
   assert(!(m.drag && m.pass));
