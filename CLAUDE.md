@@ -313,8 +313,11 @@ passed its 10,000-game run (2026-10-17, chance clean, 99.83% on the
 state). Its failures were diagnosed and fixed or filed as known gaps; a
 second run at 05e74fd matched 99.90% with the log counted, and its bar is
 now 99.8% (TESTING.md, "Implementation" step 8, "Known engine gaps").
-Random OU-legal rerun at 6d50b7f: 99.91%; its 9 failures are all
-diagnosed, 3 of them fixed since (TESTING.md, step 8's last paragraph).
+All three environments rerun at 619f1e4 (2026-10-17) and pass: OU
+99.96%, OU-legal 99.89%, random 99.92%; 4 fixes since (2ebb4fd). Open
+from that run: a Rollout checker artifact (2 games, needs a decision)
+and OU game 15 (toxic, unconfirmed) (TESTING.md, step 8's last
+paragraph).
 Nothing further is planned. Deferred (2026-10-17; the engine serves
 policy only for now, `RL.md`): `min_ko_roll`, Calc's `Summaries` and the
 search adaptation (`bench` checked for drift 2026-10-16; TESTING.md,

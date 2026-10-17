@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (50 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (54 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -712,6 +712,30 @@ turn, each measured before its bars are fixed.
    Stockpile (runMove's AfterMove is the last called move's); game 440,
    log-only, a pursuer that Rough Skin KOs faints after the target's
    switch line, not before. All three games match.
+
+   All three environments rerun (2026-10-17, engine `619f1e4`): OU
+   9929/9933 (99.96%), random OU-legal 9898/9909 (99.89%), truly random
+   9630/9638 (99.92%); soak and check_chance clean; all pass. The 23
+   failures: 10 the Truant gap; 4 rare branches, matched at 1.3M-2.8M
+   tries (OU 595 and 80, OU-legal 77 and 523); 6 fixed in `2ebb4fd` (one
+   fixture game per fix): Thief's setItem runs White Herb's onStart before
+   the steal lines (OU-legal 257, 444, 498), Showdown's AfterMove (Charge,
+   Spit Up) comes before moveend's item cures (OU-legal 134), a residual
+   tie is a coin on the pre-residual Speeds, not the current ones after a
+   Speed Boost (random 361), Lock-On lets a future attack reach a
+   semi-invulnerable target (random 535). Open, 3:
+   - A checker artifact, 2 games (OU-legal 146, random 575): after a
+     missed first Rollout, Showdown keeps an inert `rollout` volatile
+     (hitCount 0, duration 1, added at onModifyMove) until the residual;
+     the trace has only volatile names, so check_showdown reports it
+     missing at a mid-turn request or a terminal state. Needs a decision:
+     filter it in showdown_traces.cjs (hitCount 0) or in the checker.
+   - OU game 15 (traces14, seed 8588732213306791834): Swampert's toxic
+     damage after a faint replacement, ours 1/16, Showdown 2/16. Probably
+     the toxic-stage gap (Known gaps); not confirmed.
+   Run dirs: `build/runs/{ou-20261017-130000-11790484726086414745,
+   ou_legal-20261017-130920-6875604541531664515,
+   random-20261017-131911-13486077069381815800}`.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions
