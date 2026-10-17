@@ -241,7 +241,9 @@ target `hoenn` (include path `src/`, C++20). `cmake --preset debug`
 - `check_showdown_fixture`: `check_showdown` on `tools/fixtures/showdown.jsonl`,
   one committed game per fixed failure (TESTING.md, "The fixture").
 - Not in ctest: `check_showdown` on fresh traces and the environment runs;
-  see `TESTING.md`.
+  see `TESTING.md`. CI (`.github/workflows/`): `test.yml` gates pushes
+  and PRs (ctest, then the three environments at full scale on the pin);
+  `report.yml` runs them daily against Showdown master.
 
 ```
 CMakeLists.txt, CMakePresets.json

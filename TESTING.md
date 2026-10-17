@@ -375,13 +375,32 @@ Rationale:
   interactions CLAUDE.md's priority 3 says can wait.
 - **The same safety and chance bars everywhere.** A crash or a collision is
   an engine bug whatever produced the team.
-- **Not sized for CI.** At these figures one environment takes about 15
-  minutes on this machine's 16 threads, likely more than GitHub's hosted
-  runners allow. Deliberate: CI comes later.
+- **Full scale in CI too.** At these figures one environment takes about
+  10 minutes on this machine's 16 threads; CI runs it at full scale anyway
+  (see "CI"), since the bars are set for 10,000 games.
 
 ## CI
 
-Not built; where and how often jobs run is deferred.
+Built 2026-10-17, GitHub Actions (`.github/workflows/`), not yet run
+there. The repo is public, so the standard runners (4 vCPUs, 16 GB, 6-hour
+job limit) cost nothing.
+
+- **`test.yml`, gating:** on pushes to main, pull requests and by hand.
+  ctest in both presets, then the three environments in parallel jobs at
+  full scale against the pin, `--jobs 16` so the shards match this
+  machine's. A newer push cancels a running one. Estimated an hour or
+  more per environment on 4 vCPUs; not measured.
+- **`report.yml`, reporting:** the same three environments against
+  Showdown master (`--master`), daily at 09:17 UTC and by hand. GitHub
+  disables a schedule after 60 days without repository activity.
+- Both upload each environment's run directory (the summary, plus traces
+  for failing shards) as an artifact kept 14 days. The compiler is g++-14
+  (Ubuntu 24.04's; both presets build and pass ctest with it locally).
+- **Why full scale:** the bars are rates set for 10,000 games, where the
+  known gaps (about 4-9 per 10,000) pass them 99.9% of the time. At 1,000
+  games, OU's bar allows 1 failure against an expected 0.4, and the other
+  two allow 2 against about 0.9: each would fail about 6% of pushes for
+  nothing.
 
 **Every suite runs without Claude:** one command per environment, a
 nonzero exit on failure, and a summary that says which bar failed. Nothing
@@ -736,7 +755,7 @@ turn, each measured before its bars are fixed.
    Run dirs: `build/runs/{ou-20261017-130000-11790484726086414745,
    ou_legal-20261017-130920-6875604541531664515,
    random-20261017-131911-13486077069381815800}`.
-9. CI, later: a gating workflow, then the reporting one.
+9. CI: the gating and reporting workflows ("CI"), not yet run on GitHub.
 
 ## Decisions
 
@@ -749,6 +768,7 @@ the figures above as the first bars.
 
 Open:
 
-1. **Where the jobs run, and how often** (deferred by the user).
+1. **Where the jobs run, and how often:** GitHub Actions, gating per push,
+   reporting daily (2026-10-17; "CI").
 2. **Re-setting the bars** from measured 10,000-game baselines (OU and
    random OU-legal set 2026-10-16, truly random 2026-10-17).

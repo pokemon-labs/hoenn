@@ -1,0 +1,33 @@
+# The reporting workflow (TESTING.md, "CI"): every environment against
+# Showdown master, daily. A failure marks only this run; it means Showdown
+# changed: bump the pin, cross off a gap it closed, or record a new one.
+name: report
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+env:
+  CXX: g++-14
+
+jobs:
+  env:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [ou, ou_legal, random]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 tools/run_env.py ${{ matrix.env }} --master --jobs 16 --out build/runs/${{ matrix.env }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ matrix.env }}
+          path: build/runs/${{ matrix.env }}
+          retention-days: 14
