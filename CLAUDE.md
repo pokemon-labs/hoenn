@@ -310,10 +310,9 @@ then fixing what it finds; there is no further plan.
 
 **Next** (agreed 2026-10-16). Steps 1-7 are done; step 8 (truly random)
 passed its 10,000-game run (2026-10-17, chance clean, 99.83% on the
-state). All its failures are diagnosed: of 16 on the state, 11 known
-gaps and 5 fixed; of 25 log-only, 24 fixed and 1 the Truant gap. Open is
-re-setting its bar (TESTING.md, "Implementation" step 8, "Known engine
-gaps").
+state). Its failures were diagnosed and fixed or filed as known gaps; a
+second run at 05e74fd matched 99.90% with the log counted, and its bar is
+now 99.8% (TESTING.md, "Implementation" step 8, "Known engine gaps").
 1. `min_ko_roll`, Calc's `Summaries` and the search adaptation
    (`bench` checked for drift 2026-10-16; TESTING.md, "Others").
 `build/runs/classify.py`'s KNOWN list is out of date.

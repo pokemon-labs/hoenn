@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (44 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (46 games, 2026-10-17), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -333,8 +333,8 @@ multi-hit bug past the first hit would hide here, so `soak` and
 |---|---|---|---|
 | `check_showdown` games | 10,000 | 10,000 | 10,000 |
 | try cap | 1M | 1M | 1M |
-| matched | ≥ 99.9% | ≥ 99.8% | ≥ 90% |
-| log-only mismatches | count | count | reported, not counted |
+| matched | ≥ 99.9% | ≥ 99.8% | ≥ 99.8% |
+| log-only mismatches | count | count | count |
 | choice-set mismatches | 0 | 0 | 0 |
 | `soak` (debug) games | 100,000 | 100,000 | 100,000 |
 | `soak` failures | 0 | 0 | 0 |
@@ -355,8 +355,15 @@ Rationale:
   standard deviations under; a Poisson(9) count passes it 99.9% of the
   time. Against the raw 99.85% it would be only about 1.3 below, so the
   bar assumes the 6 stay fixed.
-- **Truly random at 90%, state only.** The log is still compared, since
-  it pins the branch where the state guard can't (Conversion 2's type):
+- **Truly random at 99.8%, log-only counted** (2026-10-17; set without
+  the user, who asked not to be asked that session). Measured: 9665 of
+  9675 counted games (99.90%, seed 717882832681552895, engine `05e74fd`),
+  11 failures, 1 log-only: 7 the Truant gap, 2 Fake Out against Focus
+  Punch, 2 since fixed (Known gaps, Implementation step 8). The known
+  gaps, about 9 per 10,000 games, put the bar where OU-legal's is: a
+  Poisson(9) count passes it 99.9% of the time. History: the first bar,
+  90% on the state alone, was a guess. The log pins the branch where the
+  state guard can't (Conversion 2's type):
   Custom Game is a debug format, so Showdown shows exact HP on every
   public line (`sim/battle.ts:227`), and `check_showdown` formats ours so
   when the trace's tier is Custom Game. A log-only mismatch still ends
@@ -478,10 +485,11 @@ Showdown change closes gets crossed off here.
   carries the value from its last Truant stint and may loaf or act on its
   first turn by that history. We follow the cartridge (the counter cleared
   at switch-in), which would need a per-party bit to change. 10 of the 16
-  state failures of the truly random 10,000-game run (2026-10-17).
+  state failures of the truly random 10,000-game run (2026-10-17), 7 of
+  the 11 of the next.
 
 - **Fake Out against Focus Punch** (2 of the first OU 10,000-game run,
-  2026-10-16). Showdown runs Focus Punch's lost focus before the flinch:
+  2026-10-16; 1 and 2 of the truly random runs, 2026-10-17). Showdown runs Focus Punch's lost focus before the flinch:
   `|move|...|Focus Punch||[still]`, then `|cant|...|Focus Punch|Focus
   Punch`, and the PP is spent. We stop at the flinch and keep the PP.
 
@@ -673,7 +681,16 @@ turn, each measured before its bars are fixed.
    also stopped the move. A second 10% run (seed 6772585141917448290)
    found Liquid Ooze's instafaint on a drain move (the user's faint
    first, as Leech Seed's already was), fixed.
-   The 90% bar is not re-set.
+   10,000-game run at `05e74fd` (seed 717882832681552895): 9665 of 9675
+   (99.90%), 325 multi-hit games left out, 11 unmatched (1 by the log
+   alone), soak 100,000 and check_chance clean. The 11: 7 the Truant gap
+   (one of them log-only), 2 Fake Out against Focus Punch, and 2 fixed:
+   Charge called by Assist was ended by Assist's AfterMove (Showdown's
+   runMove passes the called move, `activeMove`, sim/battle-actions.ts:
+   309; MoveState::ran), and a future attack from a Pokémon no longer in
+   cleared Mirror Move's last attack (the next turn drops attackedBy
+   entries from inactive sources, sim/battle.ts:1707). Bar set to 99.8%
+   with log-only counted (Pass criteria).
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions
@@ -688,4 +705,5 @@ the figures above as the first bars.
 Open:
 
 1. **Where the jobs run, and how often** (deferred by the user).
-2. **Re-setting the bars** from measured 10,000-game baselines.
+2. **Re-setting the bars** from measured 10,000-game baselines (OU and
+   random OU-legal set 2026-10-16, truly random 2026-10-17).

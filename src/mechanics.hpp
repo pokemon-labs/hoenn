@@ -1895,6 +1895,10 @@ struct MoveState {
   // The target fainted under Grudge (faint_target): the used move loses its
   // PP at the end of moveend, Showdown's faintMessages after the move.
   bool grudge;
+  // The last move a call ran (call_move, through nested calls), or None:
+  // Showdown's activeMove after useMove, which AfterMove sees
+  // (sim/battle-actions.ts:309).
+  Move ran;
   // The user's HP before the foe's Destiny Bond took it (faint_target), or
   // 0.
   uint16_t bonded_hp;
@@ -5625,6 +5629,7 @@ constexpr void call_move(Battle& battle, Player player, MoveState& m, Move move,
   execute(battle, player, c, options);
   m.drag = c.drag;
   m.pass = c.pass;
+  m.ran = c.ran != Move::None ? c.ran : c.move;
 }
 
 // BattleScript_EffectSleepTalk (bs1:1311), as Showdown's gen3 Sleep Talk
@@ -7276,10 +7281,13 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   m.pursuing = pursuing;
   const bool charged = a.volatiles.charged_up;
   execute(battle, player, m, options);
-  // Charge's onAfterMove and onMoveAborted (self_volatile); not after
-  // Pursuit on a switching target, which Showdown runs with useMove, nor
-  // for a user that fainted (Showdown prints no -end then; faint() clears it).
-  if (charged && !pursuing && m.move != Move::Charge && !battle.side(player).get(1).fainted()) {
+  // Charge's onAfterMove and onMoveAborted (self_volatile), for any move
+  // but Charge (gen8's condition, which gen3 inherits) or one that called
+  // it; not after Pursuit on a switching target, which Showdown runs with
+  // useMove, nor for a user that fainted (Showdown prints no -end then;
+  // faint() clears it).
+  const Move ran = m.ran != Move::None ? m.ran : m.move;
+  if (charged && !pursuing && ran != Move::Charge && !battle.side(player).get(1).fainted()) {
     a.volatiles.charged_up = false;
     protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
   }
@@ -8101,9 +8109,13 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   const uint32_t d = survive(battle, user, m, stored, rolls::FUTURE, options);
   m.hp_dealt = hp_update(battle, player, d, m, options);
   // Its tryMoveHit records it in attackedBy, and both moves are on Mirror
-  // Move's noMirror list: Mirror Move fails until the next attack.
-  side.active.last_taken_move = Move::None;
-  side.active.last_taken_from = 0;
+  // Move's noMirror list: Mirror Move fails until the next attack. Unless
+  // its user is out: the next turn drops attackedBy entries whose source
+  // isn't active (sim/battle.ts:1707), so the attack before it counts again.
+  if (in) {
+    side.active.last_taken_move = Move::None;
+    side.active.last_taken_from = 0;
+  }
   ActivePokemon& a = side.active;
   if (a.substitute_hp == 0) a.volatiles.substitute = false;
   if (m.damaged) {

@@ -44,8 +44,10 @@ samples = 128
 alpha = 1e-7
 
 # Truly random (TESTING.md, "Generators"): no legality, Showdown's gen3
-# custom game with the engine's two clauses. The match bar is state only and
-# unmeasured; set it from the 10,000-game run.
+# custom game with the engine's two clauses. The match bar is set from the
+# 2026-10-17 run at 05e74fd (99.90%, log-only counted: 10 of its 11
+# failures the Truant gap or Fake Out against Focus Punch, about 9 per
+# 10,000 games, which a 99.80% bar fails about 0.1% of the time).
 [random]
 generate = { mode = "random", teams = 2000 }
 
@@ -53,8 +55,8 @@ generate = { mode = "random", teams = 2000 }
 format = "custom"       # showdown_traces.cjs --format
 games = 10000
 tries = 1000000
-matched = 0.90
-log_only_counts = false # a log-only mismatch is reported, not a failure
+matched = 0.998
+log_only_counts = true
 choices = 0
 
 [random.soak]
