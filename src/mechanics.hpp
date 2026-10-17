@@ -1155,7 +1155,7 @@ constexpr void wake(Battle& battle, Player player, O& options) {
 // Showdown's checks (white_herb). Cured sleep and confusion are public, so
 // their counts reset. Returns whether the item was used.
 template <typename O>
-constexpr bool item_cure(Battle& battle, Player player, O& options) {
+constexpr bool item_cure_held(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
   Pokemon& mon = side.get(1);
   ActivePokemon& a = side.active;
@@ -1251,6 +1251,32 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
   return true;
 }
 
+// The hold effects item_cure_held acts on.
+constexpr bool cure_item(HoldEffect effect) {
+  switch (effect) {
+  case HoldEffect::CurePar:
+  case HoldEffect::CurePsn:
+  case HoldEffect::CureBrn:
+  case HoldEffect::CureFrz:
+  case HoldEffect::CureSlp:
+  case HoldEffect::CureConfusion:
+  case HoldEffect::CureStatus:
+  case HoldEffect::RestorePp:
+  case HoldEffect::CureAttract:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The check inline, the cure out of line: nearly every call finds no
+// curing item.
+template <typename O>
+[[gnu::always_inline]] constexpr bool item_cure(Battle& battle, Player player, O& options) {
+  return cure_item(item_data(battle.side(player).get(1).item).effect) &&
+         item_cure_held(battle, player, options);
+}
+
 // White Herb (HOLD_EFFECT_RESTORE_STATS): every lowered stage back to 0.
 // The decomp checks it with the other cures (item_cure) and at switch-in;
 // Showdown's has no onUpdate, only onStart (at switch-in, or when Trick
@@ -1258,9 +1284,9 @@ constexpr bool item_cure(Battle& battle, Player player, O& options) {
 // (data/items.ts:7679), and this follows it. Log: EndItem, then
 // -clearnegativeboost (its onUse).
 template <typename O>
-constexpr void white_herb(Battle& battle, Player player, O& options) {
+constexpr void white_herb_held(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
-  if (!holds(side, HoldEffect::RestoreStats) || side.get(1).fainted()) return;
+  if (side.get(1).fainted()) return;
   bool lowered = false;
   const auto reset = [&](int8_t& b) {
     if (b < 0) {
@@ -1274,6 +1300,12 @@ constexpr void white_herb(Battle& battle, Player player, O& options) {
   if (!lowered) return;
   use_item(battle, player, options);
   protocol::clear_negative_boost(options.log, protocol::ident(battle, player));
+}
+
+// The check inline, the rest out of line: few Pokémon hold White Herb.
+template <typename O>
+[[gnu::always_inline]] constexpr void white_herb(Battle& battle, Player player, O& options) {
+  if (holds(battle.side(player), HoldEffect::RestoreStats)) white_herb_held(battle, player, options);
 }
 
 // Both White Herbs, by Speed (an onAny handler on each holder): the order
@@ -1426,7 +1458,34 @@ constexpr void intimidate(Battle& battle, Player player, O& options) {
   lower_stats(battle, target, 1, 1, options.log);
 }
 
-template <typename O> constexpr void ability_immunity(Battle& battle, O& options);
+// The abilities ability_immunity acts on.
+constexpr bool immunity_ability(Ability ability) {
+  switch (ability) {
+  case Ability::Immunity:
+  case Ability::OwnTempo:
+  case Ability::Limber:
+  case Ability::Insomnia:
+  case Ability::VitalSpirit:
+  case Ability::WaterVeil:
+  case Ability::MagmaArmor:
+  case Ability::Oblivious:
+    return true;
+  default:
+    return false;
+  }
+}
+
+template <typename O> constexpr void ability_immunity_held(Battle& battle, O& options);
+
+// The check inline, the cure out of line: nearly every call finds neither
+// ability.
+template <typename O>
+[[gnu::always_inline]] constexpr void ability_immunity(Battle& battle, O& options) {
+  if (immunity_ability(battle.sides[0].active.ability) ||
+      immunity_ability(battle.sides[1].active.ability)) {
+    ability_immunity_held(battle, options);
+  }
+}
 
 // ABILITYEFFECT_ON_SWITCHIN (util:2470) with Intimidate and Trace:
 // - Drizzle, Drought and Sand Stream set their weather with no timer, unless
@@ -3577,7 +3636,7 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
 // changes, so it covers both Pokémon: an ability cures the status it
 // prevents (one gained before the ability, by Baton Pass, Trace or Skill
 // Swap). Cured sleep and confusion are public, so their counts reset.
-template <typename O> constexpr void ability_immunity(Battle& battle, O& options) {
+template <typename O> constexpr void ability_immunity_held(Battle& battle, O& options) {
   for (const Player p : {Player::P1, Player::P2}) {
     Side& side = battle.side(p);
     Pokemon& mon = side.get(1);
