@@ -159,7 +159,15 @@ void print_diff(const Value& a, const Value& b) {
   if (!(a.durations == b.durations)) std::printf(" durations");
   if (a.battle.turn != b.battle.turn) std::printf(" turn");
   if (!(a.battle.field == b.battle.field)) std::printf(" field");
-  if (!(a.battle.request == b.battle.request)) std::printf(" request");
+  if (!(a.battle.request == b.battle.request)) {
+    std::printf(" request(bytes");
+    const auto* xr = reinterpret_cast<const unsigned char*>(&a.battle.request);
+    const auto* yr = reinterpret_cast<const unsigned char*>(&b.battle.request);
+    for (size_t i = 0; i < sizeof(Request); i++) {
+      if (xr[i] != yr[i]) std::printf(" %zu:%u/%u", i, xr[i], yr[i]);
+    }
+    std::printf(")");
+  }
   for (int s = 0; s < 2; s++) {
     const Side& x = a.battle.sides[s];
     const Side& y = b.battle.sides[s];
@@ -415,6 +423,12 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
                     unsigned(c1[i].bits), unsigned(c2[j].bits), seen.size(),
                     total, fresh, samples);
         print_state(battle, durations);
+        if (std::getenv("HOENN_DUMP_KEYS")) {
+          for (const auto& [key, e] : seen) {
+            std::printf("  p %.6g free %u", e.value.probability, e.free);
+            print_key(key);
+          }
+        }
         stats.mass++;
         ok = false;
       }

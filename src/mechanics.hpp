@@ -1798,7 +1798,8 @@ enum class Secondary : uint8_t {
 struct Turn {
   bool protect[2]; // ProtectStruct.protected: Protect or Detect worked
   bool endure[2];  // ProtectStruct.endured: Endure worked
-  // A damaging move hit the Pokémon itself, not its Substitute (Showdown's
+  // A damaging move (or Present's heal) hit the Pokémon itself, not its
+  // Substitute (Showdown's
   // focuspunch lostFocus; the decomp's physicalDmg || specialDmg, which
   // also needs HP lost). Focus Punch reads it.
   bool hit[2];
@@ -4255,6 +4256,9 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
         target.hp = uint16_t(std::min<uint32_t>(target.stats.hp,
                                                 target.hp + target.stats.hp / 4u));
         protocol::heal(options.log, id, target);
+        // The same Hit event breaks a Focus Punch's focus (lostFocus, any
+        // non-Status move); Counter's damage stays 0.
+        if (m.turn != nullptr) m.turn->hit[index(defender)] = true;
         if (foe_side.active.volatiles.rage) rage_boost(battle, defender, options);
       }
       return moveend(battle, player, m, options);
@@ -7872,16 +7876,41 @@ constexpr bool same_state(const Battle& x, const Flow& fx, const Battle& y,
   return x.sides[0] == y.sides[0] && x.sides[1] == y.sides[1];
 }
 
-constexpr bool stage_order_matters(const Battle& battle, Stage stage) {
-  if (stage < Stage::LeechSeed || stage > Stage::Bind) return false;
-  Options<protocol::NullLog, NullChance, NullCalc> null{};
+// Whether `run(battle, options, first)` with P1 first and with P2 first, on
+// copies, gives different states, or (with Chance) records different draws:
+// an order that ends the battle the same way can still skip a draw the
+// other records (a bind tick after the last Pokémon faints), and an
+// unrecorded coin there would leave two keys covering one branch.
+template <typename O, typename F>
+constexpr bool orders_differ(const Battle& battle, const O& options, F run) {
+  using C = std::conditional_t<detail::CHANCE<O>,
+                               typename std::remove_cvref_t<O>::ChanceType,
+                               NullChance>;
+  Options<protocol::NullLog, C, NullCalc> ox{}, oy{};
+  if constexpr (detail::CHANCE<O>) {
+    ox.chance = options.chance;
+    oy.chance = options.chance;
+  }
   Battle x = battle;
   Battle y = battle;
-  Flow fx = battler_stage(x, Player::P1, stage, null);
-  if (!fx) fx = battler_stage(x, Player::P2, stage, null);
-  Flow fy = battler_stage(y, Player::P2, stage, null);
-  if (!fy) fy = battler_stage(y, Player::P1, stage, null);
-  return !same_state(x, fx, y, fy);
+  const Flow fx = run(x, ox, Player::P1);
+  const Flow fy = run(y, oy, Player::P2);
+  if (!same_state(x, fx, y, fy)) return true;
+  if constexpr (detail::CHANCE<O>) {
+    return !(ox.chance.actions == oy.chance.actions);
+  }
+  return false;
+}
+
+template <typename O>
+constexpr bool stage_order_matters(const Battle& battle, Stage stage,
+                                   const O& options) {
+  if (stage < Stage::LeechSeed || stage > Stage::Bind) return false;
+  return orders_differ(battle, options, [stage](Battle& b, auto& o, Player p) {
+    Flow f = battler_stage(b, p, stage, o);
+    if (!f) f = battler_stage(b, foe(p), stage, o);
+    return f;
+  });
 }
 
 // The per-Pokémon residuals with unequal Speeds: every stage of `first`'s,
@@ -7916,22 +7945,18 @@ constexpr void residual_quick_claw(Battle& battle, uint32_t& s1, uint32_t& s2,
   const uint32_t t2 = q2 ? UINT32_MAX : s2;
   const auto cmp = [](uint32_t x, uint32_t y) { return (x > y) - (x < y); };
   if (cmp(s1, s2) == cmp(t1, t2)) return;
-  Optional& drawn = battle.request.quick_claw;
+  Optional drawn = battle.request.quick_claw;
   if (drawn == Optional::None) {
     bool matters = s1 == s2 || t1 == t2;
     if (!matters) {
-      Options<protocol::NullLog, NullChance, NullCalc> null{};
-      Battle x = battle;
-      Battle y = battle;
-      const Flow fx = battler_pass(x, Player::P1, null);
-      const Flow fy = battler_pass(y, Player::P2, null);
-      matters = !same_state(x, fx, y, fy);
+      matters = orders_differ(battle, options, [](Battle& b, auto& o, Player p) {
+        return battler_pass(b, p, o);
+      });
     }
-    if (matters) {
-      rolls::quick_claw(battle, options);
-    } else {
-      drawn = optional(battle.rng.chance(1, 5));
-    }
+    // An unrecorded draw stays out of the request, which a residual
+    // faint's request keeps past the update (replacement_order).
+    drawn = matters ? optional(rolls::quick_claw(battle, options))
+                    : optional(battle.rng.chance(1, 5));
   }
   if (drawn == Optional::True) {
     s1 = t1;
@@ -8175,7 +8200,7 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   } else {
     for (const Stage stage : STAGES) {
       const Player first =
-          stage_order_matters(battle, stage)
+          stage_order_matters(battle, stage, options)
               ? rolls::residual_tie(battle, stage == Stage::LeechSeed, options)
               : log_order(battle);
       for (const Player p : {first, foe(first)}) {

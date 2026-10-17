@@ -469,23 +469,17 @@ suite for everything a forced one covers.
 Where we differ from Showdown and haven't fixed it. A gap that a
 Showdown change closes gets crossed off here.
 
-- **Chance-key failures with truly random teams** (undiagnosed;
-  `run_env.py random --scale 0.1 --seed 13342887709897526592`,
-  2026-10-16). Four collisions, each differing only in `request` and each
-  with a switch among the two choices (check_chance games
-  17499747864150418390, 14109578614094302193, 14117078418065394890,
-  5737730489583551945), and one key set whose probabilities sum to 1.53
-  (17016063291978671705, a Raticate mirror with Sand Tomb and Super Fang).
-  Replay with `build/release/check_chance --samples 128 --replay GAME
-  build/runs/random-…/teams.txt` from that run's directory; the run seed
-  regenerates the same teams. A bug by the bars (zero everywhere), and
-  not reached by the OU environments. Suspected, unverified: speed ties,
-  common at random levels. A tie or Quick Claw roll left out of Actions
-  because a switch makes the order irrelevant may still be stored in
-  `Request.first` or `quick_claw`, which outlive the turn; and the sum
-  failure may be "does the order matter" answered differently across
-  branches (Icy Wind changing a tie mid-turn). First check: print both
-  branches' Request and the actives' Speed.
+- **Weather damage order with Quick Claw** (log only; 20 of the
+  2026-10-17 truly random run's 25 log-only failures, likely most of
+  them). Showdown sorts the weather's eachEvent by `pokemon.speed`, which
+  `updateSpeed` sets before the residuals with the turn's Quick Claw roll
+  (`sim/battle.ts:2818`); we order the weather by plain Speed and draw no
+  roll for it. Fixing it means one roll shared by the weather's order
+  (unrecorded) and the residual order (recorded when it matters).
+- **Other log-only mismatches, truly random** (2026-10-17, one or two
+  each, undiagnosed): Shell Bell's heal against the attacker's faint,
+  Wonder Guard's `-immune` without `[from]`, Bide's `-end` against a
+  faint, Truant's `cant` against paralysis.
 
 - **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
   OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
@@ -648,10 +642,24 @@ turn, each measured before its bars are fixed.
    state (99.69%), 47 multi-hit games left out, 40 unmatched (37 by the
    log alone, at least some the `Other` items' names; unclassified), 0
    choice-set mismatches; soak 10,000 clean; check_chance 4 collisions and
-   1 sum failure (Known gaps). Paused there by the user (2026-10-16): no
-   10,000-game run, the 90% bar not re-set. Open: give `Other` items an
-   identity in the engine, or let check_showdown continue past a log-only
-   mismatch in a state-only environment.
+   1 sum failure. Paused there by the user (2026-10-16). Fixed
+   (2026-10-17): the chance failures (an unrecorded residual Quick Claw
+   draw kept in the request past the update; an unrecorded tie coin
+   whose two orders ended the battle alike but recorded different draws,
+   so `orders_differ` now compares the recorded Actions too), Focus Punch
+   against Present's heal (the heal's Hit event breaks focus), and two
+   checker errors: Castform's forme read from a non-Forecast Castform's
+   type, and the `Other` and `Mail` items' empty names in the log, which
+   now match any Showdown item the engine takes as the same (the
+   state's rule). The same seed then matches 950 of 953 with 2 log-only
+   (the weather order, Known gaps). 10,000-game run (seed
+   7867203914769733344, engine `1cf48b7` plus the chance fixes only):
+   9626 of 9642 on the state (99.83%), 358 multi-hit games left out, 0
+   choice-set mismatches; soak 100,000 and check_chance clean. Its 370
+   failures replayed with every fix: 329 match, 25 by the log alone
+   (Known gaps), 16 on the state, unclassified (mostly a PP one off,
+   Truant-like; some HP, Torment, Rage, Perish Song, a future attack).
+   The 90% bar is not re-set.
 9. CI, later: a gating workflow, then the reporting one.
 
 ## Decisions

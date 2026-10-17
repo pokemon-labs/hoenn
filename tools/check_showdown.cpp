@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -176,8 +177,54 @@ std::string show(const Unit& u) {
 // is blanked on both.
 constexpr bool MOVE_ATTRIBUTES = true;
 
-// The move lines of two units, normalized as MOVE_ATTRIBUTES says.
+Item item_of(std::string_view id);
+
+// Showdown's toID: lowercase letters and digits.
+std::string to_id(std::string_view name) {
+  std::string id;
+  for (const char c : name) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      id += char(std::tolower(static_cast<unsigned char>(c)));
+    }
+  }
+  return id;
+}
+
+// Field `n` of a protocol line ("|-item|p2a: X|Name|..." has the item at 3),
+// as [start, end), or npos if it has fewer fields.
+std::pair<size_t, size_t> field(const std::string& line, int n) {
+  size_t at = 0;
+  for (int i = 0; i < n; i++) {
+    at = line.find('|', at);
+    if (at == std::string::npos) return {at, at};
+    at++;
+  }
+  const size_t end = line.find('|', at);
+  return {at, end == std::string::npos ? line.size() : end};
+}
+
+// The engine's items without an effect are one Other (and one Mail), which
+// the log can't name: our -item and -enditem lines leave the name empty.
+// Those match any Showdown item the engine takes as the same, as the state
+// compares items (item_of).
+void normalize_items(Unit& a, const Unit& b) {
+  if (a.size() != b.size()) return;
+  for (size_t i = 0; i < a.size(); i++) {
+    const std::string k = kind(a[i]);
+    if ((k != "-item" && k != "-enditem") || kind(b[i]) != k) continue;
+    const auto [x0, x1] = field(a[i], 3);
+    const auto [y0, y1] = field(b[i], 3);
+    if (x0 == std::string::npos || y0 == std::string::npos || x1 != x0) continue;
+    const Item theirs = item_of(to_id(std::string_view(b[i]).substr(y0, y1 - y0)));
+    if (theirs != Item::Other && theirs != Item::Mail) continue;
+    a[i].insert(x0, b[i], y0, y1 - y0);
+  }
+}
+
+// The move lines of two units, normalized as MOVE_ATTRIBUTES says, and the
+// unnamed items (normalize_items).
 void normalize(Unit& a, Unit& b) {
+  normalize_items(a, b);
   if (MOVE_ATTRIBUTES || a.size() != 1 || b.size() != 1 || kind(a[0]) != "move" ||
       kind(b[0]) != "move") {
     return;
@@ -572,10 +619,12 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
                ": item " + std::string(item_id(p.item)) + ", Showdown " +
                m[5].string + ";";
       }
-      // Castform's forme is our active type (Forecast, mechanics.hpp).
+      // Castform's forme is our active type (Forecast, mechanics.hpp); with
+      // another ability, its type (Color Change's) says nothing of it.
       std::string sd_id = m[0].string;
       if (sd_id.starts_with("castform")) {
-        if (slot == 1 && !p.fainted()) {
+        if (slot == 1 && !p.fainted() &&
+            battle.sides[s].active.ability == Ability::Forecast) {
           const Type t = battle.sides[s].active.types[0];
           const char* forme = t == Type::Fire    ? "castformsunny"
                               : t == Type::Water ? "castformrainy"
