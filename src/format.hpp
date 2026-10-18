@@ -32,7 +32,7 @@ using protocol::ArgType;
 
 // What the log needs and Battle doesn't hold: the players' names and each
 // Pokémon's nickname and shininess, by party position (ID::position() - 1).
-// helpers::Pokemon has them.
+// The driver fills them; helpers::Pokemon doesn't hold them.
 struct Names {
   std::array<std::string, 2> player = {"p1", "p2"};
   std::array<std::array<std::string, 6>, 2> nickname;
