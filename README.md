@@ -209,6 +209,16 @@ Working examples: `tools/soak.cpp` (random play with Chance),
 `tools/bench.cpp` (null and log-on options), `tools/check_showdown.cpp` (log
 and formatter against Showdown).
 
+`examples/rollout.cpp` plays random games with the log on, prints them as
+Showdown text and checks the log against the state. It isn't a CMake
+target; from the repo root:
+
+```sh
+g++ -std=c++20 -O2 -Isrc examples/rollout.cpp -o rollout && ./rollout 100 1 1
+```
+
+Its arguments are `[games [seed [show [replay_every [team files...]]]]]`.
+
 ## Building the tests
 
 CMake, for tests and tools only; the library is the `INTERFACE` target
