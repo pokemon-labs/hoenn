@@ -1,4 +1,4 @@
-# The pass criteria per environment (TESTING.md, "Pass criteria"), read by
+# The pass criteria per environment (docs/TESTING.md, "Pass criteria"), read by
 # tools/run_env.py. Tightening a bar is a one-line diff here.
 #
 # Safety and chance bars are the same everywhere (zero failures); only the
@@ -28,7 +28,7 @@ games = 1000
 samples = 128
 alpha = 1e-7            # every calibration bin's tail chance at least this
 
-# Random OU-legal (TESTING.md, "Generators"). The match bar is set from the
+# Random OU-legal (docs/TESTING.md, "Generators"). The match bar is set from the
 # 2026-10-16 rerun (99.85%; 9 of its 15 failures the Truant gap, about 9 per
 # 10,000 games, which a 99.80% bar fails about 0.1% of the time).
 [ou_legal]
@@ -49,7 +49,7 @@ games = 1000
 samples = 128
 alpha = 1e-7
 
-# Truly random (TESTING.md, "Generators"): no legality, Showdown's gen3
+# Truly random (docs/TESTING.md, "Generators"): no legality, Showdown's gen3
 # custom game with the engine's two clauses. The match bar is set from the
 # 2026-10-17 run at 05e74fd (99.90%, log-only counted: 10 of its 11
 # failures the Truant gap or Fake Out against Focus Punch, about 9 per

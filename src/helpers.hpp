@@ -30,7 +30,7 @@ namespace hoenn::helpers {
 //
 // `ivs` and `evs` are in Stats order: HP, Atk, Def, Spe, SpA, SpD.
 //
-// Only the engine's bounds are checked, not legality (TESTING.md, "Truly
+// Only the engine's bounds are checked, not legality (docs/TESTING.md, "Truly
 // random"): any ability, any gender, EVs 0-255 with no total. `ability` has
 // no usable default. `hp` defaults to full; `hp` and `status` are for
 // scenario tests.

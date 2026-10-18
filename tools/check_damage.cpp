@@ -64,7 +64,7 @@ Status status(std::string_view s) {
   return Status::none();
 }
 
-// What switch-in copies (README decision 4).
+// What switch-in copies (ENGINE.md decision 4).
 void switch_in(Side& side) {
   const Pokemon& p = side.get(1);
   ActivePokemon& a = side.active;

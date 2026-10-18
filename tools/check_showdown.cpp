@@ -1,4 +1,4 @@
-// The realizability test (TESTING.md): replays Showdown games
+// The realizability test (docs/TESTING.md): replays Showdown games
 // from tools/showdown_traces.cjs and checks that some branch of ours
 // produces each step.
 //
@@ -18,12 +18,12 @@
 // volatiles in VOLATILES, each side's Spikes and screens, the weather, and a replacement request comes before or after
 // the residuals as Showdown's (its |upkeep). Without the log, state the guard leaves out can drift: a
 // failure can come from an earlier step that matched the wrong branch. The log comparison replaces the guard as the messages are
-// written (TESTING.md). A game stops at its first failure, since
+// written (docs/TESTING.md). A game stops at its first failure, since
 // we can't stay in step with Showdown after it.
 //
 // The log: our binary log through format.hpp against the step's raw
 // Showdown lines, |split| triplets included, after dropping what
-// Showdown's FILTER drops. Messages are written in groups (README,
+// Showdown's FILTER drops. Messages are written in groups (ENGINE.md,
 // "Protocol"), so only the message types in LOGGED are compared, on both
 // sides; --no-log turns the comparison off.
 //
@@ -91,7 +91,7 @@ void force_metronome(const json::Value& log, Calc& calc) {
 // Whether Showdown's log of a step uses a multi-hit move, called ones
 // (Metronome, Sleep Talk, Mirror Move, Assist) included: each gets its own
 // |move| line. A game whose first failure is such a step leaves the count
-// (TESTING.md, "Pass criteria"): its rolls and crits are too many for the
+// (docs/TESTING.md, "Pass criteria"): its rolls and crits are too many for the
 // random search.
 bool multi_hit(const json::Value& log) {
   for (const json::Value& l : log.array) {
@@ -125,7 +125,7 @@ std::string kind(const std::string& line) {
 }
 
 // The message types written so far, compared on both sides: group 1, the
-// frame, group 2, the hit results, groups 3 to 5 (src/README.md, "Protocol").
+// frame, group 2, the hit results, groups 3 to 5 (docs/ENGINE.md, "Protocol").
 const std::set<std::string> LOGGED = {
     "move", "switch", "drag", "cant", "faint", "turn", "win", "tie",
     "-damage", "-heal", "-fail", "-miss", "-immune", "-activate",

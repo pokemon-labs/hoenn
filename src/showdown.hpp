@@ -322,7 +322,7 @@ struct Team {
 };
 
 // One team: sets separated by blank lines, 1-6 of them. No legality checks,
-// not even Species Clause (TESTING.md, "Truly random").
+// not even Species Clause (docs/TESTING.md, "Truly random").
 inline Parsed<Team> parse_team(std::string_view text, RNG& rng) {
   using namespace detail;
   Team team;

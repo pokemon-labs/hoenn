@@ -717,7 +717,7 @@ turn, each measured before its bars are fixed.
    with log-only counted (Pass criteria). Fake Out against Focus Punch
    then fixed (2026-10-17): Showdown's focus volatile blocks the flinch
    from the start of the turn, so Focus Punch loses focus and spends its
-   PP (`focusing`; README shortlist). All three games match.
+   PP (`focusing`; ENGINE.md shortlist). All three games match.
 
    Random OU-legal rerun (2026-10-17, engine `6d50b7f`, seed
    13371653129572777382): 9914 of 9923 (99.91%), 77 multi-hit games left
@@ -726,7 +726,7 @@ turn, each measured before its bars are fixed.
    (game 13, Known gaps), 1 a rare branch (game 237 matches at 1,035,635
    tries, just over the cap), and 3 more, all fixed (2026-10-17, one
    fixture game each): game 233, Sleep Talk can call Nature Power (gen4's
-   flags, which gen3 inherits, drop nosleeptalk; the README had cited the
+   flags, which gen3 inherits, drop nosleeptalk; ENGINE.md had cited the
    base flags); game 610, log-only, a Spit Up that Metronome calls ends
    Stockpile (runMove's AfterMove is the last called move's); game 440,
    log-only, a pursuer that Rough Skin KOs faints after the target's

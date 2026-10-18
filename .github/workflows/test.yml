@@ -1,4 +1,4 @@
-# The gating workflow (TESTING.md, "CI"): ctest in both presets, then every
+# The gating workflow (docs/TESTING.md, "CI"): ctest in both presets, then every
 # environment at full scale against the pinned Showdown. The bars are set for
 # 10,000-game runs, so a scaled-down run would fail on the known gaps' noise.
 name: test

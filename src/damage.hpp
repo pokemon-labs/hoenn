@@ -2,7 +2,7 @@
 // stage through the damage roll.
 //
 // It follows Pokémon Showdown 0.11.11's gen3 arithmetic, not the decomp's
-// (decided 2026-10-07; src/README.md, "Damage", has the decomp trace and
+// (decided 2026-10-07; docs/ENGINE.md, "Damage", has the decomp trace and
 // every place the two differ). Showdown applies stat stages first, then
 // chains each event's modifiers into one 4096ths fixed-point multiplier
 // rounded once, where the decomp floors after every step. Paths:

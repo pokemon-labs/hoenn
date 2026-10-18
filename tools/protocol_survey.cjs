@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Surveys the protocol messages Pokémon Showdown writes in gen3 singles, for
-// the opcode inventory in src/README.md, "Protocol". Two modes:
+// the opcode inventory in docs/ENGINE.md, "Protocol". Two modes:
 //
 //   node tools/protocol_survey.cjs static [path/to/pokemon-showdown]
 //   node tools/protocol_survey.cjs games FORMAT N [--showdown PATH] [TEAM_FILE...]

@@ -8,7 +8,7 @@
 // everyone else (or exact HP again in a debug format such as Custom Game,
 // Showdown's reportExactHP, sim/battle.ts:227). Each player's view comes from Showdown's own
 // extractChannelMessages, not from here. The formatter writes none of the
-// lines Showdown's FILTER drops (README "Protocol"), nor the blank `|`
+// lines Showdown's FILTER drops (ENGINE.md "Protocol"), nor the blank `|`
 // lines between actions.
 
 #pragma once

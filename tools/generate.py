@@ -4,8 +4,12 @@
 Usage: tools/generate.py path/to/pokeemerald
 
 Reads only the decomp's C sources and headers. Output is deterministic, so
-rerunning it on an unchanged decomp is a no-op. See src/README.md for the
+rerunning it on an unchanged decomp is a no-op. See docs/ENGINE.md for the
 places where the generated data deliberately differs from the cartridge.
+
+It parses C with regexes that assume the decomp's formatting (designated-
+initializer blocks start with `{` and a newline; gender ratio reimplements
+PERCENT_FEMALE), so a reformatted decomp could break it silently.
 """
 
 import re
@@ -342,8 +346,7 @@ constexpr Move hidden_power(Type type) {{
 
 # Deoxys's stats depend on the cartridge (pokemon.c GetDeoxysStat). The decomp
 # has Normal (species_info.h) and Emerald's Speed form (sDeoxysBaseStats).
-# Attack and Defense are FireRed/LeafGreen's forms. TODO: check these two against
-# pokefirered.
+# Attack and Defense are FireRed/LeafGreen's forms.
 DEOXYS_FORMS = {
     "DeoxysAttack": (50, 180, 20, 150, 180, 20),
     "DeoxysDefense": (50, 70, 160, 90, 70, 160),
@@ -476,7 +479,7 @@ def gen_items():
     # Cmd_tryswapitems (Trick) and the Thief/Covet steal check refuse it.
     held.append(("Mail", "None", 0))
     held.append(("Other", "None", 0))
-    # Knock Off's sentinel (README decision 8): inert, never gains an item.
+    # Knock Off's sentinel (ENGINE.md decision 8): inert, never gains an item.
     held.append(("KnockedOff", "None", 0))
     assert len(held) < 256
 
@@ -495,7 +498,7 @@ namespace hoenn {{
 // Mail items, which Trick, Thief and Covet can't move (nor the Enigma Berry).
 // Other is any other holdable item without a battle effect (balls, evolution
 // stones and so on). Those only matter to Trick, Knock Off, Thief and Covet.
-// KnockedOff is what Knock Off leaves (src/README.md, decision 8): no
+// KnockedOff is what Knock Off leaves (docs/ENGINE.md, decision 8): no
 // hold effect, and the Pokémon can never gain an item.
 enum class Item : uint8_t {{
   None,

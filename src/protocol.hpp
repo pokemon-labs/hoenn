@@ -1,6 +1,6 @@
 // The gen3 protocol messages, as the Log methods of libpkmn's
 // src/lib/common/protocol.zig: each writes an ArgType, then its fields.
-// format.hpp turns them into Showdown's text; src/README.md,
+// format.hpp turns them into Showdown's text; docs/ENGINE.md,
 // "Protocol", has the decisions and the inventory of Showdown's forms.
 //
 // Every function returns at once for the null log, so search pays nothing.
@@ -206,7 +206,7 @@ enum class Cure : uint8_t {
   Move,        // |[from] move: M, + move: a thawing move
 };
 
-// -activate's effect: the gen3 inventory (README, "Protocol"). Those marked
+// -activate's effect: the gen3 inventory (ENGINE.md, "Protocol"). Those marked
 // + carry more bytes after the effect.
 enum class Activate : uint8_t {
   Protect,         // |Protect

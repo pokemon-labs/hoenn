@@ -2,7 +2,7 @@
 // opcodes (ArgType), the fixed-buffer Writer, the null writer, and the Log
 // that wraps one of them. The gen3 messages and their reasons are in
 // protocol.hpp, the text formatter in format.hpp; the encoding
-// decisions are in src/README.md, "Protocol".
+// decisions are in docs/ENGINE.md, "Protocol".
 //
 // The driver owns the buffer. A Writer only points into it, so it lives in
 // Options, never in Battle (which holds no pointers). Search runs with the

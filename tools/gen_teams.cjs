@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Writes seeded random teams as Showdown export text, for the random test
-// environments (TESTING.md, "Generators").
+// environments (docs/TESTING.md, "Generators").
 //
 //   node tools/gen_teams.cjs --mode ou-legal|random [--teams N] [--seed N]
 //       [--showdown PATH] > teams.txt

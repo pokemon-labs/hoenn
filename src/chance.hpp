@@ -22,6 +22,9 @@ namespace hoenn {
 // N - k >= 1, and the remaining counter is N - k. (Durations stores k + 1;
 // see the struct.)
 //
+// Rejected: storing elapsed durations and re-rolling "wakes this turn?" each
+// turn (less faithful, and pushes probability bookkeeping into the engine).
+//
 // Paths: bsc = src/battle_script_commands.c, util = src/battle_util.c,
 // main = src/battle_main.c.
 //

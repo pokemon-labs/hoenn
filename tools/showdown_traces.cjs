@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Plays seeded gen3 OU games in Pokémon Showdown with random legal choices
-// and writes them as JSONL traces, for the realizability test (TESTING.md,
+// and writes them as JSONL traces, for the realizability test (docs/TESTING.md,
 // "check_showdown"). Showdown picks every choice, so nothing here needs the engine;
 // check_showdown replays the traces against it.
 //
@@ -86,7 +86,7 @@ function parseArgs(argv) {
 }
 
 // gen3customgame without Smogon's clauses, which the engine always applies
-// (src/README.md, "Turn frame").
+// (docs/ENGINE.md, "Turn frame").
 const CUSTOM = 'gen3customgame@@@Sleep Clause Mod,Freeze Clause Mod';
 
 function loadTeams(files, format, Dex, Teams, TeamValidator) {

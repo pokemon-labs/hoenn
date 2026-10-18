@@ -1,4 +1,4 @@
-# The reporting workflow (TESTING.md, "CI"): every environment against
+# The reporting workflow (docs/TESTING.md, "CI"): every environment against
 # Showdown master, daily. A failure marks only this run; it means Showdown
 # changed: bump the pin, cross off a gap it closed, or record a new one.
 name: report

@@ -33,7 +33,7 @@ constexpr uint8_t index(Player p) { return uint8_t(p); }
 // Showdown's gen3 Endure keeps the base data's +4: its gen4 mod lowers
 // Protect and Detect to +3 but not Endure. The decomp has all three at +3,
 // so Endure goes first there only by speed. Visible in the order: this
-// follows Showdown (README shortlist).
+// follows Showdown (ENGINE.md shortlist).
 constexpr int8_t priority(Move move) {
   if (move == Move::Endure) return 4;
   return move == Move::None ? 0 : get(move).priority;
@@ -805,7 +805,7 @@ constexpr Player log_order(Battle& battle) {
 // SetActionsAndBattlersTurnOrder (main:4756): a switch goes before a move;
 // two moves go by GetWhoStrikesFirst; two switches by speed with Quick
 // Claw, as Showdown (decided; the decomp takes them in battler-ID order,
-// see the README).
+// see ENGINE.md).
 template <typename O> constexpr void order(Battle& battle, O& options) {
   Request& r = battle.request;
   const bool s1 = r.choice[0].type() == Choice::Switch;
@@ -900,7 +900,8 @@ constexpr void select(Battle& battle, Player player, Choice choice) {
 // ---------------------------------------------------------------------------
 
 // TurnValuesCleanUp(FALSE) (main:4866), minus the per-turn struct, which
-// isn't in Battle (README decision 2). It runs before turn 1 too (main:3909).
+// isn't in Battle (ENGINE.md decision 2). It runs before turn 1 too
+// (main:3909).
 constexpr void turn_cleanup(Battle& battle) {
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
@@ -1537,7 +1538,7 @@ constexpr void item_switch_in(Battle& battle, Player player, O& options) {
 }
 
 // The Pokémon in SLOT 1 becomes active: Cmd_switchindataupdate (bsc:4621)
-// and SwitchInClearSetData (main:3152), as README decision 4.
+// and SwitchInClearSetData (main:3152), as ENGINE.md decision 4.
 constexpr void enter(Battle& battle, Player player) {
   Side& side = battle.side(player);
   const Pokemon& mon = side.get(1);
@@ -1628,7 +1629,7 @@ constexpr void arrive_both(Battle& battle, bool start, O& options) {
 // a faint replacement, Baton Pass (`baton`) or Roar's drag (`dragged`),
 // before the new Pokémon arrives. Switch-out clears the foe's state that p's Pokémon was the
 // source of (SwitchInClearSetData and FaintClearSetData, main:3158-3199;
-// README decision 9). Baton Pass leaves the foe's escape prevention and its
+// ENGINE.md decision 9). Baton Pass leaves the foe's escape prevention and its
 // Lock-On (main:3158 skips them), and baton_pass_in restores what passes.
 template <typename O>
 constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
@@ -1657,7 +1658,7 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   if (side.active.ability == Ability::CloudNine || side.active.ability == Ability::AirLock) {
     weather_change(battle, options, player);
   }
-  // Showdown's gen3 skippedTime (README, field map): the Sleep Talk and
+  // Showdown's gen3 skippedTime (ENGINE.md, field map): the Sleep Talk and
   // Snore turns go back on the sleep counter, and off the public count.
   if (const uint8_t k = side.active.sleep_skipped; k != 0 && out.status.asleep()) {
     assert(out.status.sleep() + k <= Status::MAX_SLEEP);
@@ -1701,7 +1702,7 @@ constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
   arrive(battle, player, options);
 }
 
-// Baton Pass's switch-in (README decision 5): the passer leaves, the
+// Baton Pass's switch-in (ENGINE.md decision 5): the passer leaves, the
 // recipient enters, gets what passes and arrives (Spikes, its ability and
 // item; switchineffects, bs1:1713). What passes is the decomp's keep-list
 // (Cmd_switchindataupdate, bsc:4646; SwitchInClearSetData, main:3172-3209)
@@ -1865,7 +1866,7 @@ enum class Secondary : uint8_t {
   AllUp,
 };
 
-// The per-turn ProtectStruct (README decision 2): a local of actions(), so
+// The per-turn ProtectStruct (ENGINE.md decision 2): a local of actions(), so
 // it starts empty each turn and on resuming after Baton Pass, reached
 // through MoveState::turn (decided 2026-10-07). The residuals can't reach
 // it. Indexed by player.
@@ -2165,7 +2166,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m,
                   options);
     }
     // Showdown's gen3 skippedTime: Sleep Talk and Snore attempts since
-    // the last asleep turn that did nothing (README, field map).
+    // the last asleep turn that did nothing (ENGINE.md, field map).
     if (woke) {
       wake(battle, player, options);
     } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
@@ -4007,7 +4008,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     return moveend(battle, player, m, options);
   }
   // BattleScript_EffectFakeOut (bs1:2048): only on the user's first turn
-  // out (jumpifnotfirstturn, bsc:6786; README decision 14), else
+  // out (jumpifnotfirstturn, bsc:6786; ENGINE.md decision 14), else
   // FailedFromAtkString; then the plain hit with a certain flinch
   // (secondary()). Showdown counts move actions instead (activeMoveActions
   // > 1, ActivePokemon::move_actions), so a first action that a faint
@@ -4253,7 +4254,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
     protocol::activate_magnitude(options.log, protocol::ident(battle, player), variable);
   }
 
-  // typecalc's immunities first, as Showdown (decided; README "Damage"). A
+  // typecalc's immunities first, as Showdown (decided; ENGINE.md "Damage"). A
   // move with no effect draws no crit, and its accuracy roll changes only
   // the log (try_hit).
   m.result |= matchup(battle, player, h);
@@ -4666,7 +4667,7 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (effect != Effect::Twineedle) secondary(battle, player, m, options);
 
   // Knock Off (bs1:2475, MOVE_EFFECT_KNOCK_OFF, bsc:2858), as Showdown's
-  // gen4 onAfterHit (data/mods/gen4/moves.ts:718; README decision 8): after
+  // gen4 onAfterHit (data/mods/gen4/moves.ts:718; ENGINE.md decision 8): after
   // a hit on the target itself (not its Substitute) with the user still
   // in, its item becomes the inert Item::KnockedOff, unless the target's
   // Sticky Hold keeps it, fainted or not (the gen4 onTakeItem has no HP
@@ -6040,7 +6041,7 @@ constexpr void coat_or_snatch(Battle& battle, Player player, MoveState& m, O& op
 // (accuracycheck with NO_ACC_CALC, no draw: try_hit, as Showdown's
 // accuracy true), and it fails on one already trapped or behind a
 // Substitute; otherwise the target can't switch (escape_prevention, which
-// ends when the user switches out normally, README decision 9). Showdown
+// ends when the user switches out normally, ENGINE.md decision 9). Showdown
 // agrees (its protect flag comes from the gen5 mod). Log: Activate
 // trapped.
 template <typename O>
@@ -7794,7 +7795,7 @@ constexpr uint32_t stage_damage(const Battle& battle, Player player, Stage stage
 // the battle if a residual KO ends it.
 //
 // ENDTURN_UPROAR and ENDTURN_THRASH follow Showdown: they don't read
-// WasUnableToUseMove (README decision 2). Uproar is its own stage, so that
+// WasUnableToUseMove (ENGINE.md decision 2). Uproar is its own stage, so that
 // on a Speed tie it ends before either Pokémon's Yawn; the Thrash family's
 // lock runs out after Perish Song (lock_residuals).
 //

@@ -255,7 +255,7 @@ static_assert(!Status{6}.valid() && Status{Status::PSN}.valid());
 
 // Where update resumes after returning a mid-turn request: every point in
 // gBattleMainFunc's turn where a Pokémon can faint, plus Baton Pass. See
-// "Turn frame" in src/README.md.
+// "Turn frame" in docs/ENGINE.md.
 //
 //   None                   no request: the next update starts a turn
 //   BatonPass              the Baton Pass user's side picks the recipient;
@@ -333,7 +333,7 @@ static_assert(Phase::None < Phase::BatonPass &&
 
 // ---------------------------------------------------------------------------
 // The battle. Draft (2026-10-07): the numbered decisions cited below and the
-// map of every ActivePokemon field to the decomp are in src/README.md.
+// map of every ActivePokemon field to the decomp are in docs/ENGINE.md.
 // Packing comes last: no bitfields yet.
 //
 // None of these have default member initializers, so they stay trivial. Zero
@@ -635,7 +635,7 @@ struct Boosts {
 // The battle copy of the active Pokémon (decomp: gBattleMons plus everything
 // SwitchInClearSetData clears). Switch-in copies stats, moves, species, types
 // and ability from the Pokemon and zeroes the rest (decision 4). The field
-// map with citations is in src/README.md.
+// map with citations is in docs/ENGINE.md.
 struct ActivePokemon {
   uint32_t bide_damage;     // gBideDmg; raw damage, bound unverified
   // atk..spd (hp unused: HP lives on the Pokemon). Transform changes them.

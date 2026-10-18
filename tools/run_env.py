@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs one test environment's suites and checks its bars (TESTING.md).
+"""Runs one test environment's suites and checks its bars (docs/TESTING.md).
 
     python3 tools/run_env.py ENV [--seed N] [--jobs N] [--scale X]
                              [--showdown-commit HASH | --master]

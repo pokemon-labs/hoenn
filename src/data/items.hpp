@@ -11,7 +11,7 @@ namespace hoenn {
 // Mail items, which Trick, Thief and Covet can't move (nor the Enigma Berry).
 // Other is any other holdable item without a battle effect (balls, evolution
 // stones and so on). Those only matter to Trick, Knock Off, Thief and Covet.
-// KnockedOff is what Knock Off leaves (src/README.md, decision 8): no
+// KnockedOff is what Knock Off leaves (docs/ENGINE.md, decision 8): no
 // hold effect, and the Pokémon can never gain an item.
 enum class Item : uint8_t {
   None,
