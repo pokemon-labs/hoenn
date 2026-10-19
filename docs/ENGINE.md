@@ -400,16 +400,18 @@ following Showdown keeps the log's message order the same as its.
 
 ### Hit backbone
 
-`mechanics.hpp`'s `use_move` and `hit` are `HandleAction_UseMove` (util:78)
-and `BattleScript_EffectHit` (bs1:236): the attack canceler
-(`AtkCanceler_UnableToUseMove`, util:1987, then the rest of
-`Cmd_attackcanceler`, bsc:915), accuracy, `ppreduce`, crit, damage, the
-roll, `adjustnormaldamage`'s survival checks, `datahpupdate`, the recoil of
-`Effect::Recoil`, `tryfaintmon` and `moveend`'s cases. Per-action state is a
-`MoveState` on the stack. Status effects have their own functions behind
-the same canceler. Follow Me and Helping Hand, the only unwritten effects
-(doubles only), run the canceler and use PP, then `moveend`; Helping Hand
-logs `[notarget]` and `-notarget`, as Showdown's singles.
+`mechanics.hpp`'s `use_move` is `HandleAction_UseMove` (util:78). Every
+move, called ones included, runs through one frame, `execute`: the attack
+canceler (`cancel`: `AtkCanceler_UnableToUseMove`, util:1987, then the rest
+of `Cmd_attackcanceler`, bsc:915), attackstring and `ppreduce` for every
+script but the hits', then `script`, one `switch` with each effect once,
+then `moveend`. `hit` is `BattleScript_EffectHit` (bs1:236) and the scripts
+built on it (`plain_hit`): its own attackstring and `ppreduce`, accuracy, crit, damage, the roll,
+`adjustnormaldamage`'s survival checks, `datahpupdate`, recoil, `tryfaintmon`.
+Per-action state is a `MoveState` on the stack. Follow Me and Helping Hand,
+the only unwritten effects (doubles only), run the canceler and use PP, then
+`moveend`; Helping Hand logs `[notarget]` and `-notarget`, as Showdown's
+singles.
 
 Where it departs from the decomp, or from the draws the decomp makes:
 

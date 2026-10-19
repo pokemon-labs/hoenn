@@ -30,41 +30,18 @@ checking in on every step.
   `contact_done`, `kings_rock_done` and the two ignore flags are gone.
   `delegated` means a called move's moveend ended the action.
 
-## In progress (uncommitted in the working tree)
+- `4896d84`: comment pass to about line 4,200 (code unchanged).
+- The next commit: the comment pass to the end; section headers "Move
+  scripts", "Copying, calling and swapping", "The move frame and the
+  actions", "Requests and update"; `plain_hit`'s cases in labelled families
+  (equivalence check: same); ENGINE.md's "Hit backbone" describes
+  `execute`. The docs name no other removed function.
 
-A comment-only pass, done down to about line 4,200 of 7,518 (it stopped
-around the Roar and Baton Pass comments). The code is unchanged: a
-comment-and-whitespace-stripped fingerprint matches the one taken before the
-pass.
+## Still open (the user's decisions)
 
-Style for the pass:
-- One to three lines per comment.
-- Keep the decomp citation, and a Showdown file:line citation where we
-  follow Showdown over the decomp, plus the difference in one clause.
-- Drop history ("decided 2026-10-07", "Step 5 group N"), "Log:" paragraphs,
-  and any restating of the code.
-- Comments that say "after the canceler, attackstring and ppreduce" are now
-  wrong, because `execute()` does those for every script. Drop that phrase.
-
-## Still to do
-
-1. Finish the comment pass: the move scripts from about line 4,200 down, the
-   copy and call moves, `execute`, `use_move`, `actions`, the end of turn,
-   `update`. Leftover section headers such as "Step 5 group 8" are history;
-   rename them.
-2. Group `plain_hit`'s case list into labelled families. This reorders code,
-   so check it with the equivalence check, not the fingerprint.
-3. Maybe split the file into topic headers, with `mechanics.hpp` as the
-   umbrella: rolls, order and selection, switching, moves, hits, scripts,
-   end of turn, update.
-4. Fix the stale function names in `docs/ENGINE.md` and `CLAUDE.md`, for
-   example `handled`, `plain_hit` and `charge()`.
-5. Possible Showdown fix, not done: a King's Rock stolen with Thief can
-   flinch in the same move, because King's Rock is still checked in moveend
-   after the item is handed over. In Showdown it couldn't. Ask before
-   changing behaviour.
-
-Then commit, run the debug suite, and report back to the user.
+1. Split the file into topic headers, with `mechanics.hpp` as the umbrella?
+2. King's Rock stolen with Thief can flinch in the same move (moveend
+   checks it after the handover); Showdown's can't. Change it?
 
 ## Checks
 

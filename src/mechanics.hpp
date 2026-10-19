@@ -2428,6 +2428,7 @@ constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
 // hit() runs them all.
 constexpr bool plain_hit(Effect effect) {
   switch (effect) {
+  // The plain hit and its accuracy, crit and priority variants.
   case Effect::Hit:
   case Effect::AlwaysHit:
   case Effect::HighCritical:
@@ -2435,15 +2436,13 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::FalseSwipe:
   case Effect::QuickAttack:
   case Effect::Pursuit:
-  case Effect::Recoil:
-  case Effect::DoubleEdge:
-  case Effect::Explosion:
-  case Effect::FocusPunch:
-  case Effect::LevelDamage:
-  case Effect::HiddenPower:
+  // Hits that reach a semi-invulnerable target.
   case Effect::Thunder:
   case Effect::SkyUppercut:
   case Effect::Earthquake:
+  case Effect::Gust:
+  case Effect::Twister:
+  // Secondary effects (secondary_of).
   case Effect::PoisonHit:
   case Effect::PoisonTail:
   case Effect::PoisonFang:
@@ -2453,8 +2452,10 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::FreezeHit:
   case Effect::ParalyzeHit:
   case Effect::FlinchHit:
+  case Effect::FlinchMinimizeHit:
   case Effect::ConfuseHit:
   case Effect::TriAttack:
+  case Effect::SecretPower:
   case Effect::AttackDownHit:
   case Effect::DefenseDownHit:
   case Effect::SpeedDownHit:
@@ -2463,59 +2464,68 @@ constexpr bool plain_hit(Effect effect) {
   case Effect::AccuracyDownHit:
   case Effect::AttackUpHit:
   case Effect::DefenseUpHit:
-  case Effect::RapidSpin:
-  case Effect::BrickBreak:
+  case Effect::AllStatsUpHit:
+  // Their own failures first.
+  case Effect::FocusPunch:
   case Effect::Snore:
+  case Effect::FakeOut:
+  case Effect::SpitUp:
+  // Variable power.
+  case Effect::HiddenPower:
+  case Effect::Return:
+  case Effect::Frustration:
+  case Effect::Flail:
+  case Effect::Eruption:
+  case Effect::Facade:
+  case Effect::Revenge:
+  case Effect::Smellingsalt:
+  case Effect::WeatherBall:
+  case Effect::LowKick:
+  case Effect::Magnitude:
+  case Effect::Present:
+  case Effect::FuryCutter:
+  // Fixed damage.
+  case Effect::LevelDamage:
+  case Effect::Sonicboom:
+  case Effect::DragonRage:
+  case Effect::SuperFang:
+  case Effect::Psywave:
+  case Effect::Ohko:
   case Effect::Counter:
   case Effect::MirrorCoat:
-  case Effect::Absorb:
   case Effect::Endeavor:
-  case Effect::KnockOff:
-  case Effect::Thief:
+  // Several hits.
+  case Effect::MultiHit:
+  case Effect::DoubleHit:
+  case Effect::Twineedle:
+  case Effect::TripleKick:
+  // Two turns, a recharge or a lock.
   case Effect::SolarBeam:
   case Effect::RazorWind:
   case Effect::SkullBash:
   case Effect::SkyAttack:
   case Effect::SemiInvulnerable:
   case Effect::Recharge:
-  case Effect::MultiHit:
-  case Effect::Superpower:
-  case Effect::Overheat:
-  case Effect::Return:
-  case Effect::Frustration:
-  case Effect::Flail:
-  case Effect::Eruption:
-  case Effect::Gust:
-  case Effect::Twister:
-  case Effect::FakeOut:
-  case Effect::FlinchMinimizeHit:
-  case Effect::AllStatsUpHit:
-  case Effect::Twineedle:
-  case Effect::DoubleHit:
-  case Effect::TripleKick:
-  case Effect::Facade:
-  case Effect::Revenge:
-  case Effect::Smellingsalt:
-  case Effect::WeatherBall:
-  case Effect::LowKick:
-  case Effect::SecretPower:
-  case Effect::PayDay:
-  case Effect::RecoilIfMiss:
-  case Effect::Sonicboom:
-  case Effect::DragonRage:
-  case Effect::SuperFang:
-  case Effect::Psywave:
-  case Effect::Ohko:
-  case Effect::Present:
-  case Effect::Magnitude:
   case Effect::Rampage:
   case Effect::Uproar:
   case Effect::Rollout:
-  case Effect::FuryCutter:
-  case Effect::Rage:
-  case Effect::Trap:
-  case Effect::SpitUp:
+  // Effects on the user.
+  case Effect::Recoil:
+  case Effect::DoubleEdge:
+  case Effect::RecoilIfMiss:
+  case Effect::Explosion:
+  case Effect::Superpower:
+  case Effect::Overheat:
+  case Effect::Absorb:
   case Effect::DreamEater:
+  case Effect::RapidSpin:
+  case Effect::Rage:
+  // Effects on the target, its item or its side.
+  case Effect::Trap:
+  case Effect::PayDay:
+  case Effect::KnockOff:
+  case Effect::Thief:
+  case Effect::BrickBreak:
     return true;
   default:
     return false;
@@ -4107,6 +4117,10 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   faint_target(battle, player, m.chosen, m.grudge, m.bonded_hp, options);
 }
 
+// ---------------------------------------------------------------------------
+// Move scripts
+// ---------------------------------------------------------------------------
+
 // BattleScript_EffectConfuse (bs1:903), with Showdown's order of checks:
 // try_hit, the Substitute, an existing confusion, Own Tempo, Safeguard. On the
 // cartridge Safeguard skips moveend (bs1:3257); here it fails the move.
@@ -4210,20 +4224,12 @@ constexpr protocol::Fail fail_status(Status status) {
   return protocol::Fail::Paralysis;
 }
 
-// The primary status moves: BattleScript_EffectPoison (bs1:986), Toxic
-// (bs1:686), Paralyze (bs1:1007; Thunder Wave, Stun Spore, Glare),
-// Will-O-Wisp (bs1:2174) and Sleep (bs1:284; Spore, Hypnosis, Sleep Powder,
-// Lovely Kiss, Sing, Grass Whistle). After the canceler, attackstring and
-// ppreduce, each script runs its checks in its own order, then accuracy,
-// then Safeguard, then seteffectprimary. Every check fails the move the
-// same way, so the order changes only the messages, and this takes
-// Showdown's: try_hit (Thunder Wave's Ground and Glare's Ghost immunity are
-// natural ones, as Showdown's ignoreImmunity false; Glare's is negated by
-// Foresight), then status_stop. Paralyze's typecalc is only that type
-// immunity: Wonder Guard needs power (bsc:1409), and Showdown's skips
-// status moves too. Safeguard runs moveend as Showdown does (see
-// confuse_move). Sleep Clause (Smogon) fails the move after the accuracy
-// check, as Showdown's onSetStatus.
+// The primary status moves: Poison (bs1:986), Toxic (bs1:686), Paralyze
+// (bs1:1007), Will-O-Wisp (bs1:2174) and Sleep (bs1:284). Every check fails the
+// move the same way, so this takes Showdown's order: try_hit (Thunder Wave's
+// Ground and Glare's Ghost immunity are natural ones), status_stop, then Sleep
+// Clause after the accuracy check (onSetStatus). Safeguard runs moveend, as
+// Showdown's (see confuse_move).
 template <typename O>
 constexpr void status_move(Battle& battle, Player player, MoveState& m,
                            Secondary s, O& options) {
@@ -4267,13 +4273,10 @@ constexpr void status_move(Battle& battle, Player player, MoveState& m,
   m.result |= MoveResult::FAILED;
 }
 
-// BattleScript_EffectRest (bs1:735): it fails while asleep, under Uproar,
-// with Vital Spirit or Insomnia, and at full HP (Cmd_trysetrest); otherwise
-// 3 turns of self-inflicted sleep (Status::slf), any other status replaced,
-// and full HP. Showdown agrees (Rest's onTry and onHit; Sleep Clause skips
-// a sleep from the Pokémon itself). Its messages are Showdown's onTry's, in
-// its order: none while asleep, then -fail|heal at full HP, then -fail
-// [from] the ability.
+// Rest (bs1:735, Cmd_trysetrest): it fails while asleep, under Uproar, with
+// Vital Spirit or Insomnia, or at full HP; otherwise 3 turns of self-inflicted
+// sleep over any status, and full HP. Showdown agrees; its onTry's messages, in
+// its order.
 template <typename O>
 constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -4305,16 +4308,11 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
   protocol::heal(options.log, id, mon, protocol::Heal::Silent);
 }
 
-// BattleScript_EffectYawn (bs1:2451): it fails against Vital Spirit or
-// Insomnia, a Substitute, Safeguard, a semi-invulnerable target (accuracy
-// check without a roll, NO_ACC_CALC_CHECK_LOCK_ON; Showdown's accuracy is
-// true), a status, or a Yawn already pending (Cmd_setyawn). The cartridge
-// also fails it during an Uproar (jumpifcantmakeasleep); Showdown doesn't
-// (Yawn's onTryHit checks only the status and sleep immunity), and this
-// follows Showdown. ENDTURN_YAWN puts the target to sleep (battler_stage).
-// The messages come in Showdown's order: try_hit, a status (onTryHit), the
-// Substitute, a pending Yawn (addVolatile), then TryAddVolatile's ability
-// and Safeguard.
+// Yawn (bs1:2451, Cmd_setyawn): it fails against Vital Spirit or Insomnia, a
+// Substitute, Safeguard, a semi-invulnerable target, a status or a pending
+// Yawn. The cartridge also fails it during an Uproar; Showdown's onTryHit
+// doesn't, and this follows it. The sleep comes at ENDTURN_YAWN
+// (battler_stage).
 template <typename O>
 constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   Side& foe_side = battle.side(foe(player));
@@ -4342,20 +4340,16 @@ constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   protocol::start(options.log, target, protocol::Start::Yawn, user);
 }
 
-// The stat and stages of a one-stat raise: setstatchanger in
-// BattleScript_EffectAttackUp and its siblings (bs1:475-489, 927-945).
+// A one-stat raise's stat and stages (setstatchanger, bs1:475-489, 927-945).
 struct StatChange {
   uint8_t stat;
   int8_t n;
 };
 
-// BattleScript_EffectStatUp (bs1:489) and the scripts that share its tail
-// after the canceler: Minimize sets its flag first (setminimize, bs1:1476),
-// Defense Curl after attackstring and ppreduce (setdefensecurlbit,
-// bs1:2014); neither undoes it when the raise fails. Here both come after
-// ppreduce and Snatch, as Showdown's volatiles. Showdown's boosts and
-// volatiles agree; it prints `-boost|...|0` at the cap where the cartridge
-// prints "won't go higher".
+// BattleScript_EffectStatUp (bs1:489) and the scripts sharing its tail.
+// Minimize (setminimize, bs1:1476) and Defense Curl (bs1:2014) set their flag
+// first and keep it when the raise fails. At +6 Showdown prints -boost 0 where
+// the cartridge says "won't go higher".
 template <typename O>
 constexpr void stat_up_move(Battle& battle, Player player, MoveState& m, StatChange c,
                             O& options) {
@@ -4367,13 +4361,9 @@ constexpr void stat_up_move(Battle& battle, Player player, MoveState& m, StatCha
                   raise(a, c.stat, c.n, m), false);
 }
 
-// BattleScript_EffectStatDown (bs1:534), for Screech, Metal Sound and the
-// other one-stat drops: after the canceler, a Substitute fails it
-// (FailedFromAtkString); then accuracy (with Protect), attackstring,
-// ppreduce and the drop. Every failure is the same state, so the checks
-// and their messages come in Showdown's order: try_hit (Soundproof stops
-// Screech, Metal Sound and Growl), the Substitute (TryPrimaryHit), then
-// lower_stats(). Log: Unboost (0 at -6).
+// BattleScript_EffectStatDown (bs1:534), the one-stat drops. The failures leave
+// the same state, so the checks come in Showdown's order: try_hit (Soundproof
+// for the sound moves), the Substitute (TryPrimaryHit), then lower_stats().
 template <typename O>
 constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
                               StatChange c, O& options) {
@@ -4390,12 +4380,9 @@ constexpr void stat_down_move(Battle& battle, Player player, MoveState& m,
   lower_stats(battle, target, bit, c.n, options.log);
 }
 
-// BattleScript_EffectTickle (bs1:2652): after the canceler, attackstring and
-// ppreduce it fails with Attack and Defense both at -6, then on a missed
-// accuracy check (ButItFailed); then each drop that can happen. Neither the
-// decomp nor Showdown's gen3 (bypasssub, data/mods/gen3/moves.ts:639)
-// checks a Substitute. The order of the messages is Showdown's: try_hit,
-// then lower_stats(). Log: Unboost each (0 at -6).
+// Tickle (bs1:2652): it fails with Attack and Defense at -6, then on a miss;
+// then each drop that can happen. Neither the decomp nor Showdown's gen3
+// (bypasssub, data/mods/gen3/moves.ts:639) checks a Substitute.
 template <typename O>
 constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -4406,14 +4393,11 @@ constexpr void tickle(Battle& battle, Player player, MoveState& m, O& options) {
   lower_stats(battle, target, 0b11, 1, options.log);
 }
 
-// Memento, as Showdown's gen3 (accuracy true, boosts -2/-2, selfdestruct
-// "ifHit"): after attackstring and ppreduce, try_hit (Protect, a
-// semi-invulnerable target unless Locked-On) or a Substitute
-// (TryPrimaryHit) stops it and the user lives; otherwise each drop that
-// can happen (drops()), then the user faints, even if neither stat could
-// fall. The decomp (bs1:2204, Cmd_trymemento, bsc:9072) faints the user
-// through Protect, a Substitute and Fly, and fails with both stats at -6
-// and the user alive. Log: Unboost each, then Faint.
+// Memento, as Showdown's gen3 (accuracy true, selfdestruct "ifHit"): try_hit or
+// a Substitute stops it and the user lives; otherwise the drops that can
+// happen, then the user faints. The decomp (bs1:2204, bsc:9072) faints the user
+// through Protect, a Substitute and Fly, and fails at -6/-6 with the user
+// alive.
 template <typename O>
 constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -4428,13 +4412,10 @@ constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) 
   m.faints = true;
 }
 
-// BattleScript_EffectImprison (bs1:2509), Cmd_tryimprison (bsc:9413): it
-// fails if the user already imprisons, or shares no move with the foe;
-// otherwise the foe can't select (usable_moves) or use (the canceler) the
-// user's moves while it stays in. Showdown's gen4 onTryHit agrees, and its
-// gen3 drops the decomp's extra PP under Pressure
-// (PressurePPLoseOnUsingImprison), as pp_reduce does for a move on the user.
-// Log: Start Imprison, or Fail.
+// Imprison (bs1:2509, Cmd_tryimprison, bsc:9413): it fails if already on or no
+// move is shared; then the foe can't select or use the user's moves while it
+// stays in. Showdown's gen3 takes no extra PP under Pressure, unlike the
+// decomp.
 template <typename O>
 constexpr void imprison(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -4450,12 +4431,9 @@ constexpr void imprison(Battle& battle, Player player, MoveState& m, O& options)
   protocol::start(options.log, protocol::ident(battle, player), protocol::Start::Imprison);
 }
 
-// BattleScript_EffectNightmare (bs1:1459): after attackstring and ppreduce
-// it fails on a Substitute, a target already in a Nightmare or one not
-// asleep (Rest counts). No accuracy check; Showdown's gen3 (accuracy true,
-// protect flag) also fails it into Protect and a semi-invulnerable target
-// (try_hit), and this follows it. The residual takes 1/4 while it sleeps;
-// waking ends it. Log: Start Nightmare.
+// Nightmare (bs1:1459): it fails on a Substitute, a target already in one, or
+// one awake. Showdown's gen3 also fails it into Protect and a semi-invulnerable
+// target (try_hit); this follows it. The residual takes 1/4 while it sleeps.
 template <typename O>
 constexpr void nightmare(Battle& battle, Player player, MoveState& m, O& options) {
   Side& foe_side = battle.side(foe(player));
@@ -4471,22 +4449,17 @@ constexpr void nightmare(Battle& battle, Player player, MoveState& m, O& options
   protocol::start(options.log, protocol::ident(battle, foe(player)), protocol::Start::Nightmare);
 }
 
-// BattleScript_EffectHaze (bs1:562), Cmd_normalisebuffs: every active
-// Pokémon's stages go to 0. Showdown's gen3 Haze agrees (it keeps Focus
-// Energy, unlike gen4's). Never fails. Log: ClearAllBoost.
+// Haze (bs1:562, Cmd_normalisebuffs): every active Pokémon's stages go to 0;
+// Focus Energy stays (Showdown's gen3 too). Never fails.
 template <typename O>
 constexpr void haze(Battle& battle, O& options) {
   for (Side& side : battle.sides) side.active.boosts = Boosts{};
   protocol::clear_all_boost(options.log);
 }
 
-// BattleScript_EffectPsychUp (bs1:1790), Cmd_copyfoestats (bsc:8809): the
-// user takes the foe's stages, through a Substitute and Protect; it never
-// fails. As in the decomp, Focus Energy isn't copied: gen3 inherits the
-// gen5 mod's onHit (data/mods/gen5/moves.ts:641), stages only, not the
-// base one's volatilesToCopy. Showdown's misses a semi-invulnerable target
-// (its target is 'normal', so tryMoveHit's Invulnerability check applies;
-// accuracy true); this follows Showdown. Log: CopyBoost.
+// Psych Up (bs1:1790, Cmd_copyfoestats, bsc:8809): the foe's stages, not Focus
+// Energy (gen5 mod's onHit, data/mods/gen5/moves.ts:641), through a Substitute
+// and Protect. Showdown's misses a semi-invulnerable target; this follows it.
 template <typename O>
 constexpr void psych_up(Battle& battle, Player player, MoveState& m,
                         O& options) {
@@ -4500,11 +4473,9 @@ constexpr void psych_up(Battle& battle, Player player, MoveState& m,
                        protocol::ident(battle, foe(player)));
 }
 
-// Cosmic Power, Bulk Up, Calm Mind and Dragon Dance (bs1:2687-2800): they
-// fail only when both stats are at +6 (BattleScript_CantRaiseMultipleStats,
-// FAILED); otherwise each stat is raised in turn, and one already at +6
-// marks the move MISSED as in raise(). Showdown raises the same stats in
-// the same order (the moves' `boosts`).
+// Cosmic Power, Bulk Up, Calm Mind, Dragon Dance (bs1:2687-2800): they fail
+// only with both stats at +6; otherwise each is raised in turn, a capped one
+// marking the move MISSED as raise() does.
 template <typename O>
 constexpr void stat_pair_move(Battle& battle, Player player, MoveState& m,
                               uint8_t first, uint8_t second, O& options) {
@@ -4521,12 +4492,9 @@ constexpr void stat_pair_move(Battle& battle, Player player, MoveState& m,
   protocol::boost(options.log, id, second, raise(a, second, 1, m), false);
 }
 
-// BattleScript_EffectBellyDrum (bs1:1776), Cmd_maxattackhalvehp (bsc:8785):
-// it fails unless Attack is below +6 and HP is above half (at least 1);
-// then Attack goes to +6 and the user loses max HP / 2 (at least 1),
-// bypassing its Substitute. Showdown's Belly Drum is the same (data/moves.ts:
-// bellydrum; its directDamage floors the half). Log: Damage, then SetBoost
-// (onHit's order), or Fail.
+// Belly Drum (bs1:1776, Cmd_maxattackhalvehp, bsc:8785): it fails at +6 or at
+// half HP or less; otherwise Attack goes to +6 and the user loses max HP / 2
+// (at least 1), past its Substitute. Showdown agrees.
 template <typename O>
 constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -4544,26 +4512,15 @@ constexpr void belly_drum(Battle& battle, Player player, MoveState& m,
   protocol::set_boost(options.log, id);
 }
 
-// BattleScript_EffectCurse (bs1:1482).
+// Curse (bs1:1482). Not a Ghost: it fails only at -6 Speed and +6 Attack and
+// Defense; otherwise Speed -1 (Mist and Clear Body don't apply, bsc:6962),
+// Attack and Defense +1, each skipped at its cap. Showdown gives the same
+// boosts in that order.
 //
-// Not a Ghost type: the move targets the user. It fails only if Speed is at
-// -6 and Attack and Defense at +6; otherwise Speed falls by 1 (Mist and
-// Clear Body don't apply to Curse, bsc:6962) and Attack and Defense rise
-// by 1, each skipped at its cap (Attack or Defense at +6 marks it MISSED,
-// as in raise()). Showdown's Curse gives the same self boosts, spe -1,
-// atk +1, def +1 in that order (gen4's onModifyMove sets them, and the base
-// onTryHit it inherits sets them again in this order, data/moves.ts:3287):
-// a line for each stat that moved, and no -fail.
-//
-// A Ghost type (BattleScript_GhostCurse): it fails on the foe's
-// Substitute, a semi-invulnerable foe (accuracycheck with
-// NO_ACC_CALC_CHECK_LOCK_ON) or a foe already cursed (Cmd_cursetarget,
-// bsc:8468); otherwise the foe is cursed and the user loses max HP / 2 (at
-// least 1), bypassing its own Substitute, and may faint. Showdown agrees on
-// the Substitute (gen4 onModifyMove drops the effect), an existing curse
-// (onTryHit) and the half HP (directDamage). Protect doesn't stop it: the
-// decomp's accuracycheck checks Protect only for FLAG_PROTECT_AFFECTED,
-// which Curse lacks, and Showdown's gen4 Curse has no protect flag.
+// A Ghost (BattleScript_GhostCurse): it fails on a Substitute, a
+// semi-invulnerable foe or one already cursed (bsc:8468); otherwise the foe is
+// cursed and the user loses max HP / 2, past its own Substitute, and may faint.
+// Protect doesn't stop it, in both (no protect flag).
 template <typename O>
 constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -4585,12 +4542,9 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   ActivePokemon& t = battle.side(foe(player)).active;
-  // NO_ACC_CALC_CHECK_LOCK_ON (Cmd_accuracycheck, bsc:1099): Lock-On, then
-  // only the semi-invulnerable check (try_hit, which Showdown's accuracy
-  // true agrees with). A miss goes to BattleScript_ButItFailed (here
-  // MISSED, which moveend reads the same). Showdown's messages: -miss, then
-  // -fail for a curse already there (onTryHit) or a Substitute
-  // (TryPrimaryHit).
+  // NO_ACC_CALC_CHECK_LOCK_ON (bsc:1099): only the semi-invulnerable check,
+  // unless Locked-On. Showdown's -miss comes first, then -fail for an existing
+  // curse or a Substitute.
   if (!try_hit(battle, player, m, {.sure = true}, options)) {
     return;
   }
@@ -4600,22 +4554,17 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   t.volatiles.cursed = true;
   protocol::start(options.log, protocol::ident(battle, foe(player)), protocol::Start::Curse,
                   protocol::ident(battle, player));
-  // Damage (plain, as Showdown's directDamage from the move)
+  // Damage, plain (Showdown's directDamage from the move).
   passive_damage(battle, player, fraction(battle.side(player).get(1), 2),
                  options);
   protocol::damage(options.log, protocol::ident(battle, player),
                    battle.side(player).get(1));
 }
 
-// BattleScript_EffectSubstitute (bs1:1085), Cmd_setsubstitute (bsc:7808):
-// after the canceler, ppreduce and attackstring, it fails with a
-// Substitute already up or at max HP / 4 (at least 1) or less, setting no
-// result flag. Otherwise the Substitute gets max HP / 4 (at least 1), the
-// user loses that much, bypassing the new Substitute, and a binding on the
-// user ends. Showdown agrees on each point (data/moves.ts: substitute; its
-// `hp <= maxhp / 4` and floored directDamage match on integer HP; it ends
-// partiallytrapped silently). Log: Start Substitute, then Damage; or Fail
-// (weak).
+// Substitute (bs1:1085, Cmd_setsubstitute, bsc:7808): it fails with one up or
+// at max HP / 4 (at least 1) or less, with no result flag; otherwise it gets
+// that quarter, the user loses it past the new Substitute, and a binding on the
+// user ends. Showdown agrees.
 template <typename O>
 constexpr void substitute(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -4644,18 +4593,11 @@ constexpr void substitute(Battle& battle, Player player, O& options) {
   protocol::damage(options.log, id, battle.side(player).get(1));
 }
 
-// BattleScript_EffectProtect and BattleScript_EffectEndure (bs1), for
-// Protect, Detect and Endure; Cmd_setprotectlike (bsc:6503). It fails when
-// the user acts last this turn (gCurrentTurnActionNumber, Showdown's
-// queue.willAct()), or on the success draw (rolls::protect); a failure
-// restarts the count and marks the move MISSED. The count of consecutive
-// successes restarts, as Showdown's gen3 stall (gen5 conditions.ts:24:
-// duration 2, so it expires at the end of a turn without a success), after
-// any turn without a successful use, `stall` timing it. The decomp restarts
-// it only when the last resulting move (bsc:6506) isn't one of the three,
-// so a turn the user doesn't act at all (its action cancelled by a faint)
-// keeps the chain there. Past the fourth success, see rolls::protect. Log:
-// SingleTurn, or Fail.
+// Protect, Detect and Endure (Cmd_setprotectlike, bsc:6503): they fail when the
+// user moves last (Showdown's willAct) or on the draw (rolls::protect), which
+// restarts the count. The count restarts after any turn without a success, as
+// Showdown's gen3 stall (gen5 conditions.ts:24, duration 2); the decomp keeps
+// it through a turn the user doesn't act.
 template <typename O>
 constexpr void protect(Battle& battle, Player player, MoveState& m,
                        O& options) {
@@ -4676,11 +4618,8 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
   a.stall = 2;
 }
 
-// BattleScript_EffectSpikes (bs1:1544), Cmd_trysetspikes: a layer on the
-// foe's side, up to 3; at 3 it fails (BattleScript_FailedFromAtkString,
-// FAILED). Showdown's spikes condition agrees (onSideRestart fails at 3
-// layers). Pressure takes its extra PP (MOVE_TARGET_OPPONENTS_FIELD; Showdown's
-// mustpressure). Log: SideStart Spikes, or Fail.
+// Spikes (bs1:1544, Cmd_trysetspikes): a layer on the foe's side, failing at 3.
+// Pressure takes its extra PP (Showdown's mustpressure).
 template <typename O>
 constexpr void spikes_move(Battle& battle, Player player, MoveState& m,
                            O& options) {
@@ -4690,18 +4629,11 @@ constexpr void spikes_move(Battle& battle, Player player, MoveState& m,
   protocol::side_start(options.log, foe(player), protocol::SideCondition::Spikes);
 }
 
-// The healing moves: BattleScript_EffectRestoreHp (bs1:672; Recover, Slack
-// Off) and BattleScript_EffectSoftboiled (bs1:2027; Soft-Boiled, Milk
-// Drink), Cmd_tryhealhalfhealth: max HP / 2; BattleScript_EffectMorningSun
-// (bs1:1731; Morning Sun, Synthesis, Moonlight), Cmd_recoverbasedonsunlight:
-// 2/3 in sun, 1/4 in other weather, 1/2 without (the effective weather).
-// At least 1, bypassing the user's Substitute; at full HP it does nothing,
-// with no result flag (BattleScript_AlreadyAtFullHp). Showdown floors the
-// same fractions (gen < 5 in sim/battle-actions.ts:1199; the gen4 mod's
-// Morning Sun family, data/mods/gen4/moves.ts:940). That family's gen4
-// onHit is a bare heal, so at full HP Showdown prints nothing after the
-// move line, where the others fail. Log: Heal, or Fail heal (not for the
-// Morning Sun family).
+// The healing moves: Recover and Slack Off (bs1:672), Soft-Boiled and Milk
+// Drink (bs1:2027), half the max HP; Morning Sun, Synthesis and Moonlight
+// (bs1:1731), 2/3 in sun, 1/4 in other weather, 1/2 without. At least 1; at
+// full HP nothing, with no result flag. Showdown agrees, but its Morning Sun
+// family prints no -fail at full HP (gen4 mod, data/mods/gen4/moves.ts:940).
 template <typename O>
 constexpr void heal_move(Battle& battle, Player player, bool weather, O& options) {
   Pokemon& mon = battle.side(player).get(1);
@@ -4724,8 +4656,7 @@ constexpr void heal_move(Battle& battle, Player player, bool weather, O& options
   protocol::heal(options.log, protocol::ident(battle, player), mon);
 }
 
-// The SLOTs p's bench can send in, as a mask (bit s - 1 for SLOT s): the
-// Pokémon present and not fainted.
+// The SLOTs p's bench can send in, as a mask (bit s - 1 for SLOT s).
 constexpr uint8_t bench(const Battle& battle, Player player) {
   const Side& side = battle.side(player);
   uint8_t mask = 0;
@@ -4736,24 +4667,12 @@ constexpr uint8_t bench(const Battle& battle, Player player) {
   return mask;
 }
 
-// BattleScript_EffectRoar (bs1:593), for Roar and Whirlwind. Showdown's
-// gen3 Roar has accuracy 100 and the protect flag (data/mods/gen4/moves.ts:
-// 1164, inheriting gen5's accuracy), as the decomp's.
-// - After the canceler, attackstring and ppreduce: Suction Cups and
-//   Ingrain stop it with no result flag (Showdown's onDragOut), then a
-//   semi-invulnerable target fails it (accuracycheck with
-//   NO_ACC_CALC_CHECK_LOCK_ON; here MISSED, which moveend reads the same),
-//   then the accuracy roll (ACC_CURR_MOVE: evasion can make it miss), then
-//   an empty bench fails it (forcerandomswitch; Showdown's canSwitch).
-// - The messages come in Showdown's order: try_hit (Protect, Soundproof
-//   for Roar), then -fail for an empty bench (forceSwitch's canSwitch),
-//   and only at the drag Suction Cups' or Ingrain's -activate (DragOut).
-//   The roll is recorded only when it decides a drag.
-// - No level check: TryDoForceSwitchOut (bsc:7163) only draws when the
-//   user's level is lower, and Showdown has none.
-// - The drag happens after the whole action (Showdown's forceSwitchFlag;
-//   the decomp drags before moveend), so this only sets m.drag.
-// - It hits through a Substitute in both.
+// Roar and Whirlwind (bs1:593), as Showdown's gen3 (accuracy 100, protect
+// flag). Suction Cups and Ingrain stop it with no result flag, then a
+// semi-invulnerable target, the accuracy roll and an empty bench fail it, with
+// the messages in Showdown's order. No level check (TryDoForceSwitchOut,
+// bsc:7163; Showdown has none). The drag waits for the end of the action
+// (m.drag), as Showdown's forceSwitchFlag; the decomp drags before moveend.
 template <typename O>
 constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
   const ActivePokemon& t = battle.side(foe(player)).active;
@@ -4763,10 +4682,8 @@ constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
     return;
   }
   if (bench_empty) return but_it_failed(battle, player, m, options);
-  // BattleScript_AbilityPreventsPhasingOut and BattleScript_PrintMonIsRooted
-  // set no result flag. With both, Suction Cups speaks (Showdown's
-  // onDragOutPriority 1, data/abilities.ts:4694; the decomp checks Ingrain
-  // first).
+  // With both, Suction Cups speaks (Showdown's onDragOutPriority 1,
+  // data/abilities.ts:4694); the decomp checks Ingrain first.
   if (anchored) {
     protocol::activate(options.log, protocol::ident(battle, foe(player)),
                        t.ability == Ability::SuctionCups ? protocol::Activate::SuctionCups
@@ -4776,10 +4693,8 @@ constexpr void roar(Battle& battle, Player player, MoveState& m, O& options) {
   m.drag = true;
 }
 
-// Roar or Whirlwind's drag (Showdown's dragIn, sim/battle-actions.ts:162):
-// a random bench Pokémon replaces `target`'s, as a switch (switch-out
-// effects, Spikes, the switch-in ability and item). `user` made the draw.
-// Log: Drag.
+// The drag (Showdown's dragIn, sim/battle-actions.ts:162): a random bench
+// Pokémon replaces `target`'s as a switch. `user` made the draw.
 template <typename O>
 constexpr void drag(Battle& battle, Player user, O& options) {
   const Player target = foe(user);
@@ -4789,15 +4704,10 @@ constexpr void drag(Battle& battle, Player user, O& options) {
   arrive(battle, target, options);
 }
 
-// BattleScript_EffectBatonPass (bs1:1694): after the canceler, attackstring
-// and ppreduce, it fails with no bench (jumpifcantswitch with
-// SWITCH_IGNORE_ESCAPE_PREVENTION, so trapping doesn't stop it; Showdown's
-// onHit checks canSwitch). Otherwise the user's side picks the recipient.
-// The decomp switches before moveend, so its moveend sees the recipient;
-// here moveend runs on the passer, which is the same for Baton Pass: it
-// sets no last move, a working pass doesn't Choice-lock, and it changes no
-// status for the item cures. Log: Fail, then the switch (Switch, [from]
-// Baton Pass) on resuming.
+// Baton Pass (bs1:1694): it fails with no bench, trapping or not; otherwise the
+// side picks the recipient. Moveend runs on the passer here, on the recipient
+// in the decomp, which is the same for Baton Pass: no last move, no Choice
+// lock, no status to cure.
 template <typename O>
 constexpr void baton_pass(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -4805,12 +4715,10 @@ constexpr void baton_pass(Battle& battle, Player player, MoveState& m,
   m.pass = true;
 }
 
-// Whether Sleep Talk can't call `move`, as Showdown's gen3 Sleep Talk: the
-// nosleeptalk and charge flags, which are the decomp's list
-// (Extra::NoSleepTalk: IsInvalidForSleepTalkOrAssist, Focus Punch, Uproar,
-// IsTwoTurnsMove) except that Showdown's gen3 Bide drops its flags
-// (data/mods/gen3/moves.ts). Nature Power is allowed: gen4's flags
-// (data/mods/gen4/moves.ts:980), which gen3 inherits, drop nosleeptalk.
+// The moves Sleep Talk can't call, as Showdown's gen3 (nosleeptalk and charge
+// flags): the decomp's list (IsInvalidForSleepTalkOrAssist, Focus Punch,
+// Uproar, the two-turn moves) without Bide (data/mods/gen3/moves.ts) and Nature
+// Power (data/mods/gen4/moves.ts:980).
 constexpr bool sleep_talk_banned(Move move) {
   if (move == Move::Bide) return false;
   return get(move).extra & Extra::NoSleepTalk;
@@ -4819,12 +4727,10 @@ constexpr bool sleep_talk_banned(Move move) {
 template <typename O>
 constexpr void execute(Battle& battle, Player player, MoveState& m, O& options);
 
-// Showdown's useMove for a move that `m` calls (Sleep Talk, Metronome,
-// Assist, Mirror Move, Nature Power): no attack canceler and no PP
-// (MoveState::called), [from] the caller, and Pressure's PP for the called
-// move comes off the caller's slot (callerMoveForPressure, gen3
-// scripts.ts:174; the cartridge takes none). A Hidden Power is the user's
-// own type. `slot` is the called move's slot (Sleep Talk's), or NO_SLOT.
+// A move that `m` calls (Showdown's useMove): no canceler and no PP, [from] the
+// caller, and Pressure's PP from the caller's slot (gen3 scripts.ts:174; the
+// cartridge takes none). `slot` is the called move's slot (Sleep Talk's), or
+// NO_SLOT.
 template <typename O>
 constexpr void call_move(Battle& battle, Player player, MoveState& m, Move move,
                          uint8_t slot, O& options) {
@@ -4851,15 +4757,11 @@ constexpr void call_move(Battle& battle, Player player, MoveState& m, Move move,
   m.delegated = true;
 }
 
-// BattleScript_EffectSleepTalk (bs1:1311), as Showdown's gen3 Sleep Talk
-// (data/mods/gen3/moves.ts:557, with gen4's onTryHit): only while asleep;
-// it fails under a Choice Band lock or Encore (on the cartridge too, through
-// CheckMoveLimitations); it picks uniformly among the move slots Sleep Talk
-// may call, and fails if the pick has no PP. The cartridge instead leaves
-// out disabled, taunted, tormented and imprisoned moves and calls a move
-// with no PP (bsc:8241); this follows Showdown. The called move uses no PP
-// and skips the attack canceler (MoveState::called), and its moveend
-// records Sleep Talk as the chosen move.
+// Sleep Talk (bs1:1311), as Showdown's gen3 (data/mods/gen3/moves.ts:557): only
+// while asleep; it fails under a Choice Band lock or Encore; it picks uniformly
+// among the callable slots and fails if the pick has no PP. The cartridge
+// leaves out disabled, taunted, tormented and imprisoned moves and calls one
+// with no PP (bsc:8241).
 template <typename O>
 constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -4890,11 +4792,8 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
   call_move(battle, player, m, a.moves[slot].id, slot, options);
 }
 
-// BattleScript_EffectWish (bs1:2358), Cmd_trywish (bsc:9292): after the
-// canceler, attackstring and ppreduce it sets the user's side's counter to
-// 2 and remembers the wisher, or fails while one is pending. Showdown's
-// gen4 slot condition agrees (duration 2; addSlotCondition fails while it's
-// there). It lands in field_residuals. Log: Fail.
+// Wish (bs1:2358, Cmd_trywish, bsc:9292): the side's counter goes to 2, or it
+// fails while one is pending. Showdown agrees. It lands in field_residuals.
 template <typename O>
 constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -4903,13 +4802,9 @@ constexpr void wish(Battle& battle, Player player, MoveState& m, O& options) {
   side.conditions.wisher = side.order[0];
 }
 
-// BattleScript_EffectLeechSeed (bs1:1157): after the canceler, attackstring
-// and ppreduce, a Substitute fails it (ButItFailed); then accuracy; then
-// Cmd_setseeded (bsc:6718) misses an already seeded or Grass target. The
-// messages come in Showdown's order: try_hit, with Grass a natural
-// immunity (onTryImmunity), then the Substitute (TryPrimaryHit) and an
-// existing seed (addVolatile), each -fail. The drain is in battler_stage.
-// Log: Start Leech Seed.
+// Leech Seed (bs1:1157, Cmd_setseeded, bsc:6718): a Substitute, a miss, a
+// seeded target or a Grass one fails it, with the messages in Showdown's order
+// (Grass is a natural immunity). The drain is in battler_stage.
 template <typename O>
 constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -4928,13 +4823,9 @@ constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
   protocol::start(options.log, protocol::ident(battle, foe(player)), protocol::Start::LeechSeed);
 }
 
-// BattleScript_EffectRainDance (bs1:1744), SunnyDay (bs1:1757), Sandstorm
-// and Hail: after the canceler, attackstring and ppreduce, Cmd_setrain
-// (bsc:6681), setsunny (bsc:8767) and the like fail (MISSED) if that
-// weather is up, an ability's permanent one included; otherwise it replaces
-// any weather for 5 turns, the field residual counting this one. Showdown's
-// setWeather agrees (it fails on the same weather after gen 2). Log:
-// Weather, or Fail.
+// The weather moves (bs1:1744, 1757; Cmd_setrain, bsc:6681, setsunny,
+// bsc:8767): they fail (MISSED) if that weather is up, an ability's included;
+// otherwise it replaces any weather for 5 turns. Showdown's setWeather agrees.
 template <typename O>
 constexpr void weather_move(Battle& battle, Player player, MoveState& m,
                             Weather w, O& options) {
@@ -4951,18 +4842,13 @@ constexpr void weather_move(Battle& battle, Player player, MoveState& m,
   weather_change(battle, options);
 }
 
-// Beat Up, as Showdown's gen3 Beat Up (data/mods/gen3/moves.ts:31, gen4's
-// base power 10), which differs visibly from BattleScript_EffectBeatUp
-// (bs1:1940, Cmd_trydobeatup, bsc:8957): after the canceler, one accuracy
-// check (with Protect), attackstring and ppreduce, then one hit per party
-// member that isn't fainted or statused when the move starts, in SLOT order
-// (Showdown's side.pokemon), until the target faints. Each hit is a
-// typeless special hit through damage() with that member's base Atk
-// against the target's base Def (Hit::ally), with its own crit, damage
-// roll and Focus Band draws; Light Screen halves it and Mirror Coat counts
-// it. The decomp uses its own formula with no roll, ignores the screens
-// and goes in party order. With no such member it fails. No contact, no
-// secondary. Log: Activate Beat Up [of] the member per hit, then HitCount.
+// Beat Up, as Showdown's gen3 (data/mods/gen3/moves.ts:31): one accuracy check,
+// then one typeless special hit per party member not fainted or statused, in
+// SLOT order, until the target faints. Each uses damage() with the member's
+// base Atk against the target's base Def (Hit::ally), with its own crit, roll
+// and Focus Band; the screens and Mirror Coat count it. The decomp (bs1:1940,
+// bsc:8957) has its own formula with no roll, ignores the screens and goes in
+// party order.
 template <typename O>
 constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) {
   const Side& side = battle.side(player);
@@ -5002,22 +4888,15 @@ constexpr void beat_up(Battle& battle, Player player, MoveState& m, O& options) 
   faint_target(battle, player, m.chosen, m.grudge, m.bonded_hp, options);
 }
 
-// BattleScript_EffectPerishSong (bs1:1567), as Showdown's Perish Song
-// (data/moves.ts onHitField): after the canceler, attackstring and
-// ppreduce, every active Pokémon without a count gets 3, except a
-// semi-invulnerable one, which it misses, and a Soundproof one, the user
-// included (gen7's Soundproof, which gen3 inherits, drops the user check:
-// data/mods/gen7/abilities.ts:100). It fails only if nothing was missed,
-// blocked or started. The decomp's Cmd_trysetperishsong (bsc:8508) ignores
-// semi-invulnerability, and fails when every Pokémon is Soundproof or
-// counting. Pressure takes an extra PP (pressure_applies; the decomp's
-// PressurePPLoseOnUsingPerishSong agrees). Log, in Showdown's onHitField
-// order: per Pokémon a Miss, an Immune for Soundproof or Start perish3
-// [silent]; then FieldActivate if one started, or Fail.
+// Perish Song (bs1:1567), as Showdown's onHitField: every active Pokémon
+// without a count gets 3, except a semi-invulnerable one and a Soundproof one,
+// the user included (data/mods/gen7/abilities.ts:100). It fails only if nothing
+// was missed, blocked or started. The decomp (bsc:8508) ignores
+// semi-invulnerability. Pressure takes an extra PP.
 template <typename O>
 constexpr void perish_song(Battle& battle, Player player, MoveState& m,
                            O& options) {
-  // Showdown's getAllActive order, P1 first.
+  // Showdown's getAllActive order: P1 first.
   bool result = false;
   bool started = false;
   for (const Player p : {Player::P1, Player::P2}) {
@@ -5045,13 +4924,9 @@ constexpr void perish_song(Battle& battle, Player player, MoveState& m,
   }
 }
 
-// BattleScript_EffectReflect (bs1:974), LightScreen, Mist (bs1:874) and
-// Safeguard (bs1:1672): after the canceler, attackstring and ppreduce (and
-// Snatch), Cmd_setreflect (bsc:6697), setlightscreen, setmist (bsc:7732)
-// and setsafeguard (bsc:8652) fail while the condition is up (FAILED for
-// Mist, MISSED for the others), otherwise set 5 turns on the user's side;
-// field_residuals counts them down. Showdown's side conditions agree.
-// Log: SideStart, or Fail.
+// Reflect (bs1:974), Light Screen, Mist (bs1:874) and Safeguard (bs1:1672):
+// they fail while up (FAILED for Mist, MISSED for the others), else 5 turns on
+// the user's side (bsc:6697, 7732, 8652). Showdown agrees.
 template <typename O>
 constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
   SideConditions& c = battle.side(player).conditions;
@@ -5074,12 +4949,10 @@ constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
                                                      : SC::LightScreen);
 }
 
-// BattleScript_EffectMagicCoat (bs1:2392) and Snatch (bs1:2543), as
-// Showdown's one-turn volatiles: after the canceler, attackstring and
-// ppreduce, the user bounces (try_hit) or steals (snatched) the next such
-// move this turn. Cmd_trysetmagiccoat and trysetsnatch (bsc:9537, 9553) fail
-// when the user moves last; Showdown's never fail, and this follows it.
-// Log: SingleTurn Magic Coat or Snatch.
+// Magic Coat (bs1:2392) and Snatch (bs1:2543), as Showdown's one-turn
+// volatiles: the user bounces (try_hit) or steals (snatched) the next such move
+// this turn. The decomp fails them when the user moves last (bsc:9537, 9553);
+// Showdown's never fail.
 template <typename O>
 constexpr void coat_or_snatch(Battle& battle, Player player, MoveState& m, O& options) {
   assert(m.turn != nullptr);
@@ -5089,14 +4962,9 @@ constexpr void coat_or_snatch(Battle& battle, Player player, MoveState& m, O& op
                         coat ? protocol::SingleTurn::MagicCoat : protocol::SingleTurn::Snatch);
 }
 
-// BattleScript_EffectMeanLook (bs1:1444): after the canceler, attackstring
-// and ppreduce, Protect stops it and it misses a semi-invulnerable target
-// (accuracycheck with NO_ACC_CALC, no draw: try_hit, as Showdown's
-// accuracy true), and it fails on one already trapped or behind a
-// Substitute; otherwise the target can't switch (escape_prevention, which
-// ends when the user switches out normally, ENGINE.md decision 9). Showdown
-// agrees (its protect flag comes from the gen5 mod). Log: Activate
-// trapped.
+// Mean Look (bs1:1444): Protect and a semi-invulnerable target stop it, and it
+// fails on one already trapped or behind a Substitute; otherwise the target
+// can't switch until the user leaves (ENGINE.md decision 9). Showdown agrees.
 template <typename O>
 constexpr void mean_look(Battle& battle, Player player, MoveState& m,
                          O& options) {
@@ -5110,13 +4978,9 @@ constexpr void mean_look(Battle& battle, Player player, MoveState& m,
                      protocol::Activate::Trapped);
 }
 
-// BattleScript_EffectTaunt (bs1:2308): after the canceler, attackstring and
-// ppreduce, a missed accuracy check (Protect, evasion) or an existing
-// Taunt fails it (ButItFailed); Cmd_settaunt (bsc:9156) sets 2 turns. No
-// Substitute check. Showdown's gen3 Taunt agrees (duration 2, bypasssub,
-// protect). The selection and the canceler block power-0 moves, which are
-// exactly Showdown's Status moves; the residual counts it down. Log: Start
-// Taunt, or Fail.
+// Taunt (bs1:2308, Cmd_settaunt, bsc:9156): a miss or an existing Taunt fails
+// it; else 2 turns. No Substitute check; Showdown's gen3 agrees. Power-0 moves,
+// exactly Showdown's Status moves, are blocked.
 template <typename O>
 constexpr void taunt(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& t = battle.side(foe(player)).active;
@@ -5128,18 +4992,12 @@ constexpr void taunt(Battle& battle, Player player, MoveState& m, O& options) {
   protocol::start(options.log, protocol::ident(battle, foe(player)), protocol::Start::Taunt);
 }
 
-// BattleScript_EffectEncore (bs1:1227), Cmd_trysetencore (bsc:8017): the
-// target's last move must be in its moveset with PP left, not one of
-// Showdown's gen3 failencore moves (Encore, Mimic, Mirror Move, Sketch,
-// Struggle, Transform: a superset of the decomp's Struggle, Encore and Mirror
-// Move, since the others replace their own slot), and the target must not
-// already be encored; otherwise it fails (ButItFailed). Then the accuracy
-// check (Protect, evasion; skipped when it fails anyway, as Taunt) and a
-// hidden 3-6 turn timer ((Random() & 3) + 3; Showdown's random(3, 7)). No
-// Substitute check (Showdown: bypasssub). A target that hasn't moved yet
-// this turn uses the encored move (use_move, as Showdown's
-// onOverrideAction); the residual counts it down. Log: Start Encore, or
-// Fail.
+// Encore (bs1:1227, Cmd_trysetencore, bsc:8017): it fails without a last move
+// in the moveset with PP, on Showdown's gen3 failencore moves (Encore, Mimic,
+// Mirror Move, Sketch, Struggle, Transform: a superset of the decomp's) or an
+// existing Encore; then the accuracy check and a hidden 3-6 timer. No
+// Substitute check. A target that hasn't moved yet uses the encored move
+// (use_move; Showdown's onOverrideAction).
 template <typename O>
 constexpr void encore(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& t = battle.side(foe(player)).active;
@@ -5168,23 +5026,17 @@ constexpr void encore(Battle& battle, Player player, MoveState& m, O& options) {
   protocol::start(options.log, protocol::ident(battle, foe(player)), protocol::Start::Encore);
 }
 
-// BattleScript_EffectMimic (bs1:1134), Cmd_mimicattackcopy (bsc:7844):
-// after attackstring and ppreduce it fails (ButItFailed) on a Substitute,
-// then on Protect or a semi-invulnerable target unless Locked-On, with no
-// accuracy roll (NO_ACC_CALC_CHECK_LOCK_ON); then if the user is
-// transformed, the target has no last move, the move can't be mimicked
-// (Metronome, Struggle, Sketch, Mimic) or the user knows it already.
-// Otherwise Mimic's slot holds the move with min(5, base PP) until the user
-// leaves the field (`mimicked`; pp_reduce leaves the party's PP alone).
-// Showdown's gen3 (gen4's onHit, data/mods/gen4/moves.ts:882) agrees,
-// on the target's lastMove (last_move follows it; see moveend). Log:
-// Activate Mimic + move, or Fail.
+// Mimic (bs1:1134, Cmd_mimicattackcopy, bsc:7844): it fails on a Substitute, on
+// Protect or a semi-invulnerable target unless Locked-On, a transformed user,
+// no last move, a move it can't copy, or one already known. Otherwise the slot
+// holds the move with min(5, base PP) until the user leaves (`mimicked`).
+// Showdown's gen3 agrees (data/mods/gen4/moves.ts:882).
 template <typename O>
 constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
   const ActivePokemon& t = battle.side(foe(player)).active;
-  // Hidden Power is one move on the cartridge (MOVE_HIDDEN_POWER): the user
-  // knows it if it knows any typed one, and a copy is the user's own type.
+  // Hidden Power is one move on the cartridge: any typed one counts as known,
+  // and a copy is the user's own type.
   const Move last = t.last_move;
   bool known = false;
   for (const MoveSlot& ms : a.moves) {
@@ -5209,14 +5061,10 @@ constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
                           a.moves[m.slot].id);
 }
 
-// BattleScript_EffectPainSplit (bs1:1239), Cmd_painsplitdmgcalc
-// (bsc:8049): after attackstring and ppreduce it fails (ButItFailed) on
-// Protect or a semi-invulnerable target unless Locked-On, with no accuracy
-// roll (NO_ACC_CALC_CHECK_LOCK_ON), or on a Substitute; otherwise both
-// Pokémon go to the average of their HP, capped at max HP. Showdown agrees
-// on the state, but sets the HP directly where the decomp runs datahpupdate,
-// so here the change doesn't count as damage (Counter, Focus Punch, Bide).
-// Log: SetHP for the target ([silent]), then the user.
+// Pain Split (bs1:1239, bsc:8049): it fails on Protect or a semi-invulnerable
+// target unless Locked-On, or on a Substitute; else both go to their average
+// HP. Showdown sets the HP directly where the decomp runs datahpupdate, so it
+// isn't damage (Counter, Focus Punch, Bide).
 template <typename O>
 constexpr void pain_split(Battle& battle, Player player, MoveState& m,
                           O& options) {
@@ -5235,10 +5083,8 @@ constexpr void pain_split(Battle& battle, Player player, MoveState& m,
   protocol::set_hp(options.log, protocol::ident(battle, player), user, false);
 }
 
-// BattleScript_EffectRefresh (bs1:2520), Cmd_cureifburnedparalyzedorpoisoned
-// (bsc:9119): the user's poison, burn or paralysis is cured; otherwise it
-// fails (asleep, frozen or healthy). Showdown agrees. Log: CureStatus, or
-// Fail.
+// Refresh (bs1:2520, bsc:9119): cures poison, burn or paralysis; otherwise it
+// fails. Showdown agrees.
 template <typename O>
 constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) {
   Pokemon& mon = battle.side(player).get(1);
@@ -5250,14 +5096,11 @@ constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) 
   battle.side(player).active.toxic = 0; // status1 holds the counter
 }
 
-// BattleScript_EffectHealBell (bs1:1361), Cmd_healpartystatus (bsc:8370),
-// for Heal Bell and Aromatherapy: every Pokémon on the user's side is
-// cured, the active one's Nightmare too, except that Heal Bell skips
-// Soundproof ones (the active one by its battle ability, the others by
-// their own). It never fails. Showdown's gen4 versions agree. Cured sleeps
-// are public, so their counts reset. Log, as Showdown's gen4 mod: Heal
-// Bell's Activate, then by SLOT an Immune for an active Soundproof one or
-// a silent CureStatus; Aromatherapy's one CureTeam.
+// Heal Bell and Aromatherapy (bs1:1361, Cmd_healpartystatus, bsc:8370): the
+// user's whole side is cured, the active one's Nightmare too; Heal Bell skips
+// the Soundproof (the active one by its battle ability). Never fails.
+// Showdown's gen4 versions agree. Cured sleeps are public, so their counts
+// reset.
 template <typename O>
 constexpr void heal_bell(Battle& battle, Player player, MoveState& m,
                          O& options) {
@@ -5292,18 +5135,13 @@ constexpr void heal_bell(Battle& battle, Player player, MoveState& m,
   }
 }
 
-// Bide (BattleScript_EffectBide, bs1:1149), as Showdown's gen3: the first
-// turn starts it (duration 3, the damage count reset, the user locked),
-// the second only prints its -activate and the third releases twice the
-// damage taken since (both in cancel()). The release is hit() with that
-// fixed damage, aimed at the foe, with no move line and no PP: Showdown's
-// gen3 tryMoveHit on its moveData (accuracy 100, so the stages count;
-// Protect; Normal, so a Ghost is immune; contact; Physical for Counter).
-// The damage counted is the foe's moves' on the user itself, before the cap
-// at the HP left and after Endure and Focus Band (Showdown's onDamage,
-// priority -101; hp_update). The decomp's is the same two turns, with the
-// release's typecalc ignoring immunities. Log: Start Bide; Activate Bide;
-// End Bide, then the hit or a Fail, then End Bide [silent].
+// Bide (bs1:1149), as Showdown's gen3: the first turn starts it (duration 3,
+// locked), the second prints -activate, the third releases twice the damage
+// taken since (both in cancel()). The release is hit() with that damage at the
+// foe, no move line or PP, as Showdown's moveData (accuracy 100, Protect,
+// Normal, contact, Physical). The damage counted is the foe's, before the cap
+// at the HP left (onDamage, priority -101). The decomp's release ignores
+// immunities.
 template <typename O>
 constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -5311,8 +5149,8 @@ constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
     m.self = false;
     return hit(battle, player, m, options);
   }
-  // Showdown's gen3 Bide is aimed at the user with accuracy 100, so its own
-  // stages count, as Nature Power's, and Hustle's 0.8 (it's Physical).
+  // Aimed at the user with accuracy 100, so its own stages count, and Hustle's
+  // 0.8.
   const uint32_t calc = staged_accuracy(battle, player, get(m.move).accuracy,
                                         a.boosts.acc, a.ability, true);
   if (calc < 100 && !rolls::hit(battle, player, calc, options)) {
@@ -5328,11 +5166,9 @@ constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
   protocol::start(options.log, protocol::ident(battle, player), protocol::Start::Bide);
 }
 
-// Stockpile (BattleScript_EffectStockpile, bs1:2147), as Showdown's gen3
-// stockpile (data/mods/gen3/moves.ts:591; no Def or SpD raise there): up to
-// 3 layers; at 3 its onTry fails, silently (gen3 tryMoveHit). The layers
-// aren't passed by Baton Pass (noCopy) and go silently at a switch.
-// Log: Start stockpileN.
+// Stockpile (bs1:2147), as Showdown's gen3 (data/mods/gen3/moves.ts:591, no Def
+// or SpD raise): up to 3 layers, then it fails silently. Baton Pass doesn't
+// pass them.
 template <typename O>
 constexpr void stockpile(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -5345,11 +5181,9 @@ constexpr void stockpile(Battle& battle, Player player, MoveState& m, O& options
                         a.stockpile);
 }
 
-// Swallow (BattleScript_EffectSwallow, bs1:2167), as Showdown (gen4 mod's
-// onTry, base onHit): with no Stockpile it fails silently; otherwise it
-// heals modify(max HP, 1/4, 1/2 or 1) by the layers (the decomp divides),
-// or at full HP prints -fail heal, and either way the layers go. Log: Heal
-// or Fail heal, then End Stockpile.
+// Swallow (bs1:2167), as Showdown: with no Stockpile it fails silently;
+// otherwise it heals max HP times 1/4, 1/2 or 1 by the layers (modify; the
+// decomp divides), and the layers go either way.
 template <typename O>
 constexpr void swallow(Battle& battle, Player player, MoveState& m, O& options) {
   const ActivePokemon& a = battle.side(player).active;
@@ -5369,16 +5203,12 @@ constexpr void swallow(Battle& battle, Player player, MoveState& m, O& options) 
   stockpile_end(battle, player, options);
 }
 
-// Future Sight and Doom Desire's use (BattleScript_EffectFutureSight,
-// bs1:2061; Cmd_trysetfutureattack, bsc:8357), as Showdown's gen3 onTry
-// (data/mods/gen3/moves.ts:218; gen4 mod's futuresight): it fails, silently,
-// while a future attack is pending on the foe's side (addSlotCondition).
-// Otherwise the damage is computed now, against the foe's Pokémon as it is:
-// a typeless hit (damage.hpp) of power 80 (special) or 120 (physical) with
-// no crit, and the roll (hits[0]). Protect and semi-invulnerability don't
-// stop it (onTry comes before them). It lands at the end of the turn after
-// next (future_attack). The decomp's damage has no roll and keeps the
-// move's type. Log: Start Future Sight or Doom Desire, on the user.
+// Future Sight and Doom Desire (bs1:2061, bsc:8357), as Showdown's gen3 onTry
+// (data/mods/gen3/moves.ts:218): it fails silently while one is pending on the
+// foe's side. Otherwise the damage is computed now: a typeless hit of power 80
+// (special) or 120 (physical), no crit, with the roll. Protect and
+// semi-invulnerability don't stop it. The decomp's has no roll and keeps the
+// type. It lands in future_attack.
 template <typename O>
 constexpr void future_sight_move(Battle& battle, Player player, MoveState& m,
                                  O& options) {
@@ -5398,11 +5228,9 @@ constexpr void future_sight_move(Battle& battle, Player player, MoveState& m,
                                              : protocol::Start::FutureSight);
 }
 
-// Confusion from a status move, after its own checks (Showdown's
-// addVolatile('confusion')): an existing confusion fails it silently
-// (false), Own Tempo and Safeguard stop it (TryAddVolatile; Safeguard's
-// -activate here, Own Tempo's -immune is the caller's, at onHit), else it
-// takes hold. Returns 1 if it took hold, 0 if stopped, -1 if it failed.
+// Confusion from a status move (Showdown's addVolatile): an existing one fails
+// it silently, Own Tempo and Safeguard stop it. Returns 1 if it took hold, 0 if
+// stopped, -1 if it failed.
 template <typename O>
 constexpr int8_t add_confusion(Battle& battle, Player player, O& options) {
   const Player target = foe(player);
@@ -5419,12 +5247,10 @@ constexpr int8_t add_confusion(Battle& battle, Player player, O& options) {
   return 1;
 }
 
-// Swagger and Flatter, as Showdown (boosts, then volatileStatus confusion):
-// try_hit, a Substitute (TryPrimaryHit), the raise (-boost 0 at +6), then
-// add_confusion; Own Tempo's -immune comes last (its onHit). It fails
-// (-fail) only if the raise did nothing and the target was confused
-// already. The decomp fails it first when both hold
-// (jumpifconfusedandstatmaxed, bs1:1559); the state is the same.
+// Swagger and Flatter, as Showdown: try_hit, a Substitute, the raise, then
+// add_confusion, Own Tempo's -immune last. It fails only if the raise did
+// nothing and the target was confused already. The decomp fails it first
+// (jumpifconfusedandstatmaxed, bs1:1559); same state.
 template <typename O>
 constexpr void swagger(Battle& battle, Player player, MoveState& m, StatChange c,
                        O& options) {
@@ -5454,11 +5280,9 @@ constexpr void swagger(Battle& battle, Player player, MoveState& m, StatChange c
   }
 }
 
-// Attract, as Showdown: a target of the same gender or genderless is
-// immune (onTryImmunity, so -immune after try_hit's checks); an existing
-// infatuation or Oblivious (onImmunity('attract')) fails it. No Substitute
-// check (bypasssub). It ends when the user leaves (leave(), faint()).
-// Mental Herb cures it at moveend. Log: Start Attract.
+// Attract, as Showdown: a same-gender or genderless target is immune
+// (onTryImmunity), an existing infatuation or Oblivious fails it. No Substitute
+// check. It ends when the user leaves.
 template <typename O>
 constexpr void attract(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -5475,14 +5299,11 @@ constexpr void attract(Battle& battle, Player player, MoveState& m, O& options) 
   protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Attract);
 }
 
-// Disable, as Showdown's gen3: it fails without a last move or on Struggle
-// (onTryHit), on a target already disabled, or if the last move isn't known
-// or has no PP (gen4's onStart). No Substitute check (bypasssub). Its
-// duration is random(2, 6), plus 1 if the target won't move after this
-// (gen4's onStart: !willMove), so it always covers 2-5 of the target's
-// moves; the decomp's (Random() & 3) + 2 has no +1. The hidden timer
-// counts residuals; its Durations count starts at 2, or at 1 with the +1,
-// over a 3-6 roll (chance.hpp). Log: Start Disable.
+// Disable, as Showdown's gen3: it fails without a last move or on Struggle, on
+// a disabled target, or if the move isn't known or has no PP. No Substitute
+// check. Its duration is random(2, 6), plus 1 if the target won't move after
+// this (gen4's onStart), so it covers 2-5 of its moves; the decomp's (Random()
+// & 3) + 2 has no +1. Durations: chance.hpp.
 template <typename O>
 constexpr void disable(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -5504,9 +5325,8 @@ constexpr void disable(Battle& battle, Player player, MoveState& m, O& options) 
   protocol::start_disable(options.log, protocol::ident(battle, target), t.last_move);
 }
 
-// Torment, as Showdown (bypasssub): it fails on a target already tormented;
-// the selection then leaves out the last move (usable_moves). It ends when
-// the target leaves. Log: Start Torment.
+// Torment, as Showdown: it fails on a tormented target; the selection then
+// leaves out the last move. It ends when the target leaves.
 template <typename O>
 constexpr void torment(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -5519,11 +5339,9 @@ constexpr void torment(Battle& battle, Player player, MoveState& m, O& options) 
   protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Torment);
 }
 
-// Spite, as Showdown's gen3 (bypasssub): the target's last move loses 2-5
-// PP (at most what it has); it fails if the target has no last move, doesn't
-// know it or it has no PP. The roll is drawn only when it can change the PP
-// taken (rolls::spite); below 3 PP it changes only the log, which prints
-// the roll. Log: Activate Spite.
+// Spite, as Showdown's gen3: the last move loses 2-5 PP (at most what it has);
+// it fails without a known last move with PP. The roll is recorded only where
+// it changes the PP (rolls::spite).
 template <typename O>
 constexpr void spite(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -5541,11 +5359,9 @@ constexpr void spite(Battle& battle, Player player, MoveState& m, O& options) {
   protocol::activate_spite(options.log, protocol::ident(battle, target), t.last_move, n);
 }
 
-// Foresight and Odor Sleuth, as Showdown's gen3 (accuracy 100, so evasion
-// can make it miss; bypasssub): it fails on a target already identified.
-// The target's evasion above 0 counts as 0 against it and a Ghost loses its
-// Normal and Fighting immunity (accuracy(), damage.hpp) until it leaves.
-// Log: Start Foresight.
+// Foresight and Odor Sleuth, as Showdown's gen3 (accuracy 100, bypasssub): they
+// fail on a target already identified; until it leaves, its positive evasion
+// counts as 0 and a Ghost loses its Normal and Fighting immunity.
 template <typename O>
 constexpr void foresight(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -5558,11 +5374,9 @@ constexpr void foresight(Battle& battle, Player player, MoveState& m, O& options
   protocol::start(options.log, protocol::ident(battle, target), protocol::Start::Foresight);
 }
 
-// Lock-On and Mind Reader, as Showdown's gen3 (accuracy 100, no bypasssub):
-// a lock already on (onTryHit), even on a target that has left, or a
-// Substitute (TryPrimaryHit) fails it; otherwise the user's moves hit the
-// target until the end of the next turn (lock_on, locked_on()). Log:
-// Activate Lock-On or Mind Reader [of] the target.
+// Lock-On and Mind Reader, as Showdown's gen3: a lock already on (even on a
+// target that has left) or a Substitute fails it; otherwise the user's moves
+// hit the target through the next turn (locked_on()).
 template <typename O>
 constexpr void lock_on(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
@@ -5579,15 +5393,11 @@ constexpr void lock_on(Battle& battle, Player player, MoveState& m, O& options) 
                           Move::None, protocol::ident(battle, target));
 }
 
-// Focus Energy, Ingrain, Charge, Mud Sport and Water Sport: a volatile on
-// the user. All but Charge fail if it's on already (addVolatile; the
-// Sports' settypebasedhalvers, bsc:9758); Charge restarts, as Showdown's
-// onRestart, and its gen3 version raises no Special Defense. The Sports are
-// Showdown's gen4 volatiles (gen3 inherits them, not the field condition).
-// Showdown's Charge (gen8 mod, which gen3 inherits) has no duration: it
-// ends after the user's next move other than Charge, or that move's abort
-// (use_move); the decomp's lasts to the next turn's end, Electric or not.
-// Log: Start Focus Energy, Ingrain or Charge.
+// Focus Energy, Ingrain, Charge and the Sports: a volatile on the user, failing
+// if already on (the Sports: bsc:9758), except Charge, which restarts and
+// raises no Special Defense. The Sports are Showdown's gen4 volatiles.
+// Showdown's Charge (gen8 mod) ends after the user's next other move
+// (use_move); the decomp's at the next turn's end.
 template <typename O>
 constexpr void self_volatile(Battle& battle, Player player, MoveState& m, O& options) {
   Volatiles& v = battle.side(player).active.volatiles;
@@ -5608,13 +5418,12 @@ constexpr void self_volatile(Battle& battle, Player player, MoveState& m, O& opt
 }
 
 // ---------------------------------------------------------------------------
-// Step 5 group 8: copying, calling and swapping, as Showdown's gen3.
+// Copying, calling and swapping, as Showdown's gen3
 // ---------------------------------------------------------------------------
 
 // p's ability becomes `ability`, as Showdown's setAbility: the old one's End
-// first (Flash Fire's boost ends silently; Cloud Nine and Air Lock let the
-// weather back in for Forecast). Gen 3 runs no Start for the new one, so
-// Intimidate, Trace and the weather abilities don't act.
+// runs (Flash Fire, Cloud Nine, Air Lock), and gen 3 runs no Start for the new
+// one.
 template <typename O>
 constexpr void set_ability(Battle& battle, Player player, Ability ability, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -5627,11 +5436,10 @@ constexpr void set_ability(Battle& battle, Player player, Ability ability, O& op
   if (old == Ability::CloudNine || old == Ability::AirLock) weather_change(battle, options);
 }
 
-// Transform, as Showdown's transformInto (sim/pokemon.ts:1270): accuracy
-// true, through a Substitute and Protect, but it misses a semi-invulnerable
-// target; it fails on a transformed target. The user takes the target's
-// species, types, stats but HP, stat stages, ability, Hidden Power and
-// moves, each with min(5, base PP). Log: Transform.
+// Transform, as Showdown's transformInto (sim/pokemon.ts:1270): through a
+// Substitute and Protect, but it misses a semi-invulnerable target and fails on
+// a transformed one. The user takes everything but HP, and each move gets
+// min(5, base PP).
 template <typename O>
 constexpr void transform(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -5661,13 +5469,10 @@ constexpr void transform(Battle& battle, Player player, MoveState& m, O& options
   set_ability(battle, player, t.ability, options);
 }
 
-// Sketch, as Showdown's gen4 mod (which gen3 inherits): accuracy true,
-// through Protect, but it misses a semi-invulnerable target. It fails if the
-// user is transformed, the target has no last move or is behind a
-// Substitute, the move is Sketch or Struggle, or the user knows it.
-// Otherwise Sketch's slot holds the move for good (the party's too), with
-// its base PP and the slot's PP Ups. Log: Activate Mimic + move (Showdown's
-// gen4 Sketch prints Mimic).
+// Sketch, as Showdown's gen4 mod: it misses a semi-invulnerable target, and
+// fails for a transformed user, no last move, a Substitute, Sketch or Struggle,
+// or a move already known. Otherwise the slot keeps the move for good, with
+// base PP and the slot's PP Ups. Showdown prints Mimic's -activate.
 template <typename O>
 constexpr void sketch(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -5719,13 +5524,10 @@ constexpr bool no_mirror(Move move) {
   }
 }
 
-// Mirror Move, as Showdown's gen3 (data/mods/gen3/moves.ts:432): the last
-// move that got past the accuracy check and TryHit on the user
-// (last_taken_move, Showdown's attackedBy), if its user is in (the same
-// Pokémon, last_taken_from), has used a move since it came in (its
-// lastMove, which clearVolatile drops), still knows it and it isn't on the
-// noMirror list; else it fails. The decomp
-// keeps the flag FLAG_MIRROR_MOVE_AFFECTED instead.
+// Mirror Move, as Showdown's gen3 (data/mods/gen3/moves.ts:432): the last move
+// that got past accuracy and TryHit on the user (attackedBy), if the same foe
+// is in, has moved since it came in, still knows it and it isn't on noMirror.
+// The decomp uses FLAG_MIRROR_MOVE_AFFECTED.
 template <typename O>
 constexpr void mirror_move(Battle& battle, Player player, MoveState& m, O& options) {
   const ActivePokemon& a = battle.side(player).active;
@@ -5743,17 +5545,15 @@ constexpr void mirror_move(Battle& battle, Player player, MoveState& m, O& optio
   call_move(battle, player, m, move, MoveState::NO_SLOT, options);
 }
 
-// Showdown's gen3 noassist flag: the moves Metronome can't call, plus
-// Assist and Mirror Move. The decomp also leaves out the two-turn moves
-// (IsInvalidForSleepTalkOrAssist).
+// Showdown's gen3 noassist flag. The decomp also leaves out the two-turn moves.
 constexpr bool assist_banned(Move move) {
   return (get(move).extra & Extra::NoMetronome) || move == Move::Assist ||
          move == Move::MirrorMove;
 }
 
-// Assist, as Showdown's gen4 (which gen3 inherits): a pick among the moves
-// of the user's party but itself, fainted ones included, counted with
-// repeats (rolls::assist); it fails if there are none.
+// Assist, as Showdown's gen4: a pick among the moves of the user's party but
+// itself, fainted ones included, repeats counted (rolls::assist); it fails if
+// there are none.
 template <typename O>
 constexpr void assist(Battle& battle, Player player, MoveState& m, O& options) {
   const Side& side = battle.side(player);
@@ -5771,10 +5571,9 @@ constexpr void assist(Battle& battle, Player player, MoveState& m, O& options) {
             MoveState::NO_SLOT, options);
 }
 
-// Nature Power, as Showdown's gen3 (data/mods/gen3/moves.ts): aimed at the
-// user with accuracy 95, so its own accuracy and evasion stages, Sand Veil
-// and BrightPowder count (tryMoveHit); on a hit it calls Swift. The
-// decomp calls Swift in a link battle with no accuracy check of its own.
+// Nature Power, as Showdown's gen3: aimed at the user with accuracy 95, so its
+// own stages, Sand Veil and BrightPowder count; a hit calls Swift. The decomp
+// calls Swift with no accuracy check.
 template <typename O>
 constexpr void nature_power(Battle& battle, Player player, MoveState& m, O& options) {
   const ActivePokemon& a = battle.side(player).active;
@@ -5789,9 +5588,8 @@ constexpr void nature_power(Battle& battle, Player player, MoveState& m, O& opti
   call_move(battle, player, m, Move::Swift, MoveState::NO_SLOT, options);
 }
 
-// Camouflage, as Showdown's gen4 (which gen3 inherits): Normal, or a
-// failure if the user is Normal already. Snatch steals it. Log: Start
-// typechange.
+// Camouflage, as Showdown's gen4: Normal, failing if the user is Normal
+// already.
 template <typename O>
 constexpr void camouflage(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -5800,15 +5598,12 @@ constexpr void camouflage(Battle& battle, Player player, MoveState& m, O& option
   protocol::start_type(options.log, protocol::ident(battle, player), Type::Normal, false);
 }
 
-// Conversion, as Showdown's gen3: a pick among the types of the user's
-// moves (repeats count; Hidden Power and Weather Ball are Normal, the
-// dex's) but Curse's and the user's own (rolls::conversion); it fails if
-// there are none. Conversion 2, as Showdown's gen3: the foe's last move used
-// since it came in (last_used_move), by its type as used (Struggle's is
-// Normal), and a uniform pick among the types that resist it or are immune
-// (the user's own included); it fails with none. Accuracy true, through a
-// Substitute and Protect, but it misses a semi-invulnerable target. The
-// decomp's reads the last move to hit the user. Log: Start typechange.
+// Conversion, as Showdown's gen3: a pick among the user's move types but
+// Curse's and its own (repeats count; Hidden Power and Weather Ball are
+// Normal). Conversion 2, as Showdown's gen3: a pick among the types that resist
+// the foe's last move used since it came in (last_used_move), its own type
+// included; the decomp's reads the last move to hit the user. Either fails with
+// nothing to pick.
 template <typename O>
 constexpr void conversion(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -5840,12 +5635,10 @@ constexpr void conversion(Battle& battle, Player player, MoveState& m, O& option
   protocol::start_type(options.log, protocol::ident(battle, player), t, false);
 }
 
-// Role Play, as Showdown's (gen3 runs no ability Start): accuracy true,
-// through a Substitute and Protect, but it misses a semi-invulnerable
-// target. Its TryHit fails on the same ability or Wonder Guard. Skill Swap,
-// as Showdown's skillSwap (sim/battle.ts:1315): Protect stops it; it fails
-// if either has Wonder Guard or both have the same ability. Log: Ability
-// [from] Role Play, or Activate Skill Swap.
+// Role Play, as Showdown's: it misses a semi-invulnerable target, and fails on
+// the same ability or Wonder Guard. Skill Swap, as Showdown's skillSwap
+// (sim/battle.ts:1315): Protect stops it; Wonder Guard on either side or the
+// same ability fails it.
 template <typename O>
 constexpr void role_play(Battle& battle, Player player, MoveState& m, O& options) {
   const Ability mine = battle.side(player).active.ability;
@@ -5871,14 +5664,11 @@ constexpr void role_play(Battle& battle, Player player, MoveState& m, O& options
   }
 }
 
-// Trick, as Showdown's (data/moves.ts): accuracy 100 and Protect; the
-// target's Sticky Hold makes it immune (onTryImmunity), then a Substitute
-// stops it. It fails if either item was knocked off (takeItem, gen 4 and
-// earlier), neither holds one, or either holds Mail (its onTakeItem).
-// Otherwise the items swap; a Choice Band lock outlives its band until
-// the holder's next move or the end of the turn (cancel()), and the user's
-// new band locks it into Trick (moveend, as Thief). Log: Activate Trick, then the target's
-// Item or silent EndItem, then the user's.
+// Trick, as Showdown's: Sticky Hold makes the target immune, then a Substitute
+// stops it; it fails if either item was knocked off, neither has one, or either
+// holds Mail. A Choice Band lock outlives its band until the holder's next move
+// or the turn's end (cancel()), and a new band locks the user into Trick at
+// moveend.
 template <typename O>
 constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -5900,7 +5690,7 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   const ID id = protocol::ident(battle, player);
   const ID of = protocol::ident(battle, foe(player));
   protocol::activate_with(options.log, id, protocol::Activate::Trick, Move::None, of);
-  // Each setItem runs the new item's onStart (White Herb) before its line.
+  // Each setItem runs the new item's onStart (White Herb).
   user.item = Item::None;
   target.item = mine;
   if (mine != Item::None) {
@@ -5918,13 +5708,10 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   }
 }
 
-// Recycle, as Showdown's (gen4 drops its snatch flag): the item last used
-// up in this position (Side::recycle_item, Showdown's lastItem, which gen 4
-// and earlier hand to the switch-in) comes back to an empty hand; it fails
-// otherwise. A knocked-off hand counts as empty, as Showdown's (Knock Off
-// sets no lastItem, so only an item used up earlier comes back). Showdown's
-// itemKnockedOff then still stops Trick and Thief from taking it; here the
-// recycled item replaces the sentinel and they can. Log: Item [from] Recycle.
+// Recycle, as Showdown's: the item last used up in this position
+// (Side::recycle_item, lastItem) comes back to an empty or knocked-off hand.
+// Showdown's itemKnockedOff would still stop Trick and Thief from taking it;
+// here they can.
 template <typename O>
 constexpr void recycle(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -5939,11 +5726,16 @@ constexpr void recycle(Battle& battle, Player player, MoveState& m, O& options) 
                  protocol::ItemFrom::Recycle);
 }
 
+// ---------------------------------------------------------------------------
+// The move frame and the actions
+// ---------------------------------------------------------------------------
+
 template <typename O>
 constexpr void script(Battle& battle, Player player, MoveState& m, O& options);
 
-// The move's script, by effect: m.move set, m.chosen and the hit markers
-// filled in here.
+// One use of m.move, the frame every move runs through: the setup, the
+// canceler, the shared opening, the script, moveend, then Bide's end or the
+// user's faint.
 template <typename O>
 constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) {
   assert(m.move != Move::None);
@@ -5954,8 +5746,8 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   const Effect effect = get(m.move).effect;
 
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
-  // Every script but the hits' opens with attackstring and ppreduce, and a
-  // snatchable move can then be stolen.
+  // Every script but the hits' opens with attackstring and ppreduce, after
+  // which Snatch can steal the move.
   if (!plain_hit(effect) && !m.release) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
@@ -5972,7 +5764,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   if (m.faints) faint(battle, player, options);
 }
 
-// The script for m's effect.
+// The script for m's effect: each effect once, with its parameters.
 template <typename O>
 constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   const auto log = [&] { return protocol::ident(battle, player); };
@@ -6062,9 +5854,8 @@ constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   case Effect::Charge:
   case Effect::MudSport:
   case Effect::WaterSport: return self_volatile(battle, player, m, options);
-  // Destiny Bond (Cmd_setdestinybond, bsc:8279) and Grudge never fail; the
-  // user's next move attempt clears them (cancel) and faint_target acts on
-  // them.
+  // Destiny Bond (bsc:8279) and Grudge never fail; the user's next move clears
+  // them (cancel()).
   case Effect::DestinyBond:
     battle.side(player).active.volatiles.destiny_bond = true;
     return protocol::single_move(options.log, log(), protocol::SingleMove::DestinyBond);
@@ -6094,7 +5885,7 @@ constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   case Effect::Sketch: return sketch(battle, player, m, options);
   case Effect::SleepTalk: return sleep_talk(battle, player, m, options);
   case Effect::MirrorMove: return mirror_move(battle, player, m, options);
-  // Metronome: a uniform pick among METRONOME_MOVES; it never fails.
+  // Metronome: a uniform pick among METRONOME_MOVES.
   case Effect::Metronome:
     return call_move(battle, player, m, rolls::metronome(battle, player, options),
                      MoveState::NO_SLOT, options);
@@ -6108,12 +5899,11 @@ constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   case Effect::Trick: return trick(battle, player, m, options);
   case Effect::Recycle: return recycle(battle, player, m, options);
 
-  // Splash prints -nothing (its onTryHit); Teleport fails silently in a
-  // trainer battle (gen7's onTry, which gen3 inherits).
+  // -nothing is Splash's onTryHit; Teleport fails silently in a trainer battle
+  // (gen7's onTry).
   case Effect::Splash: return protocol::nothing(options.log);
   case Effect::Teleport: m.result |= MoveResult::FAILED; return;
-  // Follow Me and Helping Hand are doubles-only: they only use PP. Helping
-  // Hand, with no ally, prints -notarget.
+  // Doubles-only: they use PP. Helping Hand with no ally prints -notarget.
   case Effect::FollowMe: return;
   case Effect::HelpingHand: return protocol::no_target(options.log, log());
 
@@ -6123,11 +5913,10 @@ constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   }
 }
 
-// HandleAction_UseMove (util:78): which move and slot the action uses, then
-// its script. Struggle uses no PP. A forced move is the locked move. Encore
-// applies even when it began after selection: the encored move replaces the
-// chosen one, unless it was overwritten, which ends the Encore. Returns
-// what follows the action.
+// HandleAction_UseMove (util:78): the move and slot the action uses, then its
+// script. Struggle uses no PP; a forced move is the locked one; an Encore that
+// began after selection replaces the chosen move, unless its move was
+// overwritten, which ends it.
 enum class After : uint8_t {
   None,
   Drag, // Roar or Whirlwind drags the foe out (MoveState::drag)
@@ -6151,10 +5940,9 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
     m.move = Move::Struggle;
     m.no_pp = true;
   } else if (forced(a)) {
-    // gCurrMovePos keeps the slot chosen when the lock began *(verify)*.
-    // A locked move uses no PP (Showdown's runMove skips deductPP while
-    // getLockedMove names one). Known gap: Showdown's Encore on a lock that
-    // Metronome called runs Metronome as the locked move instead.
+    // gCurrMovePos keeps the slot chosen when the lock began (unverified). A
+    // locked move uses no PP (Showdown's runMove skips deductPP). Known gap:
+    // Showdown's Encore on a lock Metronome called runs Metronome instead.
     m.move = a.locked_move;
     m.locked = true;
     m.no_pp = true;
@@ -6189,11 +5977,9 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   return m.drag ? After::Drag : m.pass ? After::Pass : After::None;
 }
 
-// Whether `player`, who acts after the foe's switch, uses Pursuit on the
-// switching Pokémon first: it chose Pursuit (Encore and Choice Band applied
-// at selection) and isn't fainted, asleep, frozen or loafing (Truant).
-// Showdown's gen3 condition (data/mods/gen3/moves.ts:486) and the decomp's
-// Cmd_jumpifnopursuitswitchdmg (bsc:8723) agree on these.
+// Whether `player`, acting after the foe's switch, Pursues first: it chose
+// Pursuit and isn't fainted, asleep, frozen or loafing. Showdown's gen3
+// (data/mods/gen3/moves.ts:486) and the decomp (bsc:8723) agree.
 constexpr bool pursues(const Battle& battle, Player player) {
   const Request& r = battle.request;
   const uint8_t i = index(player);
@@ -6204,30 +5990,17 @@ constexpr bool pursues(const Battle& battle, Player player) {
          !(side.active.ability == Ability::Truant && side.active.truant);
 }
 
-// RunTurnActionsFunctions (main:4937) from action `from` (0, or after a
-// Baton Pass the next one). Each action ends in HandleAction_TryFinish
-// (util:638): a faint ends the actions (cancelallactions, bsc:5850).
+// RunTurnActionsFunctions (main:4937) from action `from`; a faint ends the
+// actions (HandleAction_TryFinish, util:638). Roar's drag comes after its
+// action and before the faint check, as Showdown's runAction
+// (sim/battle.ts:2825); a dragged-out Pokémon's move is cancelled. A working
+// Baton Pass asks for the recipient after the faint check and resumes at the
+// next action.
 //
-// Roar's drag comes after its action, before the faint check, as
-// Showdown's runAction (sim/battle.ts:2825). A dragged-out Pokémon's own
-// queued move is cancelled (Showdown's runAction skips an inactive
-// Pokémon's move); a switch can't be queued after a move.
-//
-// A Baton Pass that worked asks its side for the recipient, after the faint
-// check (Showdown's switch requests, sim/battle.ts:2844), and the actions
-// resume at the next one (update's BatonPass case).
-//
-// Pursuit on a switching target (BattleScript_ActionSwitch, bs1:3088; as
-// Showdown's gen3 onFoeBeforeSwitchOut): before a switch action, a foe that
-// pursues() uses Pursuit on the Pokémon leaving, and its own action is used
-// up. It goes through the move as Showdown's useMove: no attack canceler
-// (no BeforeMove handler: paralysis, confusion, infatuation and Disable
-// don't stop it, and nothing ticks; the decomp's script skips it too),
-// double base power (pursuing), the full moveend (a Choice Band locks it). If it KOs the switching Pokémon, the chosen switch
-// still happens, in both (Showdown requeues it in gen 2-4,
-// sim/battle.ts:2772). Not on Baton Pass, Roar or a faint replacement.
-// Log: Activate Pursuit on the Pokémon leaving, then the move with [from]
-// Pursuit.
+// Pursuit on a switch (bs1:3088; Showdown's gen3 onFoeBeforeSwitchOut): the
+// foe's move runs as useMove (no canceler, double power, the full moveend) and
+// uses up its action. The switch still happens after a KO (Showdown requeues
+// it, sim/battle.ts:2772). Not on Baton Pass, Roar or a replacement.
 template <typename O>
 constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
   Turn turn{};
@@ -6244,9 +6017,9 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
                            protocol::Activate::Pursuit);
         const Status status = battle.side(p).get(1).status;
         use_move(battle, foe(p), false, turn, options, true);
-        // A KO: Showdown's switch action goes on, and its SwitchOut prints
-        // Natural Cure's cure before the queued faint; gen3's Update after
-        // the action then ends the foe's Attract before the switch line.
+        // After a KO, Showdown's SwitchOut prints Natural Cure's cure before
+        // the queued faint, and gen3's Update ends the foe's Attract before the
+        // switch line.
         const bool ko = battle.side(p).get(1).fainted();
         if (ko && battle.side(p).active.ability == Ability::NaturalCure && status.any()) {
           protocol::cure_status(options.log, protocol::ident(battle, p), status,
@@ -6262,9 +6035,9 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
         pursued = true;
       }
       if (survived) {
-        // The switch goes on, so a pursuer's faint (Rough Skin) prints after
-        // the switch line and before the queued runSwitch, which doesn't run
-        // if the battle ended (sim/battle.ts:2839).
+        // A pursuer's faint (Rough Skin) prints after the switch line and
+        // before the queued runSwitch, which doesn't run if the battle ended
+        // (sim/battle.ts:2839).
         leave(battle, p, c.data(), options);
         protocol::faints(options.log);
         if (!lost(battle.side(foe(p)))) arrive(battle, p, options);
@@ -6293,37 +6066,26 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
 }
 
 // ---------------------------------------------------------------------------
-// End of turn (BattleTurnPassed, main:3956): DoFieldEndTurnEffects
-// (util:1181), then DoBattlerEndTurnEffects (util:1460), written out in the
-// decomp's order (decided 2026-10-07: straight-line code, not a table).
-// Nothing suspends inside them, so no case tracker is kept: residual faints
-// are replaced after both passes. The battle ends at the first residual KO
-// that leaves a side with nothing, as Showdown (fieldEvent checks after
-// every handler, sim/battle.ts:569) and the decomp's checkteamslost after
-// each damage script; the decomp's Leech Seed script has none (bs1:3283),
-// and this follows Showdown there too. Two exceptions, as Showdown: sand
-// and hail hurt both Pokémon first (one field handler), and both Perish
-// Song counts run first (a duration's end skips the faint check); so both
-// last Pokémon fainting there is a tie.
+// End of turn (BattleTurnPassed, main:3956): DoFieldEndTurnEffects (util:1181),
+// then DoBattlerEndTurnEffects (util:1460), in Showdown's residual order:
+// onResidualOrder, Speed, onResidualSubOrder, then a random order among exact
+// ties (comparePriority, sim/battle.ts:408). The side timers, Wish (7) and the
+// weather (8) come first, the per-Pokémon handlers (10), then Perish Song (12).
 //
-// The order follows Showdown, which sorts every residual handler by
-// onResidualOrder, then Speed, then onResidualSubOrder (comparePriority,
-// sim/battle.ts:408), with a random order among exact ties (speedSort).
-// The side timers, Wish (order 7) and the weather (8) come first, then the
-// per-Pokémon handlers (10), then Perish Song (12). With unequal Speeds the
-// per-Pokémon handlers are Pokémon-major, as the decomp's; on an exact
-// Speed tie they interleave by subOrder (Stage), with a coin per stage
-// where both Pokémon have a handler. The decomp re-rolls one order for the
-// whole pass (ENDTURN_ORDER, util:1209). A coin is recorded only where the
-// two orders give different states (stage_order_matters); the others,
-// Wish's, the weather's and Perish Song's coins change only the log
-// (log_order).
+// With unequal Speeds the per-Pokémon handlers are Pokémon-major, as the
+// decomp's; on a tie they interleave by Stage, with a coin per stage, recorded
+// only where it changes the state (stage_order_matters). The decomp rolls one
+// order for the pass (util:1209).
+//
+// The battle ends at the first residual KO that empties a side (Showdown's
+// fieldEvent, sim/battle.ts:569), except that sand and hail hurt both first,
+// and both Perish counts run first: there both last Pokémon fainting ties.
+// Residual faints are replaced after both passes.
 // ---------------------------------------------------------------------------
 
-// ITEMEFFECT_NORMAL (util:3317) for p's active Pokémon, at ENDTURN_ITEMS1.
-// Leftovers, the HP berries and the pinch berries act only here; on the
-// cartridge and in Showdown's gen3 mod (onResidual, data/mods/gen3/items.ts)
-// they don't act right after a hit.
+// ITEMEFFECT_NORMAL (util:3317) at ENDTURN_ITEMS1. Leftovers and the HP and
+// pinch berries act only here, in both (data/mods/gen3/items.ts onResidual),
+// not right after a hit.
 template <typename O>
 constexpr void item_end_turn(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
@@ -6335,7 +6097,6 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
   switch (item.effect) {
   case HoldEffect::RestoreHp:
     // Oran, Sitrus (30 HP in Gen III) and Berry Juice: a fixed amount.
-    // Showdown's gen3 eatItem or useItem, then the heal from the item.
     if (mon.hp > mon.stats.hp / 2) return;
     use_item(battle, player, options);
     heal(mon, item.param);
@@ -6346,13 +6107,10 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
   case HoldEffect::ConfuseSweet:
   case HoldEffect::ConfuseBitter:
   case HoldEffect::ConfuseSour: {
-    // Figy, Wiki, Mago, Aguav and Iapapa (TRY_EAT_CONFUSE_BERRY, util:3213):
-    // at half HP or less, an eighth of the max HP, then confusion if the
-    // nature dislikes the flavor. As Showdown's gen3 (data/mods/gen3/
-    // items.ts onResidual, the gen6 mod's onEat): -enditem [eat], -heal,
-    // then addVolatile('confusion'), which Own Tempo and an existing
-    // confusion stop silently; Safeguard doesn't, the holder being the
-    // source.
+    // The confusion berries (util:3213): at half HP or less, an eighth of the
+    // max HP, then confusion if the nature dislikes the flavor. As Showdown's
+    // gen3, Own Tempo and an existing confusion stop it silently; Safeguard
+    // doesn't, the holder being the source.
     if (mon.hp > mon.stats.hp / 2) return;
     use_item(battle, player, options);
     heal(mon, fraction(mon, item.param));
@@ -6375,9 +6133,9 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
   case HoldEffect::SpeedUp:
   case HoldEffect::SpAttackUp:
   case HoldEffect::SpDefenseUp: {
-    // TRY_EAT_STAT_UP_BERRY (util:3230): +1 at max HP / param (4) or less.
-    // The decomp keeps the berry at +6; Showdown's gen3 eats it anyway
-    // (data/items.ts:3392, onEat's boost prints its 0), and this follows it.
+    // The stat berries (util:3230): +1 at max HP / param or less. The decomp
+    // keeps the berry at +6; Showdown's gen3 eats it (data/items.ts:3392), as
+    // here.
     if (mon.hp > mon.stats.hp / item.param) return;
     const uint8_t stat = uint8_t(item.effect) - uint8_t(HoldEffect::AttackUp);
     int8_t& b = stage(a.boosts, stat);
@@ -6388,9 +6146,8 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
     return;
   }
   case HoldEffect::CriticalUp:
-    // Lansat Berry: Focus Energy (util:3441). The decomp keeps it under
-    // Focus Energy; Showdown eats it anyway (data/items.ts:3267), as here.
-    // Its addVolatile prints nothing if Focus Energy is already there.
+    // Lansat (util:3441): Focus Energy. The decomp keeps it under Focus Energy;
+    // Showdown eats it (data/items.ts:3267), as here.
     if (mon.hp > mon.stats.hp / item.param) return;
     use_item(battle, player, options);
     if (!a.volatiles.focus_energy) {
@@ -6399,9 +6156,8 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
     a.volatiles.focus_energy = true;
     return;
   case HoldEffect::RandomStatUp: {
-    // Starf Berry: +2 to a random stat below +6 (util:3450). With none,
-    // the decomp keeps it; Showdown eats it with no boost and no draw
-    // (data/items.ts:6003), as here.
+    // Starf (util:3450): +2 to a random stat below +6. With none the decomp
+    // keeps it; Showdown eats it with no draw (data/items.ts:6003), as here.
     if (mon.hp > mon.stats.hp / item.param) return;
     const Boosts& b = a.boosts;
     use_item(battle, player, options);
@@ -6419,20 +6175,15 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
   }
 }
 
-// DoFieldEndTurnEffects (util:1181), after ENDTURN_ORDER: the side timers
-// (P1's side, then P2's, each in turn), Wish in the residual order, then
-// the weather. Sand and hail hurt each Pokémon in the residual order
-// (BattleScript_DamagingWeatherLoop, bs1:3205) and stop once the battle is
-// over (bs1:3219).
+// DoFieldEndTurnEffects (util:1181): the side timers, Wish, then the weather.
+// Sand and hail hurt each Pokémon in the residual order (bs1:3205) and stop
+// once the battle is over (bs1:3219).
 template <typename O>
 constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
                                O& options) {
-  // ENDTURN_REFLECT, LIGHT_SCREEN, MIST, SAFEGUARD (util:1218-1311): each
-  // is one pass over both sides. Showdown's gen4 orders agree (1-4, before
-  // Wish's 7 and the weather's 8). Log: SideEnd when one runs out. A side
-  // condition's handler has no Speed, so when both sides' run out in one
-  // turn their lines come in random order: a coin that isn't recorded
-  // (CLAUDE.md, "Chance").
+  // ENDTURN_REFLECT to SAFEGUARD (util:1218-1311), each over both sides;
+  // Showdown's gen4 orders 1-4 agree. A side condition has no Speed, so two
+  // ending together print in an unrecorded random order.
   using SC = protocol::SideCondition;
   const auto count_down = [&](uint8_t SideConditions::*turns, SC c) {
     bool ends[2];
@@ -6451,9 +6202,9 @@ constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
   count_down(&SideConditions::mist, SC::Mist);
   count_down(&SideConditions::safeguard, SC::Safeguard);
 
-  // ENDTURN_WISH (util:1312): it lands on whoever is active, healing half of
-  // its max HP (trywish, bsc:9311), unless it has fainted. `s1` and `s2`
-  // are the residual Speeds, with Quick Claw (residual_speeds).
+  // ENDTURN_WISH (util:1312): half the max HP to whoever is active, unless
+  // fainted (bsc:9311). `s1` and `s2` are the residual Speeds
+  // (residual_speeds).
   const Player first = speed_order(battle, s1, s2);
   for (const Player p : {first, foe(first)}) {
     Side& side = battle.side(p);
@@ -6469,19 +6220,12 @@ constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
     }
   }
 
-  // ENDTURN_RAIN, SANDSTORM, SUN, HAIL (util:1331-1427): the timer, unless
-  // an ability set the weather (hail has no permanent form in Gen III). The
-  // turn it runs out, sand and hail deal no damage (BattleScript_
-  // SandStormHailEnds), as in Showdown (fieldEvent ends the effect and moves
-  // on, sim/battle.ts:519). Otherwise they hurt each Pokémon in the residual
-  // order if the weather has effect (Cmd_weatherdamage, bsc:7602: not under
-  // Cloud Nine or Air Lock); the timer runs either way. The decomp's loop
-  // stops once a side is out (bs1:3219), so the faster of two last Pokémon
-  // dies first and loses. Showdown's weather is one field handler that hurts
-  // both before its faint queue and checkWin run (sim/battle.ts:2539, 2610),
-  // so both last Pokémon fainting is a tie; this follows Showdown.
-  // Log: Weather none when it runs out, otherwise its upkeep (printed even
-  // under Cloud Nine or Air Lock), then the damage.
+  // ENDTURN_RAIN to HAIL (util:1331-1427): the timer, unless an ability set the
+  // weather. The turn it runs out, sand and hail deal no damage
+  // (sim/battle.ts:519); otherwise they hurt each Pokémon if not suppressed
+  // (bsc:7602). The decomp's loop stops once a side is out (bs1:3219), so the
+  // faster of two last Pokémon loses; Showdown hurts both before checkWin
+  // (sim/battle.ts:2539, 2610), a tie, and this follows it.
   Field& field = battle.field;
   if (field.weather == Weather::None) return std::nullopt;
   if (!field.permanent && --field.weather_turns == 0) {
@@ -6496,7 +6240,7 @@ constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
       effective_weather(battle) == Weather::None) {
     return std::nullopt;
   }
-  // Showdown's weather hurts the Pokémon in its own Speed order (eachEvent,
+  // Showdown's weather hurts in its own Speed order (eachEvent,
   // sim/battle.ts:470), with Quick Claw and a tie coin of its own.
   const Player order = speed_order(battle, s1, s2);
   for (const Player p : {order, foe(order)}) {
@@ -6519,16 +6263,13 @@ constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
   return outcome(battle);
 }
 
-// DoBattlerEndTurnEffects (util:1460), split into Showdown's residual
-// handlers by onResidualSubOrder (the gen4 and gen3 mods, which share
-// onResidualOrder 10), so that a Speed tie can interleave them (end_of_turn).
-// Ingrain 1; Rain Dish, Shed Skin and Speed Boost 3; Leftovers and the
-// berries 4; Leech Seed 5; poison, toxic and burn 6; Nightmare 7; Curse 8;
-// binding 9; then Uproar 11, Encore 14, Taunt 15, Yawn 19, Lock-On and
-// Charge later still (Disable has no order in gen3: lock_residuals). Those last
-// only change their own Pokémon, so they share a stage, as does Truant's
-// toggle (27, in the ability stage). The decomp's order is the same up to
-// those own-Pokémon steps.
+// DoBattlerEndTurnEffects (util:1460), split by Showdown's onResidualSubOrder
+// (order 10), so that a Speed tie can interleave them: Ingrain 1; Rain Dish,
+// Shed Skin, Speed Boost 3; Leftovers and the berries 4; Leech Seed 5; poison
+// and burn 6; Nightmare 7; Curse 8; binding 9; Uproar 11; then Encore, Taunt,
+// Yawn, Lock-On and Charge, which touch only their own Pokémon and share a
+// stage (Truant's toggle shares the ability stage). Disable has no gen3 order
+// (lock_residuals).
 enum class Stage : uint8_t {
   Ingrain,
   Ability,
@@ -6547,8 +6288,8 @@ inline constexpr Stage STAGES[] = {
     Stage::Uproar,    Stage::Timers,
 };
 
-// f(std::integral_constant<Stage, s>) for each stage s in order, until one
-// returns the end of the battle.
+// f(std::integral_constant<Stage, s>) for each stage in order, until one ends
+// the battle.
 template <typename F> constexpr Flow each_stage(F f) {
   return [&]<std::size_t... I>(std::index_sequence<I...>) {
     Flow over;
@@ -6557,10 +6298,9 @@ template <typename F> constexpr Flow each_stage(F f) {
   }(std::make_index_sequence<std::size(STAGES)>{});
 }
 
-// The HP p's handler takes in a damage stage, or 0 if it deals none, before
-// the handler runs: toxic's counter steps before its damage, and Bind's
-// hidden counter ticks first, so a Pokémon freed now or whose binder has gone
-// takes none. battler_stage and stage_order_matters both use it.
+// The HP p takes in a damage stage, or 0, before the handler runs: toxic's
+// counter steps first, and a bind whose counter runs out now or whose binder
+// has gone deals none.
 constexpr uint32_t stage_damage(const Battle& battle, Player player, Stage stage) {
   const Side& side = battle.side(player);
   const ActivePokemon& a = side.active;
@@ -6586,18 +6326,11 @@ constexpr uint32_t stage_damage(const Battle& battle, Player player, Stage stage
   }
 }
 
-// One stage of DoBattlerEndTurnEffects for p's active Pokémon. A Pokémon
-// that has fainted skips it, as each case checks its HP. Returns the end of
-// the battle if a residual KO ends it.
-//
-// ENDTURN_UPROAR and ENDTURN_THRASH follow Showdown: they don't read
-// WasUnableToUseMove (ENGINE.md decision 2). Uproar is its own stage, so that
-// on a Speed tie it ends before either Pokémon's Yawn; the Thrash family's
-// lock runs out after Perish Song (lock_residuals).
-//
-// Always inlined, and called through each_stage with a constant stage: the
-// switch folds away and most stages reduce to their first check. As a call,
-// its entry, exit and dispatch cost more than the stages' work.
+// One stage of DoBattlerEndTurnEffects for p's active Pokémon; a fainted one
+// skips it. Returns the end of the battle if a residual KO ends it. Uproar and
+// the Thrash family follow Showdown (ENGINE.md decision 2). Always inlined,
+// with a constant stage, so the switch folds away: as a call it costs more than
+// the stages' work.
 template <typename O>
 [[gnu::always_inline]] constexpr Flow battler_stage(Battle& battle, Player player,
                                                     Stage stage, O& options) {
@@ -6607,8 +6340,8 @@ template <typename O>
   Pokemon& mon = side.get(1);
   const auto alive = [&] { return !mon.fainted(); };
   const ID id = protocol::ident(battle, player);
-  // Each damaging residual is its own Showdown handler, with
-  // faintMessages after it (sim/battle.ts:569).
+  // Each damaging residual is its own Showdown handler, with faintMessages
+  // after it (sim/battle.ts:569).
   const auto hurt = [&](uint32_t n, protocol::Damage reason) {
     passive_damage(battle, player, n, options);
     protocol::damage(options.log, id, mon, reason);
@@ -6626,7 +6359,7 @@ template <typename O>
     return std::nullopt;
 
   case Stage::Ability:
-    // ENDTURN_ABILITIES: ABILITYEFFECT_ENDTURN (util:2587).
+    // ENDTURN_ABILITIES (util:2587).
     if (!alive()) return std::nullopt;
     switch (a.ability) {
     case Ability::RainDish:
@@ -6636,8 +6369,8 @@ template <typename O>
       }
       break;
     case Ability::ShedSkin:
-      // Random() % 3 == 0, only with a status to cure (util:2607). It cures
-      // sleep too, which is public, so the sleep count just resets.
+      // Shed Skin: Random() % 3 == 0, drawn only with a status to cure
+      // (util:2607). A cured sleep is public, so its count resets.
       if (mon.status.any() &&
           rolls::coin(battle, player, &Action::shed_skin, 1, 3, options)) {
         const bool asleep = mon.status.asleep();
@@ -6648,9 +6381,8 @@ template <typename O>
       }
       break;
     case Ability::SpeedBoost:
-      // Not on the turn it came in (isFirstTurn, decision 14). Battle.boost
-      // prints -ability|P|Speed Boost|boost before a boost from an ability,
-      // and neither at +6 (sim/battle.ts:2073).
+      // Not on the turn it came in (decision 14). Showdown prints neither the
+      // -ability nor a boost at +6 (sim/battle.ts:2073).
       if (a.boosts.spe < 6 && a.first_turn != 2) {
         a.boosts.spe++;
         protocol::ability(options.log, protocol::ident(battle, player), Ability::SpeedBoost,
@@ -6672,11 +6404,9 @@ template <typename O>
     return std::nullopt;
 
   case Stage::LeechSeed: {
-    // ENDTURN_LEECH_SEED (util:1501): max HP / 8 from the seeded Pokémon,
-    // then the seeder (the foe's active Pokémon) gains what was lost, or
-    // loses it to the seeded Pokémon's Liquid Ooze
-    // (BattleScript_LeechSeedTurnDrain, bs1:3265). The seeded Pokémon
-    // faints first (bs1:3283).
+    // ENDTURN_LEECH_SEED (util:1501, bs1:3265): max HP / 8 from the seeded
+    // Pokémon to the seeder, or from the seeder by Liquid Ooze. The seeded
+    // Pokémon faints first (bs1:3283).
     const Player seeder = foe(player);
     Pokemon& seeder_mon = battle.side(seeder).get(1);
     if (!v.leech_seed || !alive() || seeder_mon.fainted()) return std::nullopt;
@@ -6685,7 +6415,7 @@ template <typename O>
     const ID seeder_id = protocol::ident(battle, seeder);
     protocol::damage_seeded(options.log, id, mon, seeder_id);
     if (ooze) {
-      // Showdown's gen4 Liquid Ooze damages with instafaint
+      // Showdown's gen4 Liquid Ooze has instafaint
       // (data/mods/gen4/abilities.ts:256): a seeder it KOs faints first.
       passive_damage(battle, seeder, drained, options);
       protocol::damage_ability(options.log, seeder_id, seeder_mon,
@@ -6700,8 +6430,8 @@ template <typename O>
   }
 
   case Stage::Status: {
-    // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's
-    // counter, at most 15, times 1/16; 1/8. One status, so one handler.
+    // ENDTURN_POISON, BAD_POISON, BURN (util:1517-1552): 1/8; toxic's counter
+    // (at most 15) / 16; 1/8.
     const uint32_t n = stage_damage(battle, player, stage);
     if (n == 0) return std::nullopt;
     if (mon.status.badly_poisoned() && a.toxic != ActivePokemon::MAX_TOXIC) a.toxic++;
@@ -6723,15 +6453,11 @@ template <typename O>
     return hurt(stage_damage(battle, player, stage), protocol::Damage::Curse);
 
   case Stage::Bind: {
-    // ENDTURN_WRAP (util:1585), as Showdown's partiallytrapped (gen4 mod:
-    // 3-6 turns, order 10, subOrder 9; gen5 mod's onResidual, 1/16): the
-    // hidden counter ticks first, and at 0 the Pokémon is freed; otherwise,
-    // if the binder has left (wrapper_gone), it ends silently; else 1/16.
-    // The decomp frees it as the binder leaves. With the binder gone the
-    // binding ends here either way, so the tick changes only the log: it
-    // isn't recorded (the count is kept until then, so randomize_hidden
-    // still resamples the counter). Log: End Bound, or End BoundSilent, or
-    // Damage Bound.
+    // ENDTURN_WRAP (util:1585), as Showdown's gen4 partiallytrapped: the hidden
+    // counter ticks first and at 0 frees the Pokémon; a binding whose binder
+    // has left ends silently, else 1/16. The decomp frees it as the binder
+    // leaves. With the binder gone the tick changes only the log, so it isn't
+    // recorded.
     if (v.wrapped == 0 || !alive()) return std::nullopt;
     const uint32_t n = stage_damage(battle, player, stage);
     v.wrapped--;
@@ -6754,7 +6480,7 @@ template <typename O>
       a.wrapped_move = Move::None;
       return std::nullopt;
     }
-    // A faint clears the volatiles: the log's move is read first.
+    // A faint clears the volatiles, so the move is read first.
     const Move by = a.wrapped_move;
     assert(n != 0);
     passive_damage(battle, player, n, options);
@@ -6764,9 +6490,8 @@ template <typename O>
   }
 
   case Stage::Uproar: {
-    // Showdown's gen4 uproar condition (order 10, subOrder 11): the hidden
-    // duration ticks first; at 0 it ends, else the upkeep. The decomp's
-    // ENDTURN_UPROAR also ends it if the user couldn't move (util:1647).
+    // Showdown's gen4 uproar (subOrder 11): the hidden duration ticks, ending
+    // at 0. The decomp also ends it if the user couldn't move (util:1647).
     if (v.uproar == 0 || !alive()) return std::nullopt;
     const bool ended = --v.uproar == 0;
     if constexpr (CHANCE<O>) {
@@ -6787,8 +6512,8 @@ template <typename O>
     break;
   }
 
-  // ENDTURN_ENCORE (util:1713): it ends if the move was overwritten or its
-  // PP ran out (public), else the hidden timer ticks.
+  // ENDTURN_ENCORE (util:1713): it ends if the move was overwritten or out of
+  // PP, else the hidden timer ticks.
   if (a.encore_timer != 0) {
     const MoveSlot& ms = a.moves[a.encored_slot];
     const bool lost = ms.id != a.encored_move || ms.pp == 0;
@@ -6810,18 +6535,15 @@ template <typename O>
   }
 
   // ENDTURN_LOCK_ON, TAUNT (util:1734-1748). Lock-On is on its user, as
-  // Showdown; Charge ends in use_move.
+  // Showdown's.
   if (v.lock_on != 0 && --v.lock_on % 4 == 0) v.lock_on = 0;
   if (a.taunt != 0 && --a.taunt == 0) {
     protocol::end_effect(options.log, id, protocol::End::Taunt);
   }
 
-  // ENDTURN_YAWN (util:1752): the Pokémon falls asleep the turn after,
-  // unless it has a status, Vital Spirit or Insomnia, or an Uproar is on
-  // (whose -fail Showdown prints).
-  // Safeguard doesn't stop it, but Sleep Clause does (Showdown's yawn ends
-  // with trySetStatus from the user, which the clause checks).
-  // Log: End Yawn [silent] (its onEnd), then the sleep.
+  // ENDTURN_YAWN (util:1752): sleep the turn after, unless the Pokémon has a
+  // status, Vital Spirit or Insomnia, or an Uproar is on. Safeguard doesn't
+  // stop it; Sleep Clause does (Showdown's trySetStatus from the user).
   if (v.yawn != 0 && --v.yawn == 0 && alive()) {
     protocol::end_effect(options.log, id, protocol::End::Yawn);
     if (can_status(battle, player, Secondary::Sleep) && !sleep_clause(battle, player)) {
@@ -6833,31 +6555,24 @@ template <typename O>
     }
   }
 
-  // The decomp's ENDTURN_ITEMS2 (util:1501) cures here what the passes above
-  // set; Showdown's berries wait for the Update after all the residuals
-  // (end_of_turn), so one Lum Berry takes both Yawn's sleep and Thrash's
-  // confusion.
+  // The decomp's ENDTURN_ITEMS2 (util:1501) cures here; Showdown's berries wait
+  // for the Update after all the residuals (end_of_turn), so one Lum Berry
+  // takes both Yawn's sleep and Thrash's confusion.
   return std::nullopt;
 }
 
-// Whether the order of one stage on a Speed tie changes the state, computed
-// by running it both ways on copies. Only Leech Seed (it heals or hurts the
-// seeder: a capped heal, a faint between the two drains, Liquid Ooze) and
-// the damage stages (both last Pokémon fainting there: the first to faint
-// loses) can; the other stages touch their own Pokémon only. Two ends of
-// the battle with the same Result are the same state, whatever HP the
-// winner is left at (CLAUDE.md, "Chance").
+// Whether two orders of one stage end in the same state. Only Leech Seed and
+// the damage stages can differ; two ends with the same Result are the same,
+// whatever HP the winner keeps (CLAUDE.md, "Chance").
 constexpr bool same_state(const Battle& x, const Flow& fx, const Battle& y,
                           const Flow& fy) {
   if (fx || fy) return fx == fy;
   return x.sides[0] == y.sides[0] && x.sides[1] == y.sides[1];
 }
 
-// Whether `run(battle, options, first)` with P1 first and with P2 first, on
-// copies, gives different states, or (with Chance) records different draws:
-// an order that ends the battle the same way can still skip a draw the
-// other records (a bind tick after the last Pokémon faints), and an
-// unrecorded coin there would leave two keys covering one branch.
+// Whether `run` with P1 first and with P2 first, on copies, differs in the
+// state or (with Chance) in the draws recorded: one order can skip a draw the
+// other records, which would leave two keys for one branch.
 template <typename O, typename F>
 constexpr bool orders_differ(const Battle& battle, const O& options, F run) {
   using C = std::conditional_t<detail::CHANCE<O>,
@@ -6890,20 +6605,15 @@ constexpr bool stage_orders_differ(const Battle& battle, Stage stage,
   });
 }
 
-// stage_orders_differ without the copies. Within a stage each handler
-// touches its own Pokémon, except through Leech Seed (the seeder's HP), the
-// battle ending after a handler, and a faint's effects on the foe, of which
-// only wrapper_gone is read here, by Bind. So:
-// - Leech Seed: both are seeded and in (else one handler is a no-op).
-// - Status, Nightmare, Curse: both hits are lethal and both Pokémon are
-//   their side's last (the first to faint loses). Otherwise the faints, HP
-//   or Result agree; the stages draw nothing.
-// - Bind: both are bound and either hit is lethal: the other then ends
-//   silently, or isn't reached and its tick goes unrecorded.
-// Over-approximated where cheaper (mutual Leech Seed, Bind): a coin
-// recorded where it needn't be is one extra chance node; one left
-// unrecorded where it mattered would be a bug, which debug builds check
-// against the copies.
+// stage_orders_differ without the copies. Each handler touches its own Pokémon,
+// except through the seeder's HP, the battle ending, and wrapper_gone. So it
+// matters when:
+// - Leech Seed: both are seeded and in.
+// - Status, Nightmare, Curse: both hits are lethal and both are their side's
+//   last.
+// - Bind: both are bound and either hit is lethal.
+// Over-approximated where cheaper: an extra coin is one extra chance node, a
+// missing one a bug, which debug builds check against the copies.
 template <typename O>
 constexpr bool stage_order_matters(const Battle& battle, Stage stage,
                                    const O& options) {
@@ -6945,8 +6655,8 @@ constexpr bool stage_order_matters(const Battle& battle, Stage stage,
   return matters;
 }
 
-// The per-Pokémon residuals with unequal Speeds: every stage of `first`'s,
-// then every stage of the other's.
+// The per-Pokémon residuals with unequal Speeds: every stage of `first`'s, then
+// the other's.
 template <typename O>
 constexpr Flow battler_pass(Battle& battle, Player first, O& options) {
   for (const Player p : {first, foe(first)}) {
@@ -6958,16 +6668,12 @@ constexpr Flow battler_pass(Battle& battle, Player first, O& options) {
   return std::nullopt;
 }
 
-// Quick Claw in the residual order, as Showdown: updateSpeed before the
-// residuals (sim/battle.ts:2818) gives a holder 65535 Speed on a turn its
-// roll succeeded (gen3 getActionSpeed, data/mods/gen3/scripts.ts:18), for
-// every residual handler, Wish and the weather included. The decomp's
-// ENDTURN_ORDER uses the turn's draw too (util:1209). `s1` and `s2` are the
-// Speeds before the residuals, raised here if the roll succeeded. The roll
-// is the turn's one draw; if the move order didn't need it, it is drawn
-// here if it changes the comparison, and returned as pending: Wish and the
-// weather use it, and keep_residual_quick_claw records it after them if the
-// battler pass needs it.
+// Quick Claw in the residual order, as Showdown: updateSpeed
+// (sim/battle.ts:2818) gives a successful holder 65535 Speed for every residual
+// handler (data/mods/gen3/scripts.ts:18); the decomp's ENDTURN_ORDER also uses
+// the turn's draw (util:1209). If the move order didn't draw it, it is drawn
+// here when it changes the comparison, and returned as pending for
+// keep_residual_quick_claw.
 struct ResidualSpeeds {
   bool pending;  // drawn here, not yet recorded
   bool proc;
@@ -7000,13 +6706,10 @@ constexpr ResidualSpeeds residual_speeds(Battle& battle, uint32_t& s1, uint32_t&
   return r;
 }
 
-// Whether the order of the two per-Pokémon passes (Pokémon-major, by Speed
-// with Quick Claw) can change the state or the draws recorded. Each pass
-// touches only its own Pokémon, except through Leech Seed (the seeder's
-// HP), binding (the binder's faint frees its target), an Uproar that ends
-// before the other's Yawn, and a faint, which can end the battle before the
-// other pass (and its draws) or a Cloud Nine. A fainted Pokémon's pass does
-// nothing. Over-approximated: the damage ignores the pass's heals.
+// Whether the order of the two per-Pokémon passes can change the state or the
+// draws recorded: through Leech Seed, binding, an Uproar ending before the
+// other's Yawn, or a faint ending the battle or a Cloud Nine.
+// Over-approximated: the damage ignores the pass's heals.
 constexpr bool pass_order_matters(const Battle& battle) {
   const Side& s1 = battle.sides[0];
   const Side& s2 = battle.sides[1];
@@ -7025,17 +6728,16 @@ constexpr bool pass_order_matters(const Battle& battle) {
   return false;
 }
 
-// Records a residual Quick Claw draw that the passes' order needs: on a
-// Speed tie either way (the stage coins), or where pass_order_matters. An
-// unrecorded draw stays out of the request, which a residual faint's
-// request keeps past the update (replacement_order).
+// Records a pending residual Quick Claw draw if the order needs it: a Speed tie
+// either way, or pass_order_matters. An unrecorded draw stays out of the
+// request (replacement_order).
 template <typename O>
 constexpr void keep_residual_quick_claw(Battle& battle, const ResidualSpeeds& r,
                                         O& options) {
   if (!r.pending) return;
   const bool matters = r.tie || pass_order_matters(battle);
-  // The copies can also differ in two Yawns' hidden sleep lengths, drawn in
-  // the other order, which the key needn't tell apart.
+  // The copies can also differ in two Yawns' hidden sleep lengths, drawn in the
+  // other order, which the key needn't tell apart.
   assert(matters || (battle.sides[0].active.volatiles.yawn == 1 &&
                      battle.sides[1].active.volatiles.yawn == 1) ||
          !orders_differ(battle, options, [](Battle& b, auto& o, Player p) {
@@ -7044,25 +6746,17 @@ constexpr void keep_residual_quick_claw(Battle& battle, const ResidualSpeeds& r,
   if (matters) rolls::quick_claw_keep(battle, r.proc, options);
 }
 
-// Perish Song's count for p's active Pokémon, as Showdown (decided
-// 2026-10-07): its gen4 condition (onResidualOrder 12,
-// data/mods/gen4/moves.ts:1017) counts down in the residual pass, after the
-// per-Pokémon residuals and in their order, so its faints are replaced with
-// theirs. The decomp's HandleWishPerishSongOnTurnEnd (util:1825) runs it
-// after the residual faints are replaced, with a request of its own. The
-// count shows 3, 2, 1; at 0 the Pokémon faints. Both counts run before the
-// battle can end: Showdown's fieldEvent skips faintMessages after a
-// handler whose duration ends (sim/battle.ts:519), and the count's faint is
-// its onEnd (data/moves.ts:13263), so two last Pokémon at 0 tie. Showdown runs Speed Boost, Truant's toggle and White Herb after it
-// (order 27-29); that changes only the log. Log: Start perishN (perish0
-// before the faint).
+// Perish Song's count, as Showdown's gen4 condition (onResidualOrder 12,
+// data/mods/gen4/moves.ts:1017): after the per-Pokémon residuals and in their
+// order, its faints replaced with theirs. The decomp (util:1825) runs it after
+// the replacements, with its own request. Both counts run before the battle can
+// end (sim/battle.ts:519), so two last Pokémon at 0 tie.
 template <typename O>
 constexpr void perish_count(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   Pokemon& mon = battle.side(player).get(1);
   if (!a.volatiles.perish_song || mon.fainted()) return;
-  // Showdown's duration runs 4 to 0 from the move, so the count it prints
-  // is the timer before this step.
+  // Showdown's duration runs 4 to 0, so it prints the timer before this step.
   protocol::start_count(options.log, protocol::ident(battle, player), protocol::Start::Perish,
                         a.perish_song_timer);
   if (a.perish_song_timer != 0) {
@@ -7073,25 +6767,14 @@ constexpr void perish_count(Battle& battle, Player player, O& options) {
   passive_damage(battle, player, mon.hp, options);
 }
 
-// A future attack landing on p's side, as Showdown's futuremove slot
-// condition (data/conditions.ts:379; gen4 mod's order 11, so after every
-// per-Pokémon residual and before Perish Song): its duration ticks, and at
-// 0 the attack lands on whatever Pokémon is in, unless it has fainted (the
-// attack is spent; Showdown only hints). The landing is trySpreadMoveHit
-// with gen4's steps: a semi-invulnerable target is missed unless locked on, then the
-// accuracy (Future Sight 90, Doom Desire 85) with the user's accuracy
-// stage only if it is still in (stages clear at a switch or faint), its
-// ability wherever it is (gen3 doesn't ignore a benched Pokémon's
-// abilities), and the target's evasion and modifiers (staged_accuracy);
-// Protect doesn't stop it (no protect flag), Wonder Guard lets '???'
-// through. Then the stored damage, through a Substitute, with Focus Band
-// (Action::future) but no Endure (survive(); gen4's Endure skips future
-// moves, data/mods/gen4/moves.ts:434); Rage counts the hit, Bide
-// the damage. Destiny Bond doesn't take the user (its onFaint skips future
-// moves). The decomp (HandleWishPerishSongOnTurnEnd, util:1781) lands it
-// after the residual faints are replaced, with a request of its own.
-// Log: End move: M, then Miss (the user benched if it has left; [miss]
-// on this update's last move line, as attrLastMove), or the damage.
+// A future attack on p's side, as Showdown's futuremove
+// (data/conditions.ts:379; order 11): at 0 it lands on whoever is in, unless
+// fainted. A semi-invulnerable target is missed unless locked on; the accuracy
+// uses the user's stage only while it is in, its ability wherever it is, and
+// the target's evasion. No Protect; Wonder Guard lets it through. The stored
+// damage goes through a Substitute, with Focus Band but no Endure
+// (data/mods/gen4/moves.ts:434), and no Destiny Bond. The decomp (util:1781)
+// lands it after the replacements, with its own request.
 template <typename O>
 constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
@@ -7114,8 +6797,7 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
                        : protocol::benched(ID::init(user, position));
   protocol::end_effect(options.log, id, protocol::End::FutureMove, move);
   const ActivePokemon& t = side.active;
-  // The user's Lock-On, while it's in, reaches a semi-invulnerable target
-  // too (lockon's onSourceInvulnerability, as invulnerable()).
+  // The user's Lock-On, while it's in, reaches a semi-invulnerable target too.
   const bool locked = in && locked_on(battle, user);
   bool lands = !t.volatiles.semi_invulnerable() || locked;
   if (lands && !locked) {
@@ -7135,10 +6817,9 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   m.slot = MoveState::NO_SLOT;
   const uint32_t d = survive(battle, user, m, stored, rolls::FUTURE, options);
   m.hp_dealt = hp_update(battle, player, d, m, options);
-  // Its tryMoveHit records it in attackedBy, and both moves are on Mirror
-  // Move's noMirror list: Mirror Move fails until the next attack. Unless
-  // its user is out: the next turn drops attackedBy entries whose source
-  // isn't active (sim/battle.ts:1707), so the attack before it counts again.
+  // It enters attackedBy, and both moves are noMirror, so Mirror Move fails
+  // until the next attack; unless its user is out, since the next turn drops
+  // absent sources (sim/battle.ts:1707).
   if (in) {
     side.active.last_taken_move = Move::None;
     side.active.last_taken_from = 0;
@@ -7151,8 +6832,8 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
     rage(battle, user, m, options);
   }
   protocol::faints(options.log);
-  // The hit loop's Update after its faintMessages (sim/battle-actions.ts:996)
-  // ends the foe's Attract once its source has fainted.
+  // The hit loop's Update after faintMessages (sim/battle-actions.ts:996) ends
+  // the foe's Attract once its source has fainted.
   if (ActivePokemon& f = battle.side(user).active; target.fainted() && f.volatiles.infatuated) {
     protocol::end_effect(options.log, protocol::ident(battle, user), protocol::End::Attract);
     f.volatiles.infatuated = false;
@@ -7160,20 +6841,15 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   return outcome(battle);
 }
 
-// The durations with no residual order, which Showdown runs after every
-// other residual (Perish Song's included), for p's active Pokémon. Each
-// lasts while its move renews it (ActivePokemon::renewed: Showdown's
-// duration 2, which this pass brings to 1).
-// - lockedmove (data/conditions.ts:253): at its end the lock goes, and with
-//   trueDuration at 1 the user is confused (onEnd: -start confusion
-//   [fatigue], a fresh 2-5; not over a confusion or Own Tempo, and
-//   Safeguard doesn't stop a confusion from the user itself). Otherwise
-//   onResidual: a sleeping user loses the lock silently, else trueDuration
-//   counts down. The decomp's ENDTURN_THRASH (util:1673) counts the lock
-//   down only on turns the move ran, and ends it if the user couldn't move.
-// - rollout and iceball, furycutter: end silently.
-// - Bide (gen3 mod; its duration 3 at the start): ends silently at 0, if its
-//   third turn's action never came (a faint ended the actions).
+// The durations with no residual order, which Showdown runs after every other
+// residual, Perish Song's included. Each lasts while its move renews it
+// (ActivePokemon::renewed: Showdown's duration 2).
+// - lockedmove (data/conditions.ts:253): ending with trueDuration 1, the user
+//   is confused (-start confusion [fatigue]) unless confused already or Own
+//   Tempo. A sleeping user loses the lock silently. The decomp (util:1673)
+//   counts down only on turns the move ran.
+// - Rollout, Ice Ball and Fury Cutter end silently.
+// - Bide (gen3 mod) ends silently if its third turn's action never came.
 template <typename O>
 constexpr void lock_residuals(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
@@ -7181,10 +6857,9 @@ constexpr void lock_residuals(Battle& battle, Player player, O& options) {
   Volatiles& v = a.volatiles;
   if (side.get(1).fainted()) return;
   if (v.thrash != 0) {
-    // trueDuration becomes public at the second residual (Durations count
-    // 2): the lock goes on only at 2, and ends in confusion only at 1. At
-    // the first it is 2 or 3, and the lock goes on. Recorded once, with
-    // 1/2 (True: the 2-turn length); the count is then 0, untracked.
+    // trueDuration is public at the second residual: the lock goes on only at
+    // 2, and ends in confusion only at 1. Recorded once, with 1/2; the count is
+    // then untracked.
     if constexpr (CHANCE<O>) {
       uint8_t& c = options.chance.durations.get(player).attacking;
       if (c == 2) {
@@ -7226,12 +6901,10 @@ constexpr void lock_residuals(Battle& battle, Player player, O& options) {
   if (v.bide != 0 && --v.bide == 0) end_bide(battle, player, options);
 }
 
-// Disable's end, as Showdown's gen3 condition, which drops gen4's residual
-// order (data/mods/gen3/moves.ts:210), so it runs with the unordered
-// durations, after Perish Song (lock_residuals). The decomp's
-// ENDTURN_DISABLE (util:1692) runs among the battler's other timers. It
-// ends silently if the Pokémon no longer knows the move (public), else the
-// hidden timer ticks. Log: End Disable.
+// Disable's end, as Showdown's gen3, with no residual order
+// (data/mods/gen3/moves.ts:210), so after Perish Song; the decomp's runs with
+// the other timers (util:1692). It ends silently if the move is no longer
+// known, else the hidden timer ticks.
 template <typename O>
 constexpr void disable_residual(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
@@ -7258,30 +6931,26 @@ constexpr void disable_residual(Battle& battle, Player player, O& options) {
 }
 
 // HandleEndTurn_ContinueBattle (main:3932), then BattleTurnPassed's residuals
-// (main:3956), the future attacks, Perish Song's count and
-// HandleFaintedMonActions.
+// (main:3956), the future attacks, Perish Song and HandleFaintedMonActions.
 template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
     a.volatiles.flinched = false;
     // The decomp also cancels a sleeping Pokémon's multi-turn move here
-    // (main:3944); Showdown keeps it until the move is aborted (see
-    // inflict()), or for the Thrash family until the residuals
-    // (lock_residuals).
+    // (main:3944); Showdown keeps it until the move is aborted, or the
+    // residuals for the Thrash family.
   }
-  // The order (see the section comment): ENDTURN_ORDER (util:1209) runs
-  // GetWhoStrikesFirst with the chosen moves' priority; Showdown's residual
-  // handlers have none. Showdown sorts every handler once, by the Speeds
-  // before the residuals (with Quick Claw): a weather that ends or a Speed
-  // Boost doesn't reorder them.
+  // ENDTURN_ORDER (util:1209) uses the chosen moves' priority; Showdown's
+  // residuals have none, and are sorted once by the Speeds before them (with
+  // Quick Claw).
   uint32_t s1 = speed(battle, Player::P1);
   uint32_t s2 = speed(battle, Player::P2);
   const ResidualSpeeds rs = residual_speeds(battle, s1, s2, options);
   if (Flow over = field_residuals(battle, s1, s2, options)) return over;
   keep_residual_quick_claw(battle, rs, options);
   const Player faster = s1 > s2 ? Player::P1 : Player::P2;
-  // A log-only order: on a tie, a coin per stage on these Speeds, not the
-  // current ones (log_order), which a Speed Boost may have changed.
+  // A log-only order: a coin on a tie of these Speeds, not the current ones
+  // (log_order).
   const auto coin = [&] { return speed_order(battle, s1, s2); };
   if (s1 != s2) {
     if (Flow over = battler_pass(battle, faster, options)) return over;
@@ -7299,9 +6968,8 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     });
     if (over) return over;
   }
-  // The future attacks, by the Speed of the Pokémon each lands on: a coin
-  // on a tie if both land this turn (always recorded; either could end the
-  // battle).
+  // The future attacks, by the Speed of the Pokémon each lands on, with a
+  // recorded coin on a tie: either could end the battle.
   Player order = faster;
   if (s1 == s2) {
     const bool both = battle.sides[0].conditions.future_sight == 1 &&
@@ -7322,17 +6990,15 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   // White Herb's residual (order 29), the last.
   last = coin();
   for (const Player p : {last, foe(last)}) white_herb(battle, p, options);
-  // Showdown's stall expires with the residuals, before a residual faint's
-  // replacement: a turn without a successful Protect, Detect or Endure ends
-  // the chain (protect()).
+  // Showdown's stall expires with the residuals, before any replacement
+  // (protect()).
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
     if (a.stall != 0 && --a.stall == 0) a.protect_uses = 0;
   }
   if (Flow over = outcome(battle)) return over;
-  // Showdown's gen3 Update after the residual action (sim/battle.ts:2915),
-  // unless a replacement is due: a berry takes what came after the item
-  // stage (Thrash's confusion, Yawn's sleep).
+  // Showdown's gen3 Update after the residuals (sim/battle.ts:2915), unless a
+  // replacement is due: a berry takes Thrash's confusion or Yawn's sleep.
   if (!battle.sides[0].get(1).fainted() && !battle.sides[1].get(1).fainted()) {
     const Player first = log_order(battle);
     for (const Player p : {first, foe(first)}) item_cure(battle, p, options);
@@ -7340,8 +7006,12 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   return faints(battle, Phase::FaintAfterResiduals);
 }
 
-// The rest of BattleTurnPassed (main:3974-4013): the next turn, or a tie at
-// the turn cap.
+// ---------------------------------------------------------------------------
+// Requests and update
+// ---------------------------------------------------------------------------
+
+// The rest of BattleTurnPassed (main:3974-4013): the next turn, or a tie at the
+// turn cap.
 constexpr Result next_turn(Battle& battle) {
   turn_cleanup(battle);
   battle.request = Request{};
@@ -7374,9 +7044,8 @@ constexpr Result checked(const Battle& battle, Result result) {
   return result;
 }
 
-// The end of update's messages: the Faints still queued, then the winner
-// or a tie, or the next turn's number, then the terminating None.
-// Result::start() is returned only by start() and next_turn().
+// The end of update's messages: the queued Faints, the winner, a tie or the
+// next turn, then None. Only start() and next_turn() return Result::start().
 template <typename O>
 constexpr Result finish(const Battle& battle, Result result, O& options) {
   protocol::faints(options.log);
@@ -7394,8 +7063,8 @@ constexpr Result finish(const Battle& battle, Result result, O& options) {
 
 } // namespace detail
 
-// The legal choices for `player` given the request type its last Result
-// asked for, written to `out`; returns how many (at least 1).
+// The legal choices for `player` given its request, written to `out`; returns
+// how many (at least 1).
 constexpr uint8_t choices(const Battle& battle, Player player,
                           Choice::Type request,
                           std::span<Choice, MAX_CHOICES> out) {
@@ -7467,11 +7136,8 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
       select(battle, Player::P2, c2);
       order(battle, options);
       // CheckFocusPunch_ClearVarsBeforeTurnStarts (main:4906): Focus Punch's
-      // setup is only a message (bs1:3709), which the decomp skips for a
-      // sleeping user (main:4915) and Showdown doesn't (its focuspunch
-      // condition's onStart: SingleTurn Focus Punch, from beforeTurnMove
-      // actions, sorted by Speed with a tie shuffle of their own).
-      // TryClearRageStatuses follows Showdown instead (cancel()).
+      // message (bs1:3709), which the decomp skips for a sleeping user and
+      // Showdown doesn't (beforeTurnMove, by Speed with its own tie shuffle).
       const Player punch = log_order(battle);
       for (const Player p : {punch, foe(punch)}) {
         if (battle.request.choice[index(p)].type() == Choice::Move &&
@@ -7481,8 +7147,8 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
         }
       }
     } else {
-      // Finish Baton Pass's switch-in. A recipient that faints to Spikes
-      // ends the actions, as any faint.
+      // Finish Baton Pass's switch-in. A recipient that faints to Spikes ends
+      // the actions.
       Request& r = battle.request;
       const Player passer = r.next == 1 ? r.first : foe(r.first);
       baton_pass_in(battle, passer, (passer == Player::P1 ? c1 : c2).data(),
