@@ -494,8 +494,7 @@ static_assert(max_pp(Move::Growl, 3) == 64 && max_pp(Move::Sketch, 3) == 1);
 // A party Pokémon. Never reordered: Side::order maps SLOTs to it.
 //
 // Types live here and switch-in copies them (decision 7). The item
-// is Item::KnockedOff once Knock Off has hit it (decision 8; the sentinel is
-// still to be added to the generator). Hidden Power's type is in its move ID;
+// is Item::KnockedOff once Knock Off has hit it (decision 8). Hidden Power's type is in its move ID;
 // `hidden_power` (30-70) and `hidden_power_type` are the Pokémon's own, from
 // its IVs, set whether or not it knows the move: a Hidden Power it copies
 // (Mimic) is its own, as the decomp's hiddenpowercalc and Showdown's hpType.

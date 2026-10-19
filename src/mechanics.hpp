@@ -36,7 +36,7 @@ constexpr uint8_t index(Player p) { return uint8_t(p); }
 // ---------------------------------------------------------------------------
 
 // The decomp's MOVE_UNAVAILABLE, which gLastMoves and gLastLandedMoves record
-// for a stopped move. None stands in until the generator has a sentinel
+// for a stopped move. None stands in until src/data/moves.hpp has a sentinel
 // (CLAUDE.md, "Open").
 inline constexpr Move UNAVAILABLE = Move::None;
 

@@ -127,13 +127,7 @@ then `cmake --build --preset X` and `ctest --preset X`. Tests build with
 
 `teams/ou/` holds the Smogon OU teams; `tools/teams/` the synthetic group
 teams; `tools/fixtures/showdown.jsonl` one committed game per fixed failure.
-`tools/generate.py ~/pokeemerald` regenerates `src/data/`.
-
-## Current work
-
-The readability refactor of `src/mechanics.hpp` is in progress on branch
-`readable`; read `foo.md` (the handoff: what's done, what's left, how to
-check) before continuing it.
+`src/data/` was generated once from the decomp and is edited by hand now.
 
 ## Status (2026-10-18)
 
@@ -149,7 +143,7 @@ the next candidates are in `docs/OPTIMIZATION.md`.
 - `build/runs/classify.py`'s KNOWN list is out of date.
 - `MAX_LOG_SIZE` is a placeholder 2048 until the bound is derived (the debug
   `Writer` asserts it).
-- A `Move` sentinel for `MOVE_UNAVAILABLE` in the generator; bounds of
+- A `Move` sentinel for `MOVE_UNAVAILABLE` in `src/data/`; bounds of
   `bide_damage` and `future_sight_damage` (u32 for now).
 - Skipping the damage roll when every roll KOs (fewer chance nodes, but it
   changes the `Actions` key).
