@@ -204,6 +204,13 @@ def forbidden_lists():
     return mimic, metronome, sleep_talk_or_assist
 
 
+# Showdown's values where its gen3 differs from the decomp's, with the comment
+# the row gets (docs/ENGINE.md, "Showdown and the cartridge disagree").
+SHOWDOWN_MOVES = {
+    "ENDURE": ({"priority": "4"}, "Showdown's gen3 +4 (its gen4 mod lowers only Protect and Detect to +3); the decomp's +3."),
+}
+
+
 def gen_moves():
     moves = [(n, v) for n, v in defines("include/constants/moves.h", "MOVE_")
              if n not in ("NONE", "UNAVAILABLE")]
@@ -226,6 +233,10 @@ def gen_moves():
     entries = []
     for cname, ename, d, hp_type in rows:
         move = f"MOVE_{cname}"
+        if cname in SHOWDOWN_MOVES:
+            fields, why = SHOWDOWN_MOVES[cname]
+            d = {**d, **fields}
+            entries.append(f"    // {why}")
         effect = d["effect"][len("EFFECT_"):]
         flags = [f"Flag::{pascal(f[5:])}" for f in re.findall(r"FLAG_\w+", d["flags"])]
         extra = []

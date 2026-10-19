@@ -31,11 +31,20 @@ using Flow = std::optional<Result>;
 
 constexpr uint8_t index(Player p) { return uint8_t(p); }
 
-// Endure is +4, as Showdown's gen3 (its gen4 mod lowers only Protect and Detect
-// to +3); the decomp has all three at +3.
-constexpr int8_t priority(Move move) {
-  if (move == Move::Endure) return 4;
-  return move == Move::None ? 0 : get(move).priority;
+// A stat stage, in Boosts order: the decomp's STAT_ATK to STAT_EVASION, minus
+// 1.
+enum Stat : uint8_t { ATK, DEF, SPE, SPA, SPD, ACC, EVA };
+
+constexpr int8_t& stage(Boosts& b, uint8_t stat) {
+  switch (stat) {
+  case ATK: return b.atk;
+  case DEF: return b.def;
+  case SPE: return b.spe;
+  case SPA: return b.spa;
+  case SPD: return b.spd;
+  case ACC: return b.acc;
+  default: assert(stat == EVA); return b.eva;
+  }
 }
 
 constexpr bool holds(const Side& side, HoldEffect effect) {
@@ -709,7 +718,7 @@ constexpr Speeds speeds(const Battle& battle, Move m1, Move m2,
   for (const Player p : {Player::P1, Player::P2}) {
     const uint8_t i = index(p);
     s.speed[i] = speed(battle, p);
-    s.priority[i] = priority(moves[i]);
+    s.priority[i] = moves[i] == Move::None ? int8_t(0) : get(moves[i]).priority;
     s.quick_claw[i] =
         quick_claw && holds(battle.side(p), HoldEffect::QuickClaw);
   }
@@ -772,6 +781,17 @@ constexpr bool same_move(Move a, Move b) {
 // Adds `d` to the Bide damage, saturating.
 constexpr void add_bide(ActivePokemon& a, uint32_t d) {
   a.bide_damage = a.bide_damage > UINT32_MAX - d ? UINT32_MAX : a.bide_damage + d;
+}
+
+// No move slot: Struggle, a called move, a future attack.
+inline constexpr uint8_t NO_SLOT = 4;
+
+// The slot holding `move`, or NO_SLOT.
+constexpr uint8_t slot_of(const ActivePokemon& a, Move move) {
+  for (uint8_t s = 0; s < 4; s++) {
+    if (a.moves[s].id == move) return s;
+  }
+  return NO_SLOT;
 }
 
 // Whether `a` knows `move`, the typed Hidden Powers as one.
@@ -875,9 +895,9 @@ constexpr void turn_cleanup(Battle& battle) {
       a.last_taken_from = 0;
     }
     // Showdown's choicelock onDisableMove.
-    bool known = false;
-    for (const MoveSlot& ms : a.moves) known |= ms.id == a.choice_move;
-    if (!known || !holds(side, HoldEffect::ChoiceBand)) a.choice_move = Move::None;
+    if (slot_of(a, a.choice_move) == NO_SLOT || !holds(side, HoldEffect::ChoiceBand)) {
+      a.choice_move = Move::None;
+    }
   }
 }
 
@@ -968,12 +988,7 @@ constexpr void faint(Battle& battle, Player player, O& options) {
 
   if constexpr (CHANCE<O>) {
     Durations::Side& d = options.chance.durations.get(player);
-    d.sleep[0] = 0;
-    d.confusion = 0;
-    d.disable = 0;
-    d.encore = 0;
-    d.binding = 0;
-    d.attacking = 0;
+    d.sleep[0] = d.confusion = d.disable = d.encore = d.binding = d.attacking = 0;
   }
 }
 
@@ -993,9 +1008,8 @@ constexpr void faint_target(Battle& battle, Player player, Move used, bool& grud
   if (bond) protocol::faint(options.log, protocol::ident(battle, defender), true);
   if (battle.side(defender).active.volatiles.grudge &&
       get(used).effect != Effect::Explosion) {
-    ActivePokemon& a = battle.side(player).active;
-    for (uint8_t s = 0; s < 4; s++) {
-      if (a.moves[s].id != used || a.moves[s].pp == 0) continue;
+    const ActivePokemon& a = battle.side(player).active;
+    if (const uint8_t s = slot_of(a, used); s != NO_SLOT && a.moves[s].pp != 0) {
       grudge = true;
       protocol::faint(options.log, protocol::ident(battle, defender));
       protocol::grudge(options.log, protocol::ident(battle, defender),
@@ -1199,15 +1213,11 @@ constexpr void white_herb_held(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
   if (side.get(1).fainted()) return;
   bool lowered = false;
-  const auto reset = [&](int8_t& b) {
-    if (b < 0) {
-      b = 0;
-      lowered = true;
-    }
-  };
-  Boosts& b = side.active.boosts;
-  reset(b.atk), reset(b.def), reset(b.spe), reset(b.spa), reset(b.spd);
-  reset(b.acc), reset(b.eva);
+  for (uint8_t i = ATK; i <= EVA; i++) {
+    int8_t& b = stage(side.active.boosts, i);
+    lowered |= b < 0;
+    if (b < 0) b = 0;
+  }
   if (!lowered) return;
   use_item(battle, player, options);
   protocol::clear_negative_boost(options.log, protocol::ident(battle, player));
@@ -1259,22 +1269,6 @@ constexpr Weather ability_weather(Ability ability) {
   }
 }
 
-// A stat stage, in Boosts order: the decomp's STAT_ATK to STAT_EVASION, minus
-// 1.
-enum Stat : uint8_t { ATK, DEF, SPE, SPA, SPD, ACC, EVA };
-
-constexpr int8_t& stage(Boosts& b, uint8_t stat) {
-  switch (stat) {
-  case ATK: return b.atk;
-  case DEF: return b.def;
-  case SPE: return b.spe;
-  case SPA: return b.spa;
-  case SPD: return b.spd;
-  case ACC: return b.acc;
-  default: assert(stat == EVA); return b.eva;
-  }
-}
-
 // Showdown's TryBoost (sim/battle.ts:2038) for the foe's primary drops of the
 // stats in `mask` on p (ChangeStatBuffs, bsc:6937): a stat at -6 can't fall;
 // Clear Body and White Smoke stop every drop, Hyper Cutter Attack's and Keen
@@ -1307,6 +1301,14 @@ constexpr uint8_t drops(const Battle& battle, Player p, uint8_t mask, L& log) {
     mask = 0;
   }
   return mask;
+}
+
+// Raises a stage by up to n, up to +6. Returns the stages gained.
+constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n) {
+  int8_t& b = stage(a.boosts, stat);
+  const int8_t gained = b + n > 6 ? int8_t(6 - b) : n;
+  b = int8_t(b + gained);
+  return gained;
 }
 
 // Lowers a stage by up to n, down to -6. Returns the stages lost.
@@ -1771,17 +1773,7 @@ struct MoveState {
   bool pass;             // Baton Pass worked: the recipient is asked for after it
 
   Turn* turn; // this turn's ProtectStruct; null for a future attack's landing
-
-  static constexpr uint8_t NO_SLOT = 4;
 };
-
-// The slot holding `move`, or NO_SLOT.
-constexpr uint8_t slot_of(const ActivePokemon& a, Move move) {
-  for (uint8_t s = 0; s < 4; s++) {
-    if (a.moves[s].id == move) return s;
-  }
-  return MoveState::NO_SLOT;
-}
 
 constexpr bool physical(Type type) { return type < Type::Mystery; }
 
@@ -2084,7 +2076,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // No PP left (bs1:3556): Spite or Pressure took the last after selection.
-  if (m.slot != MoveState::NO_SLOT && a.moves[m.slot].pp == 0 &&
+  if (m.slot != NO_SLOT && a.moves[m.slot].pp == 0 &&
       m.move != Move::Struggle && !v.multiple_turns) {
     protocol::cant(options.log, id, protocol::Cant::PP, m.move);
     m.attackstring = true;
@@ -2268,17 +2260,21 @@ constexpr void deduct_pp(Battle& battle, Player player, uint8_t slot, uint8_t n)
 
 // Cmd_ppreduce (bsc:1205): one PP, two into Pressure, none for Struggle.
 constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m) {
-  if (m.no_pp || m.slot == MoveState::NO_SLOT) return;
+  if (m.no_pp || m.slot == NO_SLOT) return;
   if (battle.side(player).active.moves[m.slot].pp == 0) return;
   deduct_pp(battle, player, m.slot,
             uint8_t(1 + pressure_applies(battle, player, m.move, m.self)));
 }
 
-// BattleScript_ButItFailed: -fail, and the move is marked FAILED.
+// The move is marked FAILED, with no message of its own.
+constexpr void mark_failed(MoveState& m) { m.result |= MoveResult::FAILED; }
+
+// BattleScript_ButItFailed: -fail, and the move is marked FAILED (or `flag`).
 template <typename O>
-constexpr void but_it_failed(const Battle& battle, Player player, MoveState& m, O& options) {
+constexpr void but_it_failed(const Battle& battle, Player player, MoveState& m, O& options,
+                             uint8_t flag = MoveResult::FAILED) {
   protocol::failed(options.log, protocol::ident(battle, player));
-  m.result |= MoveResult::FAILED;
+  m.result |= flag;
 }
 
 // Cmd_datahpupdate (bsc:1844) for a move's damage to `target`: its Substitute
@@ -2423,13 +2419,8 @@ constexpr uint32_t fixed_damage(const Battle& battle, Player player, Effect effe
 // marks the move MISSED (bsc:7097). Returns the stages gained; Showdown prints
 // `-boost|...|0` at the cap (sim/battle.ts:2083).
 constexpr int8_t raise(ActivePokemon& a, uint8_t stat, int8_t n, MoveState& m) {
-  int8_t& b = stage(a.boosts, stat);
-  if (b >= 6) {
-    m.result |= MoveResult::MISSED;
-    return 0;
-  }
-  const int8_t gained = b + n > 6 ? int8_t(6 - b) : n;
-  b = int8_t(b + gained);
+  const int8_t gained = raise(a, stat, n);
+  if (gained == 0) m.result |= MoveResult::MISSED;
   return gained;
 }
 
@@ -2715,44 +2706,26 @@ constexpr void secondary(Battle& battle, Player player, MoveState& m,
   const Secondary s = secondary_of(data.effect);
   if (s == Secondary::None || (m.result & MoveResult::NO_EFFECT)) return;
   // Fake Out's flinch is certain (MOVE_EFFECT_CERTAIN).
-  const uint32_t chance =
-      data.effect == Effect::FakeOut
-          ? 100u
-          : data.chance * (battle.side(player).active.ability ==
-                                   Ability::SereneGrace
-                               ? 2u
-                               : 1u);
+  const bool serene = battle.side(player).active.ability == Ability::SereneGrace;
+  const uint32_t chance = data.effect == Effect::FakeOut ? 100u : data.chance * (serene ? 2u : 1u);
   if (chance == 0) return;
 
   // A raise on the user (MOVE_EFFECT_AFFECTS_USER) fails only at +6 (bsc:6937).
   // Ancient Power and Silver Wind (bsc:2814) raise whichever of the five aren't
   // at +6, logged in Showdown's key order.
-  if (s == Secondary::AllUp) {
-    ActivePokemon& a = battle.side(player).active;
-    constexpr uint8_t ORDER[5] = {ATK, DEF, SPA, SPD, SPE};
+  if (s == Secondary::AllUp || s == Secondary::AtkUp || s == Secondary::DefUp) {
+    constexpr uint8_t ALL[5] = {ATK, DEF, SPA, SPD, SPE};
+    const std::span<const uint8_t> stats{ALL + (s == Secondary::DefUp),
+                                         s == Secondary::AllUp ? 5u : 1u};
+    Boosts& b = battle.side(player).active.boosts;
     bool any = false;
-    for (const uint8_t stat : ORDER) any |= stage(a.boosts, stat) < 6;
-    if (!any) return;
-    if (chance < 100 && !rolls::secondary(battle, player, i, chance, options)) {
-      return;
-    }
-    for (const uint8_t stat : ORDER) {
-      int8_t& b = stage(a.boosts, stat);
-      if (b >= 6) continue;
-      b++;
+    for (const uint8_t stat : stats) any |= stage(b, stat) < 6;
+    if (!any || (chance < 100 && !rolls::secondary(battle, player, i, chance, options))) return;
+    for (const uint8_t stat : stats) {
+      if (stage(b, stat) >= 6) continue;
+      stage(b, stat)++;
       protocol::boost(options.log, protocol::ident(battle, player), stat, 1, false);
     }
-    return;
-  }
-  if (s == Secondary::AtkUp || s == Secondary::DefUp) {
-    const uint8_t stat = s == Secondary::AtkUp ? ATK : DEF;
-    int8_t& b = stage(battle.side(player).active.boosts, stat);
-    if (b >= 6) return;
-    if (chance < 100 && !rolls::secondary(battle, player, i, chance, options)) {
-      return;
-    }
-    b++;
-    protocol::boost(options.log, protocol::ident(battle, player), stat, 1, false);
     return;
   }
 
@@ -2953,7 +2926,7 @@ constexpr void call_back(Battle& battle, Player user, Move move, Move by,
   c.move = move;
   c.chosen = by;
   c.from = by;
-  c.slot = MoveState::NO_SLOT;
+  c.slot = NO_SLOT;
   c.no_pp = true;
   c.called = true;
   c.turn = m.turn;
@@ -2976,14 +2949,9 @@ constexpr bool snatched(Battle& battle, Player player, MoveState& m, O& options)
   protocol::activate_with(options.log, protocol::ident(battle, snatcher),
                           protocol::Activate::Snatch, Move::None,
                           protocol::ident(battle, player));
-  if (battle.side(player).active.ability == Ability::Pressure) {
-    const ActivePokemon& s = battle.side(snatcher).active;
-    for (uint8_t i = 0; i < 4; i++) {
-      if (s.moves[i].id == Move::Snatch) {
-        deduct_pp(battle, snatcher, i, 1);
-        break;
-      }
-    }
+  if (const uint8_t s = slot_of(battle.side(snatcher).active, Move::Snatch);
+      s != NO_SLOT && battle.side(player).active.ability == Ability::Pressure) {
+    deduct_pp(battle, snatcher, s, 1);
   }
   call_back(battle, snatcher, m.move, Move::Snatch, m, options);
   m.result |= MoveResult::FAILED;
@@ -3160,10 +3128,7 @@ constexpr void ability_on_damage(Battle& battle, Player player, MoveState& m,
   Side& side = battle.side(player);
   Pokemon& user = side.get(1);
   if (user.fainted() || !(data.flags & Flag::MakesContact)) return;
-  const auto takes = [&](Secondary s) {
-    return side.conditions.safeguard == 0 && can_status(battle, player, s) &&
-           !(s == Secondary::Sleep && sleep_clause(battle, player));
-  };
+  const auto takes = [&](Secondary s) { return status_takes(battle, target, s); };
   const auto from_ability = [&] {
     return protocol::StatusSource::by_ability(t.ability, protocol::ident(battle, target));
   };
@@ -3351,9 +3316,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
   // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends a
   // semi-invulnerable turn.
   if (no_effect || m.unable) {
-    a.volatiles.on_air = false;
-    a.volatiles.underground = false;
-    a.volatiles.underwater = false;
+    a.volatiles.on_air = a.volatiles.underground = a.volatiles.underwater = false;
   }
 
   // Showdown's AfterMove comes before the item cures.
@@ -3413,13 +3376,8 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
   if (!m.unable) white_herbs(battle, options);
 
   // Grudge takes the move's PP after the cures, so a Leppa Berry waits.
-  if (m.grudge) {
-    for (uint8_t s = 0; s < 4; s++) {
-      if (a.moves[s].id == m.chosen && a.moves[s].pp != 0) {
-        deduct_pp(battle, player, s, a.moves[s].pp);
-      }
-    }
-  }
+  const uint8_t s = m.grudge ? slot_of(a, m.chosen) : NO_SLOT;
+  if (s != NO_SLOT) deduct_pp(battle, player, s, a.moves[s].pp);
 }
 
 // Every hit has a power.
@@ -3497,9 +3455,7 @@ constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
 // MOVEEND_RAGE runs once.
 template <typename O>
 constexpr void rage_boost(Battle& battle, Player defender, O& options) {
-  ActivePokemon& t = battle.side(defender).active;
-  const int8_t n = t.boosts.atk < 6 ? 1 : 0;
-  t.boosts.atk = int8_t(t.boosts.atk + n);
+  const int8_t n = raise(battle.side(defender).active, ATK, 1);
   protocol::boost(options.log, protocol::ident(battle, defender), ATK, n, false);
 }
 
@@ -4298,8 +4254,7 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
       // Rest's onHit: setStatus meets the uproar.
       uproar_stops(battle, player, options);
     }
-    m.result |= MoveResult::FAILED;
-    return;
+    return mark_failed(m);
   }
   mon.status = Status::slf(Status::REST_SLEEP);
   side.active.toxic = 0;
@@ -4335,8 +4290,7 @@ constexpr void yawn(Battle& battle, Player player, MoveState& m, O& options) {
   }
   if (foe_side.conditions.safeguard != 0) {
     protocol::activate(options.log, target, protocol::Activate::Safeguard);
-    m.result |= MoveResult::FAILED;
-    return;
+    return mark_failed(m);
   }
   t.volatiles.yawn = 2;
   protocol::start(options.log, target, protocol::Start::Yawn, user);
@@ -4404,10 +4358,7 @@ template <typename O>
 constexpr void memento(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
-  if (!try_hit(battle, player, m, {.sure = true}, options)) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (!try_hit(battle, player, m, {.sure = true}, options)) return mark_failed(m);
   if (t.volatiles.substitute) return but_it_failed(battle, player, m, options);
   lower_stats(battle, target, 1 << ATK | 1 << SPA, 2, options.log);
   battle.side(player).get(1).hp = 0;
@@ -4436,10 +4387,7 @@ template <typename O>
 constexpr void nightmare(Battle& battle, Player player, MoveState& m, O& options) {
   Side& foe_side = battle.side(foe(player));
   Volatiles& v = foe_side.active.volatiles;
-  if (!try_hit(battle, player, m, {.sure = true}, options)) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (!try_hit(battle, player, m, {.sure = true}, options)) return mark_failed(m);
   if (v.substitute || v.nightmare || !foe_side.get(1).status.asleep()) {
     return but_it_failed(battle, player, m, options);
   }
@@ -4483,8 +4431,7 @@ constexpr void stat_pair_move(Battle& battle, Player player, MoveState& m,
     // Showdown prints both 0s and no -fail.
     protocol::boost(options.log, id, first, 0, false);
     protocol::boost(options.log, id, second, 0, false);
-    m.result |= MoveResult::FAILED;
-    return;
+    return mark_failed(m);
   }
   protocol::boost(options.log, id, first, raise(a, first, 1, m), false);
   protocol::boost(options.log, id, second, raise(a, second, 1, m), false);
@@ -4524,10 +4471,7 @@ constexpr void curse(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
   if (m.self) {
     Boosts& b = a.boosts;
-    if (b.spe <= -6 && b.atk >= 6 && b.def >= 6) {
-      m.result |= MoveResult::FAILED;
-      return;
-    }
+    if (b.spe <= -6 && b.atk >= 6 && b.def >= 6) return mark_failed(m);
     const bool slower = b.spe > -6;
     if (slower) b.spe--;
     const int8_t atk = raise(a, ATK, 1, m);
@@ -4601,10 +4545,8 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
   if (a.stall == 0) a.protect_uses = 0;
   const uint8_t n = a.protect_uses < 3 ? a.protect_uses : 3;
   if (!m.first || (n != 0 && !rolls::protect(battle, player, n, options))) {
-    protocol::failed(options.log, protocol::ident(battle, player));
     a.protect_uses = 0;
-    m.result |= MoveResult::MISSED;
-    return;
+    return but_it_failed(battle, player, m, options, MoveResult::MISSED);
   }
   const bool endure = get(m.move).effect != Effect::Protect;
   (endure ? m.turn->endure : m.turn->protect)[index(player)] = true;
@@ -4734,7 +4676,7 @@ constexpr void call_move(Battle& battle, Player player, MoveState& m, Move move,
   if (move == Move::HiddenPower || is_hidden_power(move)) {
     move = hidden_power(a.hidden_power_type);
   }
-  if (pressure_applies(battle, player, move, self_aimed(a, move)) && m.slot != MoveState::NO_SLOT) {
+  if (pressure_applies(battle, player, move, self_aimed(a, move)) && m.slot != NO_SLOT) {
     deduct_pp(battle, player, m.slot, 1);
   }
   MoveState c{};
@@ -4773,15 +4715,13 @@ constexpr void sleep_talk(Battle& battle, Player player, MoveState& m,
     if (battle.side(player).get(1).status.asleep()) {
       protocol::failed(options.log, protocol::ident(battle, player));
     }
-    m.result |= MoveResult::FAILED;
-    return;
+    return mark_failed(m);
   }
   const uint8_t slot = rolls::sleep_talk(battle, player, mask, options);
   if (a.moves[slot].pp == 0) {
     protocol::cant(options.log, protocol::ident(battle, player),
                    protocol::Cant::SleepTalkPP, a.moves[slot].id);
-    m.result |= MoveResult::FAILED;
-    return;
+    return mark_failed(m);
   }
   assert(get(a.moves[slot].id).effect != Effect::SleepTalk);
   call_move(battle, player, m, a.moves[slot].id, slot, options);
@@ -4810,9 +4750,8 @@ constexpr void leech_seed(Battle& battle, Player player, MoveState& m,
     return;
   }
   if (!takes) {
-    protocol::failed(options.log, protocol::ident(battle, player));
-    m.result |= t.volatiles.substitute ? MoveResult::FAILED : MoveResult::MISSED;
-    return;
+    return but_it_failed(battle, player, m, options,
+                         t.volatiles.substitute ? MoveResult::FAILED : MoveResult::MISSED);
   }
   t.volatiles.leech_seed = true;
   protocol::start(options.log, protocol::ident(battle, foe(player)), protocol::Start::LeechSeed);
@@ -4825,11 +4764,7 @@ template <typename O>
 constexpr void weather_move(Battle& battle, Player player, MoveState& m,
                             Weather w, O& options) {
   Field& field = battle.field;
-  if (field.weather == w) {
-    protocol::failed(options.log, protocol::ident(battle, player));
-    m.result |= MoveResult::MISSED;
-    return;
-  }
+  if (field.weather == w) return but_it_failed(battle, player, m, options, MoveResult::MISSED);
   field.weather = w;
   field.weather_turns = 5;
   field.permanent = false;
@@ -4924,9 +4859,8 @@ constexpr void screen(Battle& battle, Player player, MoveState& m, O& options) {
                    : effect == Effect::Safeguard ? c.safeguard
                                                : c.light_screen;
   if (turns != 0) {
-    protocol::failed(options.log, protocol::ident(battle, player));
-    m.result |= effect == Effect::Mist ? MoveResult::FAILED : MoveResult::MISSED;
-    return;
+    return but_it_failed(battle, player, m, options,
+                         effect == Effect::Mist ? MoveResult::FAILED : MoveResult::MISSED);
   }
   turns = 5;
   protocol::side_start(options.log, player,
@@ -4989,7 +4923,7 @@ template <typename O>
 constexpr void encore(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& t = battle.side(foe(player)).active;
   const uint8_t slot = slot_of(t, t.last_move);
-  bool fails = slot == MoveState::NO_SLOT || t.last_move == Move::None ||
+  bool fails = slot == NO_SLOT || t.last_move == Move::None ||
                t.encored_move != Move::None;
   switch (t.last_move) {
   case Move::Encore:
@@ -5025,10 +4959,7 @@ constexpr void mimic(Battle& battle, Player player, MoveState& m, O& options) {
   // and a copy is the user's own type.
   const Move last = t.last_move;
   const bool known = knows(a, last);
-  if (!try_hit(battle, player, m, {.sure = true}, options)) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (!try_hit(battle, player, m, {.sure = true}, options)) return mark_failed(m);
   if (t.volatiles.substitute || a.volatiles.transformed || last == Move::None ||
       (get(last).extra & Extra::NoMimic) || known) {
     return but_it_failed(battle, player, m, options);
@@ -5052,10 +4983,7 @@ template <typename O>
 constexpr void pain_split(Battle& battle, Player player, MoveState& m,
                           O& options) {
   Side& foe_side = battle.side(foe(player));
-  if (!try_hit(battle, player, m, {.sure = true}, options)) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (!try_hit(battle, player, m, {.sure = true}, options)) return mark_failed(m);
   if (foe_side.active.volatiles.substitute) return but_it_failed(battle, player, m, options);
   Pokemon& user = battle.side(player).get(1);
   Pokemon& target = foe_side.get(1);
@@ -5162,10 +5090,7 @@ constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
 template <typename O>
 constexpr void stockpile(Battle& battle, Player player, MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
-  if (a.stockpile >= 3) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (a.stockpile >= 3) return mark_failed(m);
   a.stockpile++;
   protocol::start_count(options.log, protocol::ident(battle, player), protocol::Start::Stockpile,
                         a.stockpile);
@@ -5177,10 +5102,7 @@ constexpr void stockpile(Battle& battle, Player player, MoveState& m, O& options
 template <typename O>
 constexpr void swallow(Battle& battle, Player player, MoveState& m, O& options) {
   const ActivePokemon& a = battle.side(player).active;
-  if (a.stockpile == 0) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (a.stockpile == 0) return mark_failed(m);
   Pokemon& mon = battle.side(player).get(1);
   const ID id = protocol::ident(battle, player);
   if (mon.hp == mon.stats.hp) {
@@ -5203,10 +5125,7 @@ template <typename O>
 constexpr void future_sight_move(Battle& battle, Player player, MoveState& m,
                                  O& options) {
   Side& foe_side = battle.side(foe(player));
-  if (foe_side.conditions.future_sight != 0) {
-    m.result |= MoveResult::FAILED;
-    return;
-  }
+  if (foe_side.conditions.future_sight != 0) return mark_failed(m);
   const Hit h = Hit::of(m.move);
   foe_side.future_sight_damage =
       apply_roll(damage(battle, player, h), rolls::damage(battle, player, 0, options));
@@ -5246,7 +5165,7 @@ constexpr void swagger(Battle& battle, Player player, MoveState& m, StatChange c
                        O& options) {
   const Player target = foe(player);
   ActivePokemon& t = battle.side(target).active;
-  int8_t& b = stage(t.boosts, c.stat);
+  const int8_t b = stage(t.boosts, c.stat);
   const bool sub = t.volatiles.substitute;
   const bool confusable = t.volatiles.confusion == 0 && t.ability != Ability::OwnTempo &&
                           battle.side(target).conditions.safeguard == 0;
@@ -5255,10 +5174,8 @@ constexpr void swagger(Battle& battle, Player player, MoveState& m, StatChange c
   }
   const ID id = protocol::ident(battle, target);
   if (sub) return but_it_failed(battle, player, m, options);
-  // At +6 the raise marks the move MISSED, as raise() and the decomp.
-  const int8_t gained = b + c.n > 6 ? int8_t(6 - b) : c.n;
-  b = int8_t(b + gained);
-  if (gained == 0) m.result |= MoveResult::MISSED;
+  // At +6 the raise marks the move MISSED, as the decomp.
+  const int8_t gained = raise(t, c.stat, c.n, m);
   protocol::boost(options.log, id, c.stat, gained, false);
   const int8_t confused = add_confusion(battle, player, options);
   if (t.ability == Ability::OwnTempo) {
@@ -5297,7 +5214,7 @@ constexpr void disable(Battle& battle, Player player, MoveState& m, O& options) 
   ActivePokemon& t = battle.side(target).active;
   const uint8_t slot = slot_of(t, t.last_move);
   const bool fails = t.last_move == Move::None || t.last_move == Move::Struggle ||
-                     t.disabled_move != Move::None || slot == MoveState::NO_SLOT ||
+                     t.disabled_move != Move::None || slot == NO_SLOT ||
                      t.moves[slot].pp == 0;
   if (!try_hit(battle, player, m, {.matters = !fails}, options)) {
     return;
@@ -5334,7 +5251,7 @@ constexpr void spite(Battle& battle, Player player, MoveState& m, O& options) {
   const Player target = foe(player);
   const ActivePokemon& t = battle.side(target).active;
   const uint8_t slot = slot_of(t, t.last_move);
-  const bool fails = t.last_move == Move::None || slot == MoveState::NO_SLOT ||
+  const bool fails = t.last_move == Move::None || slot == NO_SLOT ||
                      t.moves[slot].pp == 0;
   if (!try_hit(battle, player, m, {.matters = !fails}, options)) {
     return;
@@ -5522,7 +5439,7 @@ constexpr void mirror_move(Battle& battle, Player player, MoveState& m, O& optio
   if (move == Move::None || no_mirror(move) || !available) {
     return but_it_failed(battle, player, m, options);
   }
-  call_move(battle, player, m, move, MoveState::NO_SLOT, options);
+  call_move(battle, player, m, move, NO_SLOT, options);
 }
 
 // Showdown's gen3 noassist flag. The decomp also leaves out the two-turn moves.
@@ -5548,7 +5465,7 @@ constexpr void assist(Battle& battle, Player player, MoveState& m, O& options) {
   }
   if (n == 0) return but_it_failed(battle, player, m, options);
   call_move(battle, player, m, rolls::assist(battle, player, list, n, options),
-            MoveState::NO_SLOT, options);
+            NO_SLOT, options);
 }
 
 // Nature Power, as Showdown's gen3: aimed at the user with accuracy 95, so its
@@ -5557,7 +5474,7 @@ constexpr void assist(Battle& battle, Player player, MoveState& m, O& options) {
 template <typename O>
 constexpr void nature_power(Battle& battle, Player player, MoveState& m, O& options) {
   if (!hits_self(battle, player, m, false, options)) return;
-  call_move(battle, player, m, Move::Swift, MoveState::NO_SLOT, options);
+  call_move(battle, player, m, Move::Swift, NO_SLOT, options);
 }
 
 // Camouflage, as Showdown's gen4: Normal, failing if the user is Normal
@@ -5859,7 +5776,7 @@ constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   // Metronome: a uniform pick among METRONOME_MOVES.
   case Effect::Metronome:
     return call_move(battle, player, m, rolls::metronome(battle, player, options),
-                     MoveState::NO_SLOT, options);
+                     NO_SLOT, options);
   case Effect::Assist: return assist(battle, player, m, options);
   case Effect::NaturePower: return nature_power(battle, player, m, options);
   case Effect::Camouflage: return camouflage(battle, player, m, options);
@@ -5906,7 +5823,7 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   if (a.move_actions < 2) a.move_actions++;
 
   MoveState m{};
-  m.slot = MoveState::NO_SLOT;
+  m.slot = NO_SLOT;
   if (data == 0 && r.move[i] == Move::Struggle) {
     m.move = Move::Struggle;
     m.no_pp = true;
@@ -6105,9 +6022,7 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
     // here.
     if (mon.hp > mon.stats.hp / item.param) return;
     const uint8_t stat = uint8_t(item.effect) - uint8_t(HoldEffect::AttackUp);
-    int8_t& b = stage(a.boosts, stat);
-    const int8_t n = b < 6 ? 1 : 0;
-    b = int8_t(b + n);
+    const int8_t n = raise(a, stat, 1);
     use_item(battle, player, options);
     protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, held);
     return;
@@ -6130,9 +6045,7 @@ constexpr void item_end_turn(Battle& battle, Player player, O& options) {
     use_item(battle, player, options);
     if (b.atk >= 6 && b.def >= 6 && b.spe >= 6 && b.spa >= 6 && b.spd >= 6) return;
     const uint8_t stat = uint8_t(rolls::starf(battle, player, options) - 1);
-    int8_t& s = stage(a.boosts, stat);
-    const int8_t n = s + 2 > 6 ? int8_t(6 - s) : int8_t(2);
-    s = int8_t(s + n);
+    const int8_t n = raise(a, stat, 2);
     protocol::boost(options.log, protocol::ident(battle, player), stat, n, false, held);
     return;
   }
@@ -6778,7 +6691,7 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   m.move = move;
   m.chosen = move;
   m.type = Type::Mystery;
-  m.slot = MoveState::NO_SLOT;
+  m.slot = NO_SLOT;
   const uint32_t d = survive(battle, user, m, stored, rolls::FUTURE, options);
   m.hp_dealt = hp_update(battle, player, d, m, options);
   // It enters attackedBy, and both moves are noMirror, so Mirror Move fails
@@ -6874,7 +6787,7 @@ constexpr void disable_residual(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   if (a.disable_timer == 0 || battle.side(player).get(1).fainted()) return;
   const ID id = protocol::ident(battle, player);
-  if (slot_of(a, a.disabled_move) == MoveState::NO_SLOT) {
+  if (slot_of(a, a.disabled_move) == NO_SLOT) {
     a.disabled_move = Move::None;
     a.disable_timer = 0;
     if constexpr (CHANCE<O>) options.chance.durations.get(player).disable = 0;

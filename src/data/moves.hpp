@@ -864,7 +864,8 @@ inline constexpr MoveData MOVE_DATA[MOVES - 1] = {
     {Effect::Rampage, 90, Type::Dragon, 100, 15, 100, Target::Random, 0, Flag::MakesContact | Flag::ProtectAffected | Flag::MirrorMoveAffected | Flag::KingsRockAffected, 0}, // Outrage
     {Effect::Sandstorm, 0, Type::Rock, 0, 10, 0, Target::User, 0, 0, 0}, // Sandstorm
     {Effect::Absorb, 60, Type::Grass, 100, 5, 0, Target::Selected, 0, Flag::ProtectAffected | Flag::MirrorMoveAffected, 0}, // GigaDrain
-    {Effect::Endure, 0, Type::Normal, 0, 10, 0, Target::User, 3, 0, Extra::NoMetronome | Extra::NoAssist}, // Endure
+    // Showdown's gen3 +4 (its gen4 mod lowers only Protect and Detect to +3); the decomp's +3.
+    {Effect::Endure, 0, Type::Normal, 0, 10, 0, Target::User, 4, 0, Extra::NoMetronome | Extra::NoAssist}, // Endure
     {Effect::AttackDown2, 0, Type::Normal, 100, 20, 0, Target::Selected, 0, Flag::ProtectAffected | Flag::MagicCoatAffected | Flag::MirrorMoveAffected, 0}, // Charm
     {Effect::Rollout, 30, Type::Rock, 90, 20, 0, Target::Selected, 0, Flag::MakesContact | Flag::ProtectAffected | Flag::MirrorMoveAffected | Flag::KingsRockAffected, 0}, // Rollout
     {Effect::FalseSwipe, 40, Type::Normal, 100, 40, 0, Target::Selected, 0, Flag::MakesContact | Flag::ProtectAffected | Flag::MirrorMoveAffected | Flag::KingsRockAffected, 0}, // FalseSwipe

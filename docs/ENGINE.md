@@ -288,7 +288,7 @@ is the same and only the messages differ.
 | Pressure on field-wide moves | none (`MOVE_TARGET_USER`): weathers, Haze, Perish Song... | an extra PP (target `'all'` includes the foe); Conversion 2 too |
 | Sleep Talk into Pressure | 2 PP for Sleep Talk itself (`MOVE_TARGET_DEPENDS`), none for the called move | 1 for Sleep Talk (`'self'`), plus the called move's extra PP |
 | Protect's chain after a turn without acting | kept (`gLastResultingMoves` unchanged) | ended (`stall` expires after a turn without a success) |
-| Endure's priority | +3, as Protect and Detect | +4 (the gen4 mod lowers only Protect and Detect) |
+| Endure's priority | +3, as Protect and Detect | +4 (the gen4 mod lowers only Protect and Detect); set in the generated data (`SHOWDOWN_MOVES`, `tools/generate.py`) |
 | Thief taking a Choice Band | not locked (item arrives after `MOVEEND_CHOICE_MOVE`) | locked into Thief |
 | Speed | floors per factor; weather ×2 before the stage | stage, then modifiers chained and rounded once (paralysis 147 and 149 both 37) |
 | End-of-turn order | `GetWhoStrikesFirst`: move priority, Quick Claw; one order for the whole pass | Speed with Quick Claw (one order for all per-Pokémon residuals, onResidualOrder 10); on a Speed tie, each handler pair by subOrder with its own coin |
