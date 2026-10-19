@@ -782,6 +782,9 @@ main = `src/battle_main.c`.
     it not 2 (util:2629). Fake Out (bsc:6790 reads it) follows Showdown's
     `activeMoveActions` instead (`move_actions`): an action a faint
     cancelled doesn't use up the first turn.
+15. **`bide_damage` and `future_sight_damage` stay `uint32_t`** (settled
+    2026-10-19). No bound is derived; Bide's sum saturates. Packing leaves
+    them as they are.
 
 Packing comes last: natural alignment for now (`Battle` is 824 B against a
 ~700 B target). Revisit padding and `has_unique_object_representations_v`
@@ -898,7 +901,7 @@ the changes.
 | `gLastResultingMoves` | `last_resulting_move` | `Move` | Protect's consecutive-use reset (bsc:6506) |
 | `gLastPrintedMoves` | `last_printed_move` | `Move` | Sketch (bsc:8148) |
 | `lastTakenMove`, `lastTakenMoveFrom` | `last_taken_move` | `Move` | Mirror Move (bsc:6640–6662). `lastTakenMoveFrom` is per attacker; in singles it collapses *(verify they're always set together)* |
-| `gBideDmg`, `gBideTarget` | `bide_damage` | u32 | Bide (util:2218, bsc:1912). The target is the foe. Accumulates raw damage *(verify a bound before narrowing)* |
+| `gBideDmg`, `gBideTarget` | `bide_damage` | u32 | Bide (util:2218, bsc:1912). The target is the foe. Accumulates raw damage, saturating (decision 15) |
 | `RESOURCE_FLAG_FLASH_FIRE` | `flash_fire` | bool | util:2692–2700 |
 
 ### Open points from the map

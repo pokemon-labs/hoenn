@@ -143,8 +143,7 @@ the next candidates are in `docs/OPTIMIZATION.md`.
 - `build/runs/classify.py`'s KNOWN list is out of date.
 - `MAX_LOG_SIZE` is a placeholder 2048 until the bound is derived (the debug
   `Writer` asserts it).
-- A `Move` sentinel for `MOVE_UNAVAILABLE` in `src/data/`; bounds of
-  `bide_damage` and `future_sight_damage` (u32 for now).
+- A `Move` sentinel for `MOVE_UNAVAILABLE` in `src/data/`.
 - Skipping the damage roll when every roll KOs (fewer chance nodes, but it
   changes the `Actions` key).
 

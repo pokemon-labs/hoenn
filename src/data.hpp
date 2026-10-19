@@ -636,7 +636,7 @@ struct Boosts {
 // and ability from the Pokemon and zeroes the rest (decision 4). The field
 // map with citations is in docs/ENGINE.md.
 struct ActivePokemon {
-  uint32_t bide_damage;     // gBideDmg; raw damage, bound unverified
+  uint32_t bide_damage;     // gBideDmg; u32 settled (ENGINE.md, decision 15)
   // atk..spd (hp unused: HP lives on the Pokemon). Transform changes them.
   Stats stats;
   MoveSlot moves[4];
@@ -762,8 +762,8 @@ struct Side {
   Pokemon pokemon[6];
   ActivePokemon active;
   // The future attack on this side's Pokémon (futureSightDmg, by target):
-  // its damage, rolled at the use (Showdown's getDamage); s32 in the
-  // decomp, bound unverified. The move is Future Sight or Doom Desire, None
+  // its damage, rolled at the use (Showdown's getDamage); u32 settled
+  // (ENGINE.md, decision 15). The move is Future Sight or Doom Desire, None
   // when no attack is pending.
   uint32_t future_sight_damage;
   Move future_sight_move;
