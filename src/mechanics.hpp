@@ -1897,81 +1897,46 @@ struct Turn {
   bool snatch[2];
 };
 
-// What one move execution tracks: the decomp's per-action globals
-// (gCurrentMove, gCurrMovePos, gMoveResultFlags, gHpDealt) and the
-// gHitMarker bits that this code reads. On the stack, as libpkmn gen2's
-// State; HandleAction_ActionFinished (util:661) clears the hit markers
-// between actions.
+// One move's execution, on the stack (as libpkmn gen2's State): the
+// decomp's per-action globals and the gHitMarker bits this code reads,
+// cleared between actions (HandleAction_ActionFinished, util:661).
 struct MoveState {
-  Move move;         // gCurrentMove
-  Move chosen;       // gChosenMove: the move itself, or Sleep Talk, Snatch
-                     // or Magic Coat for the move it calls
-  Type type;         // the move's type as used: the table's, or Weather
-                     // Ball's (move_type), resolved once in execute() as
-                     // Showdown's onModifyMove
-  uint8_t slot;      // gCurrMovePos, 0-3, or NO_SLOT
+  // The move, and how the action came to use it.
+  Move move;     // gCurrentMove
+  Move chosen;   // gChosenMove: the move, or the caller (Sleep Talk, Snatch...)
+  Move from;     // the move that called this one, if `called`
+  Type type;     // as used: Weather Ball's, Hidden Power's (move_type)
+  uint8_t slot;  // gCurrMovePos, 0-3, or NO_SLOT
+  bool self;     // aimed at the user (MOVE_TARGET_USER)
+  bool first;    // the target acts after this, so a flinch can stop it
+  bool no_pp;    // HITMARKER_NO_PPDEDUCT: Struggle, a locked or called move
+  bool locked;   // the forced turn of a locked move ([from] lockedmove)
+  bool called;   // run by another move (call_move): no canceler, no PP
+  bool pursuing; // Pursuit on a switching target (pursues): power x2, sure hit
+  bool release;  // Bide's release (cancel): no move line, no PP
+
+  // What has happened so far.
   uint8_t result;    // gMoveResultFlags (MoveResult)
-  uint16_t hp_dealt; // gHpDealt: HP the target or its Substitute lost
-  uint16_t total;    // HP the target itself lost to every hit (Showdown's
-                     // totalDamage, which Shell Bell reads)
-  bool self;         // the target is the user (MOVE_TARGET_USER)
-  bool no_pp;        // HITMARKER_NO_PPDEDUCT (Struggle)
-  bool obeys;        // HITMARKER_OBEYS: passed the attack canceler
+  bool obeys;        // HITMARKER_OBEYS: past the attack canceler
   bool attackstring; // HITMARKER_ATTACKSTRING_PRINTED
   bool unable;       // HITMARKER_UNABLE_TO_USE_MOVE
-  bool damaged;      // TARGET_TURN_DAMAGED: the target's own HP took damage
-  bool first;        // the target acts after this, so a flinch can stop it
-  bool ignore_on_air;      // HITMARKER_IGNORE_ON_AIR (Thunder, Sky Uppercut)
-  bool ignore_underground; // HITMARKER_IGNORE_UNDERGROUND (Earthquake)
-  // HITMARKER_SYNCHRONIZE_EFFECT with synchronizeMoveEffect: the last poison,
-  // toxic, paralysis or burn this move's execution set (bsc:2503), for
-  // moveend's Synchronize cases. None when not armed.
-  Secondary synchronize;
-  Player synchronized; // who took the status that armed it
-  // Called by another move (`from`; `chosen` is the move the action
-  // chose): the attack canceler already ran for the caller (its tracker
-  // stays at CANCELER_END, as Showdown's useMove skips BeforeMove), and the
-  // move uses no PP.
-  bool called;
-  Move from;
-  // Past the accuracy check and TryHit on the foe: Showdown's gotAttacked
-  // (gen3 scripts.ts:464), which Mirror Move reads (last_taken_move).
-  bool attacked;
-  // Pursuit on a target switching out (pursues()): double power, and it
-  // can't miss.
-  bool pursuing;
-  // Bide's release on its third turn (bide()): no move line, no PP.
-  bool release;
-  // The move took the user's HP to 0 (Explosion, Memento): it faints after
-  // moveend.
-  bool faints;
-  // The forced turn of a locked move (Solar Beam's second turn), which
-  // Showdown logs [from] lockedmove.
-  bool locked;
-  // Roar or Whirlwind worked: the target is dragged out after the action,
-  // as Showdown's forceSwitchFlag (sim/battle.ts:2828).
-  bool drag;
-  // Baton Pass worked: the user's side picks the recipient after the action
-  // (Phase::BatonPass), as Showdown's switchFlag.
-  bool pass;
-  // gBattleStruct->changedItems for the user: the item Thief or Covet took,
-  // given to the user at MOVEEND_CHANGED_ITEMS. None when nothing was taken.
-  Item stolen;
-  // The target fainted under Grudge (faint_target): the used move loses its
-  // PP at the end of moveend, Showdown's faintMessages after the move.
-  bool grudge;
-  // The last move a call ran (call_move, through nested calls), or None:
-  // Showdown's activeMove after useMove, which AfterMove sees
-  // (sim/battle-actions.ts:309).
-  Move ran;
-  // moveend ran the AfterMove handlers (after_move).
-  bool after_move;
-  // The user's HP before the foe's Destiny Bond took it (faint_target), or
-  // 0.
-  uint16_t bonded_hp;
-  // This turn's ProtectStruct; set by use_move, null only for the
-  // residuals' MoveState, which never reads it.
-  Turn* turn;
+  bool attacked;     // past the accuracy check and TryHit (Showdown's gotAttacked)
+  bool damaged;      // TARGET_TURN_DAMAGED: the target itself lost HP
+  uint16_t hp_dealt; // gHpDealt: what the target or its Substitute lost
+  uint16_t total;    // what the target itself lost over every hit (Shell Bell)
+
+  // Left for moveend, or for after it.
+  Secondary synchronize; // the status that arms Synchronize (bsc:2503), or None
+  Player synchronized;   // who took it
+  Item stolen;           // Thief's item, handed over at MOVEEND_CHANGED_ITEMS
+  bool grudge;           // the target fainted under Grudge (faint_target)
+  uint16_t bonded_hp;    // the user's HP before Destiny Bond took it, for Shell Bell
+  bool faints;           // Explosion, Memento: the user faints after moveend
+  bool delegated;        // it called a move (call_move), whose moveend ends the action
+  bool drag;             // Roar worked: the drag follows the action
+  bool pass;             // Baton Pass worked: the recipient is asked for after it
+
+  Turn* turn; // this turn's ProtectStruct; null for a future attack's landing
 
   static constexpr uint8_t NO_SLOT = 4;
 };
@@ -2352,18 +2317,18 @@ constexpr bool locked_on(const Battle& battle, Player p) {
 
 // Showdown's Invulnerability event (gen3 tryMoveHit, before the accuracy
 // roll): a semi-invulnerable target the move can't reach. Lock-On and Mind
-// Reader reach it (the only possible locker in singles is the attacker);
-// Surf and Whirlpool hit Dive (HITMARKER_IGNORE_UNDERWATER, bs1:239,
-// and BattleScript_EffectTrap), and the moves that
-// set ignore_on_air or ignore_underground reach Fly and Dig (Earthquake
-// and Magnitude, as Showdown's dig condition).
-constexpr bool invulnerable(const Battle& battle, Player player,
-                            const MoveState& m) {
+// Reader reach it. HITMARKER_IGNORE_ON_AIR: Thunder, Sky Uppercut, Gust and
+// Twister (bs1:1892, 1826); IGNORE_UNDERGROUND: Earthquake and Magnitude;
+// IGNORE_UNDERWATER: Surf and Whirlpool (bs1:239).
+constexpr bool invulnerable(const Battle& battle, Player player, const MoveState& m) {
   const Volatiles& v = battle.side(foe(player)).active.volatiles;
   if (m.pursuing || locked_on(battle, player)) return false;
-  return (v.on_air && !m.ignore_on_air) ||
-         (v.underground && !m.ignore_underground) ||
-         (v.underwater && m.move != Move::Surf && m.move != Move::Whirlpool);
+  const Effect e = get(m.move).effect;
+  const bool air = e == Effect::Thunder || e == Effect::SkyUppercut || e == Effect::Gust ||
+                   e == Effect::Twister;
+  const bool ground = e == Effect::Earthquake || e == Effect::Magnitude;
+  const bool water = m.move == Move::Surf || m.move == Move::Whirlpool;
+  return (v.on_air && !air) || (v.underground && !ground) || (v.underwater && !water);
 }
 
 // The accuracy check's arithmetic from the move's accuracy `acc` on, for an
@@ -3659,25 +3624,21 @@ constexpr void stockpile_end(Battle& battle, Player player, O& options) {
   protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Stockpile);
 }
 
-// The AfterMove handlers (Showdown's runMove, sim/battle-actions.ts:311),
-// for `ran`, the last move the action called (`activeMove`): moveend's, or
-// use_move's when no moveend ran them. `charged`: the user had Charge
-// before the move.
-// - Charge's onAfterMove and onMoveAborted (self_volatile), for any move but
-//   Charge (gen8's condition, which gen3 inherits) or one that called it;
-//   not after Pursuit on a switching target, which Showdown runs with
-//   useMove, nor for a user that fainted (Showdown prints no -end then;
-//   faint() clears it).
-// - Spit Up's onAfterMove: once the move ran, hit or not, the layers go.
+// Showdown's AfterMove handlers (runMove, sim/battle-actions.ts:311), for
+// the last move the action ran (a called move, not its caller):
+// - Charge ends after any move but Charge (gen8's condition, which gen3
+//   inherits), not after Pursuit on a switching target (useMove) or for a
+//   fainted user.
+// - Spit Up's layers go once it ran, hit or not.
 template <typename O>
-constexpr void after_move(Battle& battle, Player player, const MoveState& m,
-                          Move ran, bool charged, O& options) {
+constexpr void after_move(Battle& battle, Player player, const MoveState& m, O& options) {
   ActivePokemon& a = battle.side(player).active;
-  if (charged && !m.pursuing && ran != Move::Charge && !battle.side(player).get(1).fainted()) {
+  if (a.volatiles.charged_up && !m.pursuing && m.move != Move::Charge &&
+      !battle.side(player).get(1).fainted()) {
     a.volatiles.charged_up = false;
     protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Charge);
   }
-  if (m.obeys && get(ran).effect == Effect::SpitUp) stockpile_end(battle, player, options);
+  if (m.obeys && get(m.move).effect == Effect::SpitUp) stockpile_end(battle, player, options);
 }
 
 template <typename O>
@@ -3724,8 +3685,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m,
   }
 
   // Showdown's AfterMove comes before the Update that cures by item.
-  after_move(battle, player, m, m.move, a.volatiles.charged_up, options);
-  m.after_move = true;
+  after_move(battle, player, m, options);
 
   // MOVEEND_ITEM_EFFECTS_ALL: ITEMEFFECT_MOVE_END's cures. The decomp
   // stops at the first Pokémon whose item acts (util:3740); Showdown's
@@ -5305,8 +5265,7 @@ constexpr void call_move(Battle& battle, Player player, MoveState& m, Move move,
   execute(battle, player, c, options);
   m.drag = c.drag;
   m.pass = c.pass;
-  m.ran = c.ran != Move::None ? c.ran : c.move;
-  m.after_move = c.after_move;
+  m.delegated = true;
 }
 
 // BattleScript_EffectSleepTalk (bs1:1311), as Showdown's gen3 Sleep Talk
@@ -6410,11 +6369,6 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
            (m.move == Move::Curse && !has_type(battle.side(player).active, Type::Ghost));
   m.type = move_type(battle, m.move);
   const Effect effect = get(m.move).effect;
-  // Gust and Twister (bs1:1892, 1826) hit a target in the air, doubled
-  // (damage.hpp, as Showdown's Fly condition).
-  m.ignore_on_air = effect == Effect::Thunder || effect == Effect::SkyUppercut ||
-                    effect == Effect::Gust || effect == Effect::Twister;
-  m.ignore_underground = effect == Effect::Earthquake || effect == Effect::Magnitude;
 
   if (!cancel(battle, player, m, options)) return moveend(battle, player, m, options);
   // Every script but the hits' opens with attackstring and ppreduce, and a
@@ -6426,7 +6380,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   }
   script(battle, player, m, options);
   // A move that calls another ends with the called move's moveend.
-  if (m.ran != Move::None) return;
+  if (m.delegated) return;
   moveend(battle, player, m, options);
   if (m.release && battle.side(player).active.volatiles.bide != 0) {
     end_bide(battle, player, options);
@@ -6647,11 +6601,7 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   m.first = first;
   m.turn = &turn;
   m.pursuing = pursuing;
-  const bool charged = a.volatiles.charged_up;
   execute(battle, player, m, options);
-  if (!m.after_move) {
-    after_move(battle, player, m, m.ran != Move::None ? m.ran : m.move, charged, options);
-  }
   assert(!(m.drag && m.pass));
   return m.drag ? After::Drag : m.pass ? After::Pass : After::None;
 }
