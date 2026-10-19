@@ -129,6 +129,12 @@ then `cmake --build --preset X` and `ctest --preset X`. Tests build with
 teams; `tools/fixtures/showdown.jsonl` one committed game per fixed failure.
 `tools/generate.py ~/pokeemerald` regenerates `src/data/`.
 
+## Current work
+
+The readability refactor of `src/mechanics.hpp` is in progress on branch
+`readable`; read `foo.md` (the handoff: what's done, what's left, how to
+check) before continuing it.
+
 ## Status (2026-10-18)
 
 The engine is complete: every move, item and the log are written. All three
