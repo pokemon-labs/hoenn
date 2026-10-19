@@ -107,7 +107,7 @@ constexpr std::optional<hoenn::Pokemon> init_pokemon(const Pokemon& p) {
   for (size_t i = 0; i < 4 && p.moves[i] != Move::None; i++) {
     Move m = p.moves[i];
     if (m == Move::HiddenPower) m = hp.move;
-    out.moves[i] = {m, max_pp(m, 3), 3};
+    out.moves[i] = {m, max_pp(m)};
   }
   out.hp = p.hp.value_or(out.stats.hp);
   out.species = p.species;
@@ -190,7 +190,7 @@ static_assert([] {
   const hoenn::Pokemon p = *init_pokemon(detail::SKARMORY);
   // HP: (2 * 65 + 31 + 63) + 110; SpD: (2 * 70 + 31 + 62) + 5, then x1.1.
   return p.stats.hp == 334 && p.hp == 334 && p.stats.atk == 165 &&
-         p.stats.spd == 261 && p.moves[0].pp == 32 && p.moves[0].pp_ups == 3 &&
+         p.stats.spd == 261 && p.moves[0].pp == 32 &&
          p.moves[3].id == Move::Toxic && p.moves[3].pp == 16 &&
          p.types[0] == Type::Steel && p.types[1] == Type::Flying &&
          p.hidden_power >= 30 && p.happiness == 255;

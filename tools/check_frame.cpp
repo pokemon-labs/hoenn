@@ -279,8 +279,8 @@ void check_moves() {
     CHECK(o.chance.probability.p == 15 && o.chance.probability.q == 256);
     // PP on both the active Pokémon and the party, for both players.
     CHECK(b.sides[0].active.moves[1].pp == b.sides[0].get(1).moves[1].pp);
-    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack, 3) - 1);
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash) - 1);
     // Mirror Move's record is kept only where it can be read.
     CHECK(b.sides[1].active.last_taken_move == Move::None);
   }
@@ -292,7 +292,7 @@ void check_moves() {
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(b.sides[1].get(1).hp == hp);
     CHECK(o.chance.actions.p1 == Action{});
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Earthquake, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Earthquake) - 1);
   }
   {
     // Focus Band, forced: the lethal hit leaves 1 HP.
@@ -329,7 +329,7 @@ void check_moves() {
     CHECK(dealt > 0);
     CHECK(b.sides[0].get(1).hp == hp1 - (dealt / 4 ? dealt / 4 : 1));
     // Struggle took no PP from the party either.
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BodySlam, 3));
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BodySlam));
   }
   {
     // Explosion: the user faints whether or not it hits, here into a Ghost
@@ -396,7 +396,7 @@ void check_confusion() {
     update(b, Choice::move(2), Choice::move(1), o);
     CHECK(b.sides[0].get(1).hp == hp1 - expected);
     CHECK(b.sides[1].get(1).hp == hp2);
-    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack, 3));
+    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack));
     CHECK(b.sides[0].active.volatiles.confusion == 2);
     CHECK(o.chance.actions.p1.confusion == Optional::True);
     CHECK(o.chance.actions.p1.confusion_end == Optional::False);
@@ -483,7 +483,7 @@ void check_confuse() {
     CHECK(o.chance.durations.p2.confusion == 2);
     CHECK(o.chance.actions.p2.confusion_end == Optional::False);
     CHECK(o.chance.actions.p2.confusion != Optional::None);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::ConfuseRay, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::ConfuseRay) - 1);
   }
   {
     // It fails into Own Tempo, a Substitute, Safeguard or an existing
@@ -557,7 +557,7 @@ void check_status_moves() {
   {
     Battle b = after(1, plain, none);
     CHECK(b.sides[1].get(1).status.badly_poisoned());
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Toxic, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Toxic) - 1);
     CHECK(after(2, plain, none).sides[1].get(1).status.paralyzed());
     CHECK(after(3, plain, none).sides[1].get(1).status.burned());
     CHECK(after(4, plain, none).sides[1].get(1).status.paralyzed());
@@ -587,7 +587,7 @@ void check_status_moves() {
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(!b.sides[1].get(1).status.any());
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Toxic, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Toxic) - 1);
   }
   // Thunder Wave into Wonder Guard lands: status moves skip it.
   {
@@ -639,7 +639,7 @@ void check_stat_moves() {
   {
     Battle b = after(dancer, 3, none);
     CHECK(b.sides[0].active.boosts.spa == 1 && b.sides[0].active.boosts.spd == 1);
-    CHECK(b.sides[0].get(1).moves[2].pp == max_pp(Move::CalmMind, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[2].pp == max_pp(Move::CalmMind) - 1);
     b = after(dancer, 4, none);
     CHECK(b.sides[0].active.boosts.eva == 1 && b.sides[0].active.volatiles.minimized);
   }
@@ -655,7 +655,7 @@ void check_stat_moves() {
       b.sides[0].active.boosts.spe = 6;
     });
     CHECK(b.sides[0].active.boosts.atk == 6 && b.sides[0].active.boosts.spe == 6);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::DragonDance, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::DragonDance) - 1);
   }
   helpers::Pokemon snorlax = SNORLAX;
   snorlax.moves[0] = Move::Curse;
@@ -753,7 +753,7 @@ void check_roar() {
       auto [b, o] = after(slot, 0, setup);
       return b.sides[1].get(1).species == Species::Snorlax &&
              o.chance.actions.p1.switch_target == 0 &&
-             b.sides[0].get(1).moves[slot - 1].pp == max_pp(roarer.moves[slot - 1], 3) - 1;
+             b.sides[0].get(1).moves[slot - 1].pp == max_pp(roarer.moves[slot - 1]) - 1;
     };
     CHECK(stays(1, [](Battle& b) { b.sides[1].active.ability = Ability::SuctionCups; }));
     CHECK(stays(1, [](Battle& b) { b.sides[1].active.volatiles.rooted = true; }));
@@ -777,7 +777,7 @@ void check_roar() {
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[1].get(1).species == Species::Snorlax);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Roar, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Roar) - 1);
   }
   // Both Roar: the faster drags the slower out, whose Roar is cancelled.
   {
@@ -790,7 +790,7 @@ void check_roar() {
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(b.sides[0].get(1).species == Species::Jolteon);
     CHECK(b.sides[1].get(1).species == Species::Dugtrio);
-    CHECK(b.sides[1].get(2).moves[0].pp == max_pp(Move::Roar, 3));
+    CHECK(b.sides[1].get(2).moves[0].pp == max_pp(Move::Roar));
     CHECK(o.chance.actions.p2.switch_target == 0);
   }
 }
@@ -822,8 +822,8 @@ void check_baton_pass() {
     Result r = update(b, Choice::move(1), Choice::move(1), o);
     CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
     CHECK(b.request.phase == Phase::BatonPass && b.request.next == 1);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BatonPass, 3) - 1);
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3));
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BatonPass) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash));
     std::array<Choice, MAX_CHOICES> out{};
     CHECK(choices(b, Player::P1, r.p1(), out) == 1 && out[0] == Choice::swap(2));
     r = update(b, Choice::swap(2), Choice::pass(), o);
@@ -840,7 +840,7 @@ void check_baton_pass() {
     CHECK(b.sides[1].active.volatiles.lock_on % 4 == 1);
     CHECK(!detail::locked_on(b, Player::P2));
     // The foe's Splash ran after the switch.
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash) - 1);
   }
   // The slower passer: the request comes last and the end of turn follows.
   {
@@ -850,7 +850,7 @@ void check_baton_pass() {
     Result r = update(b, Choice::move(1), Choice::move(1), null);
     CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
     CHECK(b.request.next == Request::END_OF_ACTIONS);
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash) - 1);
     r = update(b, Choice::swap(2), Choice::pass(), null);
     CHECK(r == Result::start() && b.turn == 2);
     CHECK(b.sides[0].active.species == Species::Dugtrio);
@@ -861,7 +861,7 @@ void check_baton_pass() {
     Null null{};
     const Result r = update(b, Choice::move(1), Choice::move(1), null);
     CHECK(r == Result::start() && b.turn == 2);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BatonPass, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::BatonPass) - 1);
   }
   // The recipient faints to Spikes: a replacement, and the foe's move is
   // cancelled.
@@ -874,7 +874,7 @@ void check_baton_pass() {
     r = update(b, Choice::swap(2), Choice::pass(), null);
     CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Pass));
     CHECK(b.request.phase == Phase::FaintAfterAction);
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash, 3));
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash));
     r = update(b, Choice::swap(3), Choice::pass(), null);
     CHECK(r == Result::start() && b.turn == 2);
     CHECK(b.sides[0].active.species == Species::Snorlax);
@@ -896,7 +896,7 @@ void check_wish() {
     CHECK(mon.hp == 1);
     // A second Wish fails (and uses PP); the first lands.
     update(b, Choice::move(1), Choice::move(1), null);
-    CHECK(mon.moves[0].pp == max_pp(Move::Wish, 3) - 2);
+    CHECK(mon.moves[0].pp == max_pp(Move::Wish) - 2);
     CHECK(b.sides[0].conditions.wish == 0 && b.sides[0].conditions.wisher == 0);
     CHECK(mon.hp == 1 + mon.stats.hp / 2);
   }
@@ -948,7 +948,7 @@ void check_leech_seed() {
     auto [b, o] = after(grass, Optional::None, none);
     CHECK(!b.sides[1].active.volatiles.leech_seed);
     CHECK(o.chance.actions.p1.hit == Optional::None);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::LeechSeed, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::LeechSeed) - 1);
   }
   {
     auto [b, o] = after(IDLE, Optional::None, [](Battle& b) {
@@ -988,7 +988,7 @@ void check_cures() {
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(!b.sides[0].get(1).status.any() && b.sides[0].active.toxic == 0);
     update(b, Choice::move(1), Choice::move(1), null);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Refresh, 3) - 2);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Refresh) - 2);
   }
   {
     Battle b = started({user}, {IDLE});
@@ -1063,7 +1063,7 @@ void check_counter() {
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Counter, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Counter) - 1);
   }
   // A Ghost type is immune to Counter.
   {
@@ -1126,7 +1126,7 @@ void check_taunt() {
   // Faster Taunt stops this turn's Splash, without PP.
   update(b, Choice::move(1), Choice::move(3), null);
   CHECK(b.sides[1].active.taunt == 1);
-  CHECK(b.sides[1].get(1).moves[2].pp == max_pp(Move::Splash, 3));
+  CHECK(b.sides[1].get(1).moves[2].pp == max_pp(Move::Splash));
   std::array<Choice, MAX_CHOICES> out{};
   const uint8_t n = choices(b, Player::P2, Choice::Move, out);
   bool splash = false;
@@ -1134,7 +1134,7 @@ void check_taunt() {
   CHECK(!splash);
   // A second Taunt fails; then it runs out.
   update(b, Choice::move(1), Choice::move(1), null);
-  CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Taunt, 3) - 2);
+  CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Taunt) - 2);
   CHECK(b.sides[1].active.taunt == 0);
 }
 
@@ -1164,8 +1164,8 @@ void check_encore() {
   o.calc.overrides.p1.hit = Optional::True;
   update(b, Choice::move(1), Choice::move(1), o);
   CHECK(b.sides[1].active.encored_move == Move::Splash);
-  CHECK(pp(0) == max_pp(Move::BodySlam, 3));
-  CHECK(pp(2) == max_pp(Move::Splash, 3) - 2);
+  CHECK(pp(0) == max_pp(Move::BodySlam));
+  CHECK(pp(2) == max_pp(Move::Splash) - 2);
   CHECK(o.chance.durations.p2.encore == 2);
   CHECK(only(Choice::move(3)));
   // A second Encore fails; the timer runs out within 6 ends of turn.
@@ -1203,7 +1203,7 @@ void check_solar_beam() {
   target.moves[3] = Move::Protect;
   Observed o{};
   o.calc.overrides.p1.hit = Optional::True;
-  const uint8_t pp = max_pp(Move::SolarBeam, 3);
+  const uint8_t pp = max_pp(Move::SolarBeam);
   Battle b = started({user}, {target});
   const Pokemon& t = b.sides[1].get(1);
   const ActivePokemon& a = b.sides[0].active;
@@ -1257,7 +1257,7 @@ void check_semi_invulnerable() {
   target.moves[3] = Move::Splash;
   Observed o{};
   o.calc.overrides.p1.hit = Optional::True;
-  const uint8_t pp = max_pp(Move::Dig, 3);
+  const uint8_t pp = max_pp(Move::Dig);
   Battle b = started({user}, {target, SNORLAX});
   const Pokemon& u = b.sides[0].get(1);
   const ActivePokemon& a = b.sides[0].active;
@@ -1295,7 +1295,7 @@ void check_recharge() {
   helpers::Pokemon user = SNORLAX;
   user.moves[2] = Move::HyperBeam;
   Observed o{};
-  const uint8_t pp = max_pp(Move::HyperBeam, 3);
+  const uint8_t pp = max_pp(Move::HyperBeam);
   Battle b = started({user, JOLTEON}, {SNORLAX});
   const Pokemon& t = b.sides[1].get(1);
   const ActivePokemon& a = b.sides[0].active;
@@ -1420,11 +1420,11 @@ void check_mimic() {
     const MoveSlot& ms = b.sides[0].active.moves[0];
     CHECK(ms.id == Move::QuickAttack && ms.pp == 5);
     CHECK(b.sides[0].get(1).moves[0].id == Move::Mimic);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic, 3) - 2);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic) - 2);
     // Using the copy spends its PP only.
     update(b, Choice::move(1), Choice::move(3), null);
     CHECK(b.sides[0].active.moves[0].pp == 4);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic, 3) - 2);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Mimic) - 2);
   }
   {
     // A copied Hidden Power is the user's own (Dark from 31s), and works.
@@ -1590,7 +1590,7 @@ void check_endeavor() {
     CHECK(b.sides[1].get(1).hp == 30);
     update(b, Choice::move(1), Choice::move(1), null); // fails
     CHECK(b.sides[1].get(1).hp == 30);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Endeavor, 3) - 2);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Endeavor) - 2);
   }
   {
     helpers::Pokemon ghost = IDLE;
@@ -1902,7 +1902,7 @@ void check_substitute() {
     CHECK(b.sides[0].active.volatiles.substitute);
     CHECK(b.sides[0].active.substitute_hp == mon.stats.hp / 4);
     CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 4);
-    CHECK(mon.moves[0].pp == max_pp(Move::Substitute, 3) - 1);
+    CHECK(mon.moves[0].pp == max_pp(Move::Substitute) - 1);
   }
   // At a quarter or less, or with one up, it fails at no cost.
   {
@@ -1956,7 +1956,7 @@ void check_protect() {
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
-    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Earthquake, 3) - 1);
+    CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Earthquake) - 1);
     CHECK(b.sides[0].active.protect_uses == 1);
   }
   // Acting last (the foe switches, which goes first), it fails with no
@@ -2085,7 +2085,7 @@ void check_spikes_and_heals() {
     Null null{};
     for (int i = 0; i < 4; i++) update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[1].conditions.spikes == 3);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Spikes, 3) - 4);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Spikes) - 4);
   }
   const auto healed = [&](uint8_t slot, uint16_t hp, auto&& setup) {
     Battle b = started({user}, {IDLE});
@@ -2127,7 +2127,7 @@ void check_focus_punch() {
   {
     Battle b = after(DUGTRIO, none);
     CHECK(b.sides[1].get(1).hp == b.sides[1].get(1).stats.hp);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::FocusPunch, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::FocusPunch) - 1);
   }
   CHECK(after(IDLE, none).sides[1].get(1).hp < after(IDLE, none).sides[1].get(1).stats.hp);
   {
@@ -2531,7 +2531,7 @@ void check_absorbing() {
     const Observed o = run(b, 1);
     CHECK(l.hp == 10 + l.stats.hp / 4);
     CHECK(o.chance.actions.p1.hits[0].damage == 0);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Thunderbolt, 3) - 1);
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Thunderbolt) - 1);
     // Thunder Wave has no power, so it isn't absorbed.
     Battle c = started({zapper}, {lanturn});
     run(c, 2);
@@ -2736,8 +2736,8 @@ void check_sleep() {
     o.calc.overrides.turn.speed_tie = 1;
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(b.sides[1].get(1).hp < b.sides[1].get(1).stats.hp);
-    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::SleepTalk, 3) - 1);
-    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::BodySlam, 3));
+    CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::SleepTalk) - 1);
+    CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::BodySlam));
     CHECK(b.sides[0].active.last_move == Move::SleepTalk);
     CHECK(o.chance.actions.p1.move_slot == 2);
     CHECK(b.sides[0].active.sleep_skipped == 1);

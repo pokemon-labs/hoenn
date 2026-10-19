@@ -1308,14 +1308,14 @@ constexpr bool item_cure_held(Battle& battle, Player player, O& options) {
   case HoldEffect::RestorePp: {
     // Leppa Berry, as Showdown's onUpdate (data/items.ts:3360): 10 PP to the
     // first slot at 0, at once; the decomp waits for the end of the turn. A
-    // Transformed or Mimicked slot's maximum counts its PP Ups (unverified
-    // against Showdown).
+    // Transformed or Mimicked slot's maximum has 3 PP Ups too
+    // (sim/pokemon.ts:1320, data/mods/gen4/moves.ts:896).
     uint8_t slot = 0;
     while (slot < 4 && (a.moves[slot].id == Move::None || a.moves[slot].pp != 0)) slot++;
     if (slot == 4) return false;
     use_item(battle, player, options);
     MoveSlot& ms = a.moves[slot];
-    const uint8_t max = max_pp(ms.id, ms.pp_ups);
+    const uint8_t max = max_pp(ms.id);
     ms.pp = uint8_t(max < 10 ? max : 10);
     if (!a.volatiles.transformed && !(a.mimicked & (1 << slot))) mon.moves[slot].pp = ms.pp;
     protocol::activate_with(options.log, protocol::ident(battle, player),
@@ -4070,7 +4070,7 @@ constexpr void transform(Battle& battle, Player player, MoveState& m, O& options
   for (uint8_t i = 0; i < 4; i++) {
     const Move move = t.moves[i].id;
     const uint8_t base = move == Move::None ? 0 : get(move).pp;
-    a.moves[i] = {move, uint8_t(base < 5 ? base : 5), a.moves[i].pp_ups};
+    a.moves[i] = {move, uint8_t(base < 5 ? base : 5)};
   }
   a.mimicked = 0;
   a.boosts = t.boosts;
@@ -4085,7 +4085,7 @@ constexpr void transform(Battle& battle, Player player, MoveState& m, O& options
 // Sketch, as Showdown's gen4 mod: it misses a semi-invulnerable target, and
 // fails for a transformed user, no last move, a Substitute, Sketch or Struggle,
 // or a move already known. Otherwise the slot keeps the move for good, with
-// base PP and the slot's PP Ups. Showdown prints Mimic's -activate.
+// base PP. Showdown prints Mimic's -activate.
 template <typename O>
 constexpr void sketch(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -4102,7 +4102,7 @@ constexpr void sketch(Battle& battle, Player player, MoveState& m, O& options) {
     return but_it_failed(battle, player, m, options);
   }
   assert(m.slot < 4);
-  a.moves[m.slot] = {last, get(last).pp, side.get(1).moves[m.slot].pp_ups};
+  a.moves[m.slot] = {last, get(last).pp};
   side.get(1).moves[m.slot] = a.moves[m.slot];
   protocol::activate_with(options.log, protocol::ident(battle, player),
                           protocol::Activate::Mimic, last);

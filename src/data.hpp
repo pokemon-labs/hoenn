@@ -470,26 +470,26 @@ static_assert(hidden_power(Stats{31, 30, 30, 31, 31, 31}).power == 70);
 static_assert(hidden_power(Stats{0, 0, 0, 0, 0, 0}).move == Move::HiddenPowerFighting);
 static_assert(hidden_power(Stats{0, 0, 0, 0, 0, 0}).power == 30);
 
-// A move and its PP. `pp_ups` (0-3) is kept for max PP (Leppa Berry, Transform,
-// the PP write-back).
+// A move and its PP. Its max PP is max_pp(id): every slot has 3 PP Ups.
 struct MoveSlot {
   Move id;
   uint8_t pp;
-  uint8_t pp_ups;
 
   friend constexpr bool operator==(const MoveSlot&, const MoveSlot&) = default;
 };
 
+// The max PP with 3 PP Ups, which Showdown gives every move (sim/pokemon.ts:361,
+// sim/battle.ts:2378), Transform's, Mimic's and Sketch's included. As
 // CalculatePPWithBonus (src/pokemon.c:4650): each PP Up adds a fifth of the
-// base PP. At most 64 (a 40 PP move with 3 PP Ups).
-constexpr uint8_t max_pp(Move move, uint8_t pp_ups) {
-  assert(move != Move::None && uint16_t(move) < MOVES && pp_ups <= 3);
+// base PP. At most 64 (a 40 PP move).
+constexpr uint8_t max_pp(Move move) {
+  assert(move != Move::None && uint16_t(move) < MOVES);
   const uint8_t base = get(move).pp;
-  return uint8_t(base + base * 20 * pp_ups / 100);
+  return uint8_t(base + base * 60 / 100);
 }
 
-static_assert(max_pp(Move::Spikes, 3) == 32 && max_pp(Move::Spikes, 0) == 20);
-static_assert(max_pp(Move::Growl, 3) == 64 && max_pp(Move::Sketch, 3) == 1);
+static_assert(max_pp(Move::Spikes) == 32 && max_pp(Move::Toxic) == 16);
+static_assert(max_pp(Move::Growl) == 64 && max_pp(Move::Sketch) == 1);
 
 // A party Pokémon. Never reordered: Side::order maps SLOTs to it.
 //
@@ -534,7 +534,7 @@ struct Pokemon {
       return false;
     }
     for (const MoveSlot& m : moves) {
-      if (!detail::valid(m.id) || m.pp_ups > 3) return false;
+      if (!detail::valid(m.id)) return false;
       if (m.id == Move::None && m.pp != 0) return false;
     }
     return true;
@@ -718,7 +718,7 @@ struct ActivePokemon {
       if (!detail::valid(m)) return false;
     }
     for (const MoveSlot& m : moves) {
-      if (!detail::valid(m.id) || m.pp_ups > 3) return false;
+      if (!detail::valid(m.id)) return false;
     }
     return boosts.valid() && volatiles.valid() && toxic <= MAX_TOXIC &&
            sleep_skipped <= Status::MAX_SLEEP - 1 &&
@@ -871,7 +871,7 @@ static_assert([] {
     p.level = 50;
     p.hidden_power = 70;
     p.hidden_power_type = Type::Dark;
-    p.moves[0] = {Move::Tackle, 35, 0};
+    p.moves[0] = {Move::Tackle, 35};
     s.active.species = p.species;
   }
   if (!b.valid()) return false;
@@ -893,7 +893,7 @@ static_assert([] {
     p.level = 50;
     p.hidden_power = 70;
     p.hidden_power_type = Type::Dark;
-    p.moves[0] = {Move::Tackle, 35, 0};
+    p.moves[0] = {Move::Tackle, 35};
   }
   if (!b.valid()) return false;
   b.turn = 1;  // started, but no active Pokémon
