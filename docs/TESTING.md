@@ -438,7 +438,7 @@ no job against master.
 Calc is easy to misread, so here is what it is and where tests use it.
 
 **What it is.** `Calc` holds `overrides`, an `Actions` value. When `update`
-reaches a random draw, its roll helper (`mechanics.hpp`, one per
+reaches a random draw, its roll helper (`effects.hpp`, one per
 catalogue row) checks the matching override field: nonzero forces that
 outcome, 0 draws normally. Hidden counters (sleep, confusion, binding
 lengths) aren't overrides; a test sets them in the battle instead.
@@ -466,7 +466,7 @@ built.
   test is for: given that pick, our engine must still produce Showdown's
   log, with every other draw searched. What it skips is whether we could
   draw that pick at all. A forced pick Metronome can't call asserts
-  (`mechanics.hpp`, `metronome_can_call`), but only in debug, and
+  (`effects.hpp`, `metronome_can_call`), but only in debug, and
   `check_showdown` runs in release; the pick set is otherwise checked only
   by the unforced games.
 

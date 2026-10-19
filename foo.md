@@ -39,9 +39,14 @@ checking in on every step.
 
 ## Still open (the user's decisions)
 
-1. Split the file into topic headers, with `mechanics.hpp` as the umbrella?
-2. King's Rock stolen with Thief can flinch in the same move (moveend
-   checks it after the handover); Showdown's can't. Change it?
+- Done (uncommitted): `mechanics.hpp` keeps the turn's state and the flow
+  (about 2,170 lines); `effects.hpp` holds the effects, roll helpers and
+  shared helpers (about 4,950), included mid-file after the turn's state and
+  forward declarations. It doesn't stand alone, so the `headers` test skips
+  it. The user prefers braced if-blocks; don't collapse them.
+
+(King's Rock stolen with Thief was a false alarm: Thief and Covet lack the
+King's Rock flag, which matches Showdown's gen3 list.)
 
 ## Checks
 

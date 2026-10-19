@@ -106,7 +106,7 @@ and `probability`. `chance.hpp` catalogues every reachable draw.
   resamples them). Every draw that can affect public state has its own
   field, sized for its multiplicity in one update; overflowing or
   rewriting a field asserts.
-- **Hooks:** one roll helper per catalogue row in `mechanics.hpp` does the
+- **Hooks:** one roll helper per catalogue row in `effects.hpp` does the
   Calc override, the draw and the Chance record, under
   `if constexpr (Chance::enabled)`. The null types are only
   `{ static constexpr bool enabled = false; }`.

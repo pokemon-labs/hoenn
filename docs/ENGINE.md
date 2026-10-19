@@ -317,7 +317,7 @@ Thrash, Bide, Future Sight, Transform...).
 - **The formula lives in `damage.hpp`**, included by `mechanics.hpp` and
   `calc.hpp` (so `min_ko_roll` reuses it without side effects). Its functions
   read a `const Battle&` and take no `options`: they never draw. The draws
-  are roll helpers in `mechanics.hpp`, as libpkmn's `Rolls`.
+  are roll helpers in `effects.hpp`, as libpkmn's `Rolls`.
 - **A zero divisor is asserted, not checked.** It needs a Def or SpD of 0–3,
   which no valid Pokémon has (the lowest is 4, which is still 1 at −6), so
   it's corrupt state (CLAUDE.md, "Safety"). Showdown would compute `Infinity`

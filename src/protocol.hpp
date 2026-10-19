@@ -868,7 +868,7 @@ template <typename L> void cure_team(L& log, ID id) {
   }
 }
 
-// Boost's stat byte: the stage index (mechanics.hpp's stage(): 0 Atk, 1 Def,
+// Boost's stat byte: the stage index (effects.hpp's stage(): 0 Atk, 1 Def,
 // 2 Spe, 3 SpA, 4 SpD, 5 accuracy, 6 evasion), with these flags.
 inline constexpr uint8_t BOOST_DOWN = 1 << 6; // -unboost
 inline constexpr uint8_t BOOST_ITEM = 1 << 7; // [from] item: I, + item

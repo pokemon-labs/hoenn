@@ -25,6 +25,8 @@ target_compile_options(hoenn_warnings INTERFACE -Wall -Wextra -Wpedantic -Werror
 # define nothing twice across translation units.
 file(GLOB_RECURSE HOENN_HEADERS CONFIGURE_DEPENDS
      RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp)
+# effects.hpp is part of mechanics.hpp, included after the turn's state.
+list(REMOVE_ITEM HOENN_HEADERS effects.hpp)
 set(HOENN_HEADER_TUS)
 foreach(header ${HOENN_HEADERS})
   string(MAKE_C_IDENTIFIER ${header} name)

@@ -2,7 +2,7 @@
 // come) min_ko_roll.
 //
 // Overrides are an Actions: a nonzero field forces that branch, 0 rolls
-// normally. The roll helpers in mechanics.hpp read them directly behind
+// normally. The roll helpers in effects.hpp read them directly behind
 // `if constexpr (enabled)` (CLAUDE.md, "Chance", Hooks). Hidden rolls are in
 // neither; to fix a sleep length, set the counter in the battle. Summaries
 // are on hold.

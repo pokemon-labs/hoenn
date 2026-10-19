@@ -478,7 +478,7 @@ static_assert(std::is_trivial_v<Durations> &&
 //
 // update() resets `probability` and `actions` when it starts; `durations`
 // carry over between updates, so the caller keeps one Chance per battle (and
-// copies it along with the battle). The roll helpers in mechanics.hpp write
+// copies it along with the battle). The roll helpers in effects.hpp write
 // these fields directly behind `if constexpr (enabled)` (CLAUDE.md, "Chance",
 // Hooks); there are no per-site methods.
 template <typename R = Rational<double>> struct Chance {

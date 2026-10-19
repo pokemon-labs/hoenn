@@ -10,7 +10,7 @@
 // data/mods/gen3/scripts.ts (modifyDamage), battle = sim/battle.ts.
 //
 // Nothing here draws or takes options. The draws (crit, damage roll) are
-// roll helpers in mechanics.hpp, which apply Calc overrides and report to
+// roll helpers in effects.hpp, which apply Calc overrides and report to
 // Chance; they pass the outcome in (Hit::crit, apply_roll's index). So
 // calc.hpp's min_ko_roll runs the same path without side effects.
 //
@@ -174,7 +174,7 @@ constexpr bool typeless(const Hit& hit) {
 // is this plus 1, capped at 5 (battle-actions getDamage), with the same table.
 // The decomp computes the same sum (Cmd_critcalc, bsc:1253), except that
 // Showdown gives Razor Wind critRatio 2 too, and this follows it. The roll
-// itself is a roll helper in mechanics.hpp.
+// itself is a roll helper in effects.hpp.
 constexpr uint8_t crit_stage(const Battle& battle, Player player, Move move) {
   const Side& side = battle.side(player);
   const ActivePokemon& active = side.active;

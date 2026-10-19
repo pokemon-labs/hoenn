@@ -619,7 +619,7 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
                ": item " + std::string(item_id(p.item)) + ", Showdown " +
                m[5].string + ";";
       }
-      // Castform's forme is our active type (Forecast, mechanics.hpp); with
+      // Castform's forme is our active type (Forecast, effects.hpp); with
       // another ability, its type (Color Change's) says nothing of it.
       std::string sd_id = m[0].string;
       if (sd_id.starts_with("castform")) {

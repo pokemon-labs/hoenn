@@ -7,7 +7,7 @@
 // they take no space and their calls compile to nothing. The log's types are
 // in protocol.hpp. Chance and Calc are generation-specific, so their real and
 // null types belong in chance.hpp and calc.hpp. The roll helpers
-// in mechanics.hpp use them directly behind `if constexpr
+// in effects.hpp use them directly behind `if constexpr
 // (T::enabled)`; the null types are only `enabled = false` (CLAUDE.md,
 // "Chance", Hooks).
 
