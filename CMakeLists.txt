@@ -73,10 +73,6 @@ add_test(NAME check_showdown_fixture
          COMMAND check_showdown --quiet --tries 1000000 --seed 1
                  ${CMAKE_CURRENT_SOURCE_DIR}/tools/fixtures/showdown.jsonl)
 
-# Which moves on the teams have a written mechanic (tools/coverage.cpp).
-add_executable(coverage tools/coverage.cpp)
-target_link_libraries(coverage PRIVATE hoenn hoenn_warnings)
-
 # The OU teams: every *.txt in the directory, whatever its name.
 set(HOENN_TEAMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/teams/ou
     CACHE PATH "Showdown export teams for the tests")

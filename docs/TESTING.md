@@ -309,8 +309,6 @@ comparison, since the log hides some state.
   runs vary by about 6%; compare commits on the same day, interleaved.
   ADV-Simulator's update about 1.4 µs. None is like for like.
   Not a pass/fail suite.
-- `coverage`: which moves on the given teams have a written mechanic
-  (100% on `teams/ou/`). Not a pass/fail suite.
 
 ## Pass criteria (proposed)
 
