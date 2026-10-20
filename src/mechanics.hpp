@@ -1880,9 +1880,31 @@ constexpr ResidualSpeeds residual_speeds(Battle& battle, uint32_t& s1, uint32_t&
   return r;
 }
 
+// Whether p's pass may draw other than a Yawn's sleep length: Shed Skin with a
+// status, or a Starf or confusion berry at its threshold (the stat, the
+// confusion's length). Over-approximated: the berry's heal, nature and Own
+// Tempo checks are ignored.
+constexpr bool pass_draws(const Battle& battle, Player p) {
+  const Side& side = battle.side(p);
+  const Pokemon& mon = side.get(1);
+  if (side.active.ability == Ability::ShedSkin && mon.status.any()) return true;
+  const ItemData item = item_data(mon.item);
+  switch (item.effect) {
+  case HoldEffect::RandomStatUp: return mon.hp <= mon.stats.hp / item.param;
+  case HoldEffect::ConfuseSpicy:
+  case HoldEffect::ConfuseDry:
+  case HoldEffect::ConfuseSweet:
+  case HoldEffect::ConfuseBitter:
+  case HoldEffect::ConfuseSour: return mon.hp <= mon.stats.hp / 2;
+  default: return false;
+  }
+}
+
 // Whether the order of the two per-Pokémon passes can change the state or the
 // draws recorded: through Leech Seed, binding, an Uproar ending before the
-// other's Yawn, or a faint ending the battle or a Cloud Nine.
+// other's Yawn, both passes drawing (each takes the other's values in the
+// other order; two Yawns alone only swap hidden sleep lengths), or a faint
+// ending the battle or a Cloud Nine.
 // Over-approximated: the damage ignores the pass's heals.
 constexpr bool pass_order_matters(const Battle& battle) {
   const Side& s1 = battle.sides[0];
@@ -1892,6 +1914,9 @@ constexpr bool pass_order_matters(const Battle& battle) {
   const Volatiles& v2 = s2.active.volatiles;
   if (v1.leech_seed || v2.leech_seed || v1.wrapped != 0 || v2.wrapped != 0) return true;
   if (uproar(battle) && (v1.yawn != 0 || v2.yawn != 0)) return true;
+  const bool o1 = pass_draws(battle, Player::P1);
+  const bool o2 = pass_draws(battle, Player::P2);
+  if ((o1 || v1.yawn == 1) && (o2 || v2.yawn == 1) && (o1 || o2)) return true;
   for (const Player p : {Player::P1, Player::P2}) {
     uint32_t damage = 0;
     for (const Stage stage : {Stage::Status, Stage::Nightmare, Stage::Curse}) {
