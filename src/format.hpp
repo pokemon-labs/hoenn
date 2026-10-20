@@ -54,17 +54,14 @@ inline std::string status_name(uint8_t bits) {
   return "";
 }
 
-// Pokemon.getHealth (sim/pokemon.ts:2060): exact, or HP Percentage Mod's
-// ceiling with 100 kept for full HP.
+// Pokemon.getHealth (sim/pokemon.ts:2060): exact, or HP Percentage Mod's.
 inline std::string health(uint16_t hp, uint16_t max, uint8_t status, bool exact) {
   if (hp == 0) return "0 fnt";
   std::string s;
   if (exact) {
     s = std::to_string(hp) + "/" + std::to_string(max);
   } else {
-    uint32_t pct = (100u * hp + max - 1) / max;
-    if (pct == 100 && hp < max) pct = 99;
-    s = std::to_string(pct) + "/100";
+    s = std::to_string(protocol::hp_percent(hp, max)) + "/100";
   }
   const std::string st = status_name(status);
   if (!st.empty()) s += " " + st;
@@ -92,13 +89,19 @@ struct Reader {
 
 } // namespace detail
 
+// Omniscient: the raw log, a |split| triplet for each line with HP (and
+// Pressure). View: bytes a player's view already (view.hpp), so each
+// triplet is only its secret line: Showdown's stream for that player.
+enum class Stream : uint8_t { Omniscient, View };
+
 // Formats one update's messages, up to the terminating None (or the end of
 // `bytes`), appending lines to `out`.
 class Formatter {
  public:
   // `exact_hp`: Showdown's reportExactHP, which a debug format sets.
-  explicit Formatter(const Names& names, bool exact_hp = false)
-      : names_(names), exact_hp_(exact_hp) {}
+  explicit Formatter(const Names& names, bool exact_hp = false,
+                     Stream stream = Stream::Omniscient)
+      : names_(names), exact_hp_(exact_hp), stream_(stream) {}
 
   void format(std::span<const uint8_t> bytes, std::vector<std::string>& out) {
     detail::Reader r{bytes};
@@ -106,7 +109,9 @@ class Formatter {
     while (!r.done()) {
       const ArgType type = ArgType(r.byte());
       if (type == ArgType::None) return;
+      [[maybe_unused]] const size_t start = r.pos;
       line(type, r, out);
+      assert(r.pos - start == protocol::message_size(type, bytes.data() + start));
     }
   }
 
@@ -119,6 +124,7 @@ class Formatter {
  private:
   const Names& names_;
   bool exact_hp_;
+  Stream stream_;
   size_t last_move_ = SIZE_MAX;
 
   std::string ident(ID id) const {
@@ -167,6 +173,10 @@ class Formatter {
   // and `after` what follows it.
   void split(std::vector<std::string>& out, Player p, const std::string& before,
              uint16_t hp, uint16_t max, uint8_t status, const std::string& after) const {
+    if (stream_ == Stream::View) {
+      out.push_back(before + detail::health(hp, max, status, true) + after);
+      return;
+    }
     out.push_back(std::string("|split|") + detail::side_id(p));
     out.push_back(before + detail::health(hp, max, status, true) + after);
     out.push_back(before + detail::health(hp, max, status, exact_hp_) + after);
@@ -761,6 +771,10 @@ class Formatter {
       case F::Boost: out.push_back(s + "|boost"); return;
       case F::Pressure:
         // addSplit with no public line (data/mods/gen3/abilities.ts:148).
+        if (stream_ == Stream::View) {
+          out.push_back(s + "|[silent]");
+          return;
+        }
         out.push_back(std::string("|split|") + detail::side_id(id.player()));
         out.push_back(s + "|[silent]");
         out.push_back("");

@@ -120,7 +120,7 @@ CMake, for tests and tools only; the library is the `INTERFACE` target
 then `cmake --build --preset X` and `ctest --preset X`. Tests build with
 `-Wall -Wextra -Wpedantic -Werror`. Targets: `headers`, `check_data`,
 `check_teams`, `check_damage`, `soak`, `check_chance`, `check_frame`,
-`check_showdown_fixture`; the full environments run with
+`check_view`, `check_showdown_fixture`; the full environments run with
 `python3 tools/run_env.py ENV`. Regenerate the damage cases with
 `node tools/damage_oracle.cjs > tools/damage_cases.inc`. Everything else
 (suites, bars, CI) is in `docs/TESTING.md`.

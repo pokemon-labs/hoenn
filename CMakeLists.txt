@@ -62,6 +62,11 @@ target_link_libraries(soak PRIVATE hoenn hoenn_warnings)
 add_executable(bench tools/bench.cpp)
 target_link_libraries(bench PRIVATE hoenn hoenn_warnings)
 
+# The player view's square against Showdown's split filter
+# (tools/check_view.cpp, docs/ENGINE.md, "Protocol").
+add_executable(check_view tools/check_view.cpp)
+target_link_libraries(check_view PRIVATE hoenn hoenn_warnings)
+
 # The choices and Chance's Actions determine the result (tools/check_chance.cpp).
 add_executable(check_chance tools/check_chance.cpp)
 target_link_libraries(check_chance PRIVATE hoenn hoenn_warnings)
@@ -86,6 +91,8 @@ if(HOENN_TEAM_FILES)
   add_test(NAME check_frame COMMAND check_frame ${HOENN_TEAM_FILES})
   # A short soak; run the binary by hand for long ones.
   add_test(NAME soak COMMAND soak --games 100 ${HOENN_TEAM_FILES})
+  # A few games; run the binary by hand for long ones.
+  add_test(NAME check_view COMMAND check_view --games 20 ${HOENN_TEAM_FILES})
   add_test(NAME check_chance
            COMMAND check_chance --games 2 --samples 32 ${HOENN_TEAM_FILES})
   # The ablation that must fail: the seed left in, every repeated key

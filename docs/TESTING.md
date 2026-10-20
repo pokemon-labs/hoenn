@@ -309,6 +309,14 @@ comparison, since the log hides some state.
   runs vary by about 6%; compare commits on the same day, interleaved.
   ADV-Simulator's update about 1.4 µs. None is like for like.
   Not a pass/fail suite.
+- `check_view`: the player view (`view.hpp`, `ENGINE.md`, "Protocol").
+  Over random self-play, per update, player and HP mode, Showdown's split
+  filter (written from `extractChannelMessages`, `sim/battle.ts:35`, not
+  from `format.hpp`) over the omniscient text equals the formatted view;
+  a second `View` over the view changes nothing (so the foe is numbered in
+  order of appearance); our own HP is untouched. 2026-10-20: 0 failures
+  over 1,000 OU and 1,000 group-team games; dropping the renumbering,
+  Leech Seed's `[of]` or Wish's wisher each fails it.
 
 ## Pass criteria (proposed)
 

@@ -1160,4 +1160,119 @@ void heal_wish(L& log, ID id, const Pokemon& mon, uint8_t wisher) {
   }
 }
 
+// HP Percentage Mod's public HP (Pokemon.getHealth, sim/pokemon.ts:2060):
+// the ceiling, with 100 kept for full HP only.
+constexpr uint16_t hp_percent(uint16_t hp, uint16_t max) {
+  assert(hp <= max && max != 0);
+  uint32_t pct = (100u * hp + max - 1) / max;
+  if (pct == 100 && hp < max) pct = 99;
+  return uint16_t(pct);
+}
+
+// The bytes of a message after its ArgType, read from `fields` (the
+// encodings above). view.hpp walks the log with it; the Formatter asserts it
+// reads exactly this much.
+constexpr size_t message_size(ArgType type, const uint8_t* fields) {
+  switch (type) {
+  case ArgType::LastStill:
+  case ArgType::LastMiss:
+  case ArgType::LastNoTarget:
+  case ArgType::OHKO:
+  case ArgType::Tie:
+  case ArgType::ClearAllBoost:
+  case ArgType::Nothing: return 0;
+  case ArgType::NoTarget:
+  case ArgType::Faint:
+  case ArgType::Win:
+  case ArgType::CureTeam:
+  case ArgType::SetBoost:
+  case ArgType::ClearNegativeBoost:
+  case ArgType::Crit:
+  case ArgType::SuperEffective:
+  case ArgType::Resisted:
+  case ArgType::MustRecharge:
+  case ArgType::FieldActivate: return 1;
+  case ArgType::Miss:
+  case ArgType::Turn:
+  case ArgType::CopyBoost:
+  case ArgType::HitCount:
+  case ArgType::Transform:
+  case ArgType::SingleTurn:
+  case ArgType::SingleMove:
+  case ArgType::FormeChange: return 2;
+  case ArgType::Prepare: return 3;
+  case ArgType::Anim: return 4;
+  case ArgType::Move: return MoveFrom(fields[4]) == MoveFrom::From ? 7 : 5;
+  case ArgType::Fail: {
+    const Fail f = Fail(fields[1]);
+    return f == Fail::Unboost || f == Fail::Ability ? 3 : 2;
+  }
+  case ArgType::Immune: {
+    const Immune i = Immune(fields[1]);
+    return i == Immune::Ability || i == Immune::Confusion ? 3 : 2;
+  }
+  case ArgType::Activate: {
+    const Activate a = Activate(fields[1]);
+    size_t n = 2;
+    if (a == Activate::Ability || a == Activate::Magnitude) n += 1;
+    if (a == Activate::Spite) n += 3;
+    if (activate_move(a)) n += 2;
+    if (activate_of(a)) n += 1;
+    return n;
+  }
+  case ArgType::Start: {
+    const Start s = Start(fields[1]);
+    if (s == Start::Disable) return 4;
+    return s >= Start::Curse ? 3 : 2;
+  }
+  case ArgType::End: return end_move(End(fields[1])) ? 4 : 2;
+  case ArgType::SetHP: return 7;
+  case ArgType::Switch:
+  case ArgType::Drag: return 11;
+  case ArgType::Cant: {
+    const Cant c = Cant(fields[1]);
+    return 2 + (names_move(c) ? 2 : 0) + (c == Cant::Damp ? 1 : 0);
+  }
+  case ArgType::Damage:
+    switch (Damage(fields[6])) {
+    case Damage::LeechSeed: return 8;
+    case Damage::Bound:
+    case Damage::Ability: return 9;
+    default: return 7;
+    }
+  case ArgType::Heal:
+    switch (Heal(fields[6])) {
+    case Heal::Drain:
+    case Heal::Wish: return 8;
+    case Heal::Item:
+    case Heal::Ability: return 9;
+    default: return 7;
+    }
+  case ArgType::Status:
+    switch (StatusFrom(fields[2])) {
+    case StatusFrom::None: return 3;
+    default: return 5;
+    }
+  case ArgType::CureStatus: return Cure(fields[2]) == Cure::Move ? 6 : 4;
+  case ArgType::Boost: return fields[1] & BOOST_ITEM ? 4 : 3;
+  case ArgType::SideStart:
+  case ArgType::SideEnd:
+    return SideCondition(fields[1]) == SideCondition::SpikesRapidSpin ? 3 : 2;
+  case ArgType::Weather: return WeatherFrom(fields[1]) == WeatherFrom::Ability ? 4 : 2;
+  case ArgType::Item: {
+    const ItemFrom f = ItemFrom(fields[2]);
+    return f == ItemFrom::Thief || f == ItemFrom::Covet ? 4 : 3;
+  }
+  case ArgType::EndItem: {
+    const EndItemFrom f = EndItemFrom(fields[2]);
+    return f == EndItemFrom::KnockOff || f == EndItemFrom::Thief ? 4 : 3;
+  }
+  case ArgType::Ability: {
+    const AbilityFrom f = AbilityFrom(fields[2]);
+    return f == AbilityFrom::Trace || f == AbilityFrom::RolePlay ? 5 : 3;
+  }
+  default: assert(false && "not a gen3 message"); return 0;
+  }
+}
+
 } // namespace hoenn::protocol

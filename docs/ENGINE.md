@@ -650,6 +650,20 @@ Decided (2026-10-08):
   libpkmn's single protocol namespace.
 - `update` ends its messages with `None` (0), libpkmn's terminator.
 
+Decided (2026-10-20):
+
+- **A player's view of the bytes** (`protocol::View`, `view.hpp`) deletes
+  everything the log shows and Showdown's stream for that player doesn't:
+  the foe's exact HP, the sleep counter and Rest flag, the foe's Pressure,
+  and the foe's party positions. The ident is libpkmn's original party
+  position (libpkmn `docs/PROTOCOL.md`, "PokemonIdent"), which Showdown
+  never shows, so the view numbers the foe's Pokémon in order of first
+  appearance, as a model built from the text holds them. Every other field
+  the formatter reads is printed, so public. Formatting the view with names
+  permuted the same way (`Stream::View`) gives Showdown's split filter of
+  the omniscient text; `check_view` tests it. Side relabelling (the viewer
+  always p1) is the driver's.
+
 ## Teams
 
 `helpers.hpp` builds a battle from `helpers::Pokemon` sets, as libpkmn's
