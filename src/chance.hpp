@@ -192,7 +192,12 @@ namespace hoenn {
 //                                                            move, multi-hit
 //                                                            included.
 // Multi-hit count         2,3,4,5: 3/8,3/8,1/8,1/8    1     bsc:7147, two draws
-//                                                            folded into one
+//                                                            folded into one;
+//                                                            kept as the hits
+//                                                            landed, at least
+//                                                            n when a faint or
+//                                                            sleep stops the
+//                                                            loop (multi_hits)
 //                                                            outcome
 // Triple Kick's later     acc/100 per hit, the loop   2     Showdown's
 //   accuracy checks       stops at a miss                    multiaccuracy
@@ -331,7 +336,8 @@ struct Action {
   uint8_t move_slot;     // Sleep Talk's pick, 1-4 (bsc:8268)
   Optional protect;      // Protect, Detect or Endure succeeding (bsc:6514)
   Optional hit;          // accuracy (bsc:1176), once per move
-  uint8_t multi_hit;     // the hit count, 2-5 (bsc:7147); for Triple Kick
+  uint8_t multi_hit;     // the hits landed, 2-5 (bsc:7147), or 0 when the
+                         // loop stopped by hit 2; for Triple Kick
                          // the hits that landed, 1-3 (its later accuracy
                          // checks: a count below 3 with the target still
                          // standing means the next check missed)

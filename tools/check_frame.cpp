@@ -1398,6 +1398,43 @@ void check_multi_hit() {
     CHECK(run(b, 1, 4, 5) == 5);
     CHECK(b.sides[1].get(1).hp == 1);
   }
+  {
+    // A faint on hit k makes every count from k up one outcome, count >= k;
+    // without a stop the count is exact. Each hit takes `per`.
+    uint16_t per = 0;
+    {
+      Battle b = started({user}, {target});
+      run(b, 1, 3, 2);
+      per = uint16_t((b.sides[1].get(1).stats.hp - b.sides[1].get(1).hp) / 2);
+    }
+    const auto key = [&](uint16_t hp, uint8_t n) {
+      Battle b = started({user}, {target});
+      b.sides[1].get(1).hp = hp;
+      Observed o{};
+      o.calc.overrides.p1.hit = Optional::True;
+      o.calc.overrides.p1.multi_hit = n;
+      for (uint8_t i = 0; i < MAX_HITS; i++) {
+        o.calc.overrides.p1.hits[i].crit = Optional::False;
+        o.calc.overrides.p1.hits[i].damage = 100;
+      }
+      update(b, Choice::move(1), Choice::move(3), o);
+      o.chance.probability.reduce();
+      return o.chance;
+    };
+    const auto at3 = key(uint16_t(2 * per + 1), 3);
+    const auto at5 = key(uint16_t(2 * per + 1), 5);
+    const auto exact3 = key(uint16_t(4 * per), 3);
+    CHECK(at3.actions == at5.actions && at3.actions.p1.multi_hit == 3);
+    CHECK(at3.probability.p == at5.probability.p &&
+          at3.probability.q == at5.probability.q);
+    CHECK(exact3.actions.p1.multi_hit == 3);
+    // 5/8 against 3/8; the other draws are the same.
+    CHECK(at3.probability.p * exact3.probability.q * 3 ==
+          exact3.probability.p * at3.probability.q * 5);
+    // A faint by hit 2 leaves nothing to record.
+    CHECK(key(uint16_t(per + 1), 4).actions.p1.multi_hit == 0);
+    CHECK(key(uint16_t(per), 5).actions.p1.multi_hit == 0);
+  }
 }
 
 // Mimic: Mimic's slot takes the target's last move with min(5, base PP),

@@ -650,22 +650,32 @@ template <typename O> constexpr uint8_t spite(Battle& battle, Player p, O& optio
 }
 
 // A 2-5 hit move's count: 2 or 3 at 3/8 each, 4 or 5 at 1/8
-// (Cmd_setmultihitcounter, bsc:7139; Showdown's sample agrees).
+// (Cmd_setmultihitcounter, bsc:7139; Showdown's sample agrees). Drawn up
+// front, recorded by multi_hits once the loop ends.
 template <typename O>
 constexpr uint8_t multi_hit(Battle& battle, Player p, O& options) {
   uint8_t forced = 0;
   if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).multi_hit;
   assert(forced == 0 || (forced >= 2 && forced <= 5));
-  uint8_t n = forced;
-  if (n == 0) {
-    const uint32_t r = battle.rng.range(8);
-    n = r < 3 ? 2 : r < 6 ? 3 : r == 6 ? 4 : 5;
-  }
+  if (forced != 0) return forced;
+  const uint32_t r = battle.rng.range(8);
+  return r < 3 ? 2 : r < 6 ? 3 : r == 6 ? 4 : 5;
+}
+
+// Records a 2-5 hit move's `n` landed hits. If the loop `stopped` after them
+// (a faint, or the user asleep), every count from n up gave the same state,
+// so the outcome is count >= n: nothing to record for n <= 2, else 5/8, 2/8
+// or 1/8. Otherwise the count was n. A forced n replays either.
+template <typename O>
+constexpr void multi_hits(Player p, uint8_t n, bool stopped, O& options) {
+  assert(n >= 1 && n <= 5 && (stopped || n >= 2));
   if constexpr (detail::CHANCE<O>) {
+    if (stopped && n <= 2) return;
     record(options.chance.actions.get(p).multi_hit, n);
-    observe(options, n <= 3 ? 3 : 1, 8);
+    constexpr uint8_t AT_LEAST[6] = {0, 0, 0, 5, 2, 1};
+    observe(options, stopped ? AT_LEAST[n] : n <= 3 ? 3 : 1, 8);
   }
-  return n;
+  (void)p, (void)n, (void)stopped, (void)options;
 }
 
 // Effect Spore's status: 1 sleep, 2 poison, 3 paralysis (util:2776; Showdown

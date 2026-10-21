@@ -1253,6 +1253,12 @@ constexpr void multi_hit_strikes(Battle& battle, Player player, MoveState& m, co
     hits++;
   }
   if (effect == Effect::TripleKick) rolls::kicks(player, hits, options);
+  if (effect == Effect::MultiHit) {
+    const bool stopped = target.fainted() || user.fainted() ||
+                         (user.status.asleep() && m.chosen != Move::SleepTalk);
+    assert(hits == n || stopped);
+    rolls::multi_hits(player, hits, stopped, options);
+  }
   m.damaged = damaged;
   // The faints wait for the end of runMove, after AfterMove.
   protocol::hit_count(options.log, protocol::ident(battle, foe(player)), hits);
