@@ -1365,16 +1365,13 @@ void check_multi_hit() {
       o.calc.overrides.p1.hits[i].contact = Optional::False;
     }
     update(b, Choice::move(move), Choice::move(foe_move), o);
-    uint8_t rolled = 0;
-    while (rolled < MAX_HITS && o.chance.actions.p1.hits[rolled].damage != 0) {
-      rolled++;
-    }
-    return rolled;
+    return o.chance.actions.p1;
   };
   {
     Battle b = started({user}, {target});
     const Pokemon& t = b.sides[1].get(1);
-    CHECK(run(b, 1, 3, 4) == 4);
+    const Action a = run(b, 1, 3, 4);
+    CHECK(a.multi_hit == 4 && a.hits[3].damage == 100 && a.hits[4].damage == 0);
     const uint16_t four = uint16_t(t.stats.hp - t.hp);
     CHECK(four % 4 == 0 && four != 0);
   }
@@ -1382,20 +1379,21 @@ void check_multi_hit() {
     Battle b = started({user}, {target});
     b.sides[1].active.ability = Ability::RoughSkin;
     const Pokemon& u = b.sides[0].get(1);
-    CHECK(run(b, 2, 3, 3) == 3);
+    CHECK(run(b, 2, 3, 3).multi_hit == 3);
     CHECK(u.stats.hp - u.hp == 3 * (u.stats.hp / 16));
   }
   {
     Battle b = started({user}, {target, DUGTRIO});
     b.sides[1].get(1).hp = 1;
-    CHECK(run(b, 1, 3, 5) == 1);
+    // Stopped at hit 1, and every roll is lethal: nothing to record.
+    CHECK(run(b, 1, 3, 5).multi_hit == 0);
     CHECK(b.sides[1].get(1).fainted());
   }
   {
     // Endure holds at 1 HP and the remaining hits still come.
     Battle b = started({user}, {target});
     b.sides[1].get(1).hp = 2;
-    CHECK(run(b, 1, 4, 5) == 5);
+    CHECK(run(b, 1, 4, 5).multi_hit == 5);
     CHECK(b.sides[1].get(1).hp == 1);
   }
   {
@@ -1404,7 +1402,7 @@ void check_multi_hit() {
     uint16_t per = 0;
     {
       Battle b = started({user}, {target});
-      run(b, 1, 3, 2);
+      (void)run(b, 1, 3, 2);
       per = uint16_t((b.sides[1].get(1).stats.hp - b.sides[1].get(1).hp) / 2);
     }
     const auto key = [&](uint16_t hp, uint8_t n) {
@@ -1428,12 +1426,72 @@ void check_multi_hit() {
     CHECK(at3.probability.p == at5.probability.p &&
           at3.probability.q == at5.probability.q);
     CHECK(exact3.actions.p1.multi_hit == 3);
-    // 5/8 against 3/8; the other draws are the same.
-    CHECK(at3.probability.p * exact3.probability.q * 3 ==
-          exact3.probability.p * at3.probability.q * 5);
+    // 5/8 against 3/8, and hit 3 on 1 HP is lethal whatever it rolls, where
+    // the exact count's hit 3 records its crit (15/16) and roll (1/16).
+    CHECK(at3.probability.p * exact3.probability.q * 3 * 15 ==
+          exact3.probability.p * at3.probability.q * 5 * 256);
     // A faint by hit 2 leaves nothing to record.
     CHECK(key(uint16_t(per + 1), 4).actions.p1.multi_hit == 0);
     CHECK(key(uint16_t(per), 5).actions.p1.multi_hit == 0);
+  }
+}
+
+// A hit that reaches its cap records only `lethal`, with the odds of any
+// lethal (crit, roll), and nothing when every pair is lethal; Calc's lethal
+// replays it.
+void check_lethal() {
+  Hit h = Hit::of(Move::QuickAttack);
+  const Battle fresh = started({SNORLAX}, {IDLE});
+  const uint32_t normal = damage(fresh, Player::P1, h);
+  h.crit = true;
+  const uint32_t crit = damage(fresh, Player::P1, h);
+  // Some rolls KO without a crit, not all.
+  const uint16_t hp = uint16_t(apply_roll(normal, 8));
+  CHECK(apply_roll(normal, 0) < hp);
+  uint64_t normals = 0, crits = 0;
+  for (uint8_t k = 0; k < 16; k++) {
+    normals += apply_roll(normal, k) >= hp;
+    crits += apply_roll(crit, k) >= hp;
+  }
+  const auto run = [&](uint16_t foe_hp, uint8_t sub, Optional c, uint8_t roll, Optional lethal) {
+    Battle b = fresh;
+    b.sides[1].get(1).hp = foe_hp;
+    b.sides[1].active.volatiles.substitute = sub != 0;
+    b.sides[1].active.substitute_hp = sub;
+    Observed o{};
+    o.calc.overrides.p1.hits[0] = {c, roll, lethal, Optional::None, Optional::None, 0,
+                                   Optional::None, Optional::None};
+    update(b, Choice::move(2), Choice::move(1), o);
+    o.chance.probability.reduce();
+    return std::pair{b, o.chance};
+  };
+  {
+    const auto [b, c] = run(hp, 0, Optional::False, 100, Optional::None);
+    const HitDraws& d = c.actions.p1.hits[0];
+    CHECK(b.sides[1].get(1).fainted());
+    CHECK(d.lethal == Optional::True && d.crit == Optional::None && d.damage == 0);
+    CHECK(c.probability.p * 256 == (crits + 15 * normals) * c.probability.q);
+    // Forcing lethal replays the same key.
+    const auto [b2, c2] = run(hp, 0, Optional::None, 0, Optional::True);
+    CHECK(b2.sides[1].get(1).fainted() && c2.actions == c.actions);
+  }
+  {
+    const auto [b, c] = run(hp, 0, Optional::False, 85, Optional::None);
+    const HitDraws& d = c.actions.p1.hits[0];
+    CHECK(!b.sides[1].get(1).fainted());
+    CHECK(d.lethal == Optional::None && d.crit == Optional::False && d.damage == 85);
+  }
+  {
+    // Every pair lethal: nothing recorded.
+    const auto [b, c] = run(uint16_t(apply_roll(normal, 0)), 0, Optional::None, 0, Optional::None);
+    CHECK(b.sides[1].get(1).fainted() && c.actions == Actions{});
+    CHECK(c.probability.p == 1 && c.probability.q == 1);
+  }
+  {
+    // A Substitute's HP is the cap.
+    const auto [b, c] = run(hp, 1, Optional::None, 0, Optional::None);
+    CHECK(b.sides[1].get(1).hp == hp && b.sides[1].active.substitute_hp == 0);
+    CHECK(c.actions == Actions{});
   }
 }
 
@@ -1867,7 +1925,7 @@ void check_screens_and_power() {
     Battle b = started({attacker}, {IDLE});
     setup(b);
     Observed o{};
-    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, 0, Optional::None, Optional::None};
+    o.calc.overrides.p1.hits[0] = {Optional::False, 100, Optional::None, Optional::None, Optional::None, 0, Optional::None, Optional::None};
     update(b, Choice::move(slot), Choice::move(1), o);
     const Pokemon& t = b.sides[1].get(1);
     return t.stats.hp - t.hp;
@@ -2956,6 +3014,7 @@ int main(int argc, char** argv) {
   check_recharge();
   check_destiny_bond();
   check_multi_hit();
+  check_lethal();
   check_mimic();
   check_misc_moves();
   check_perish_song();

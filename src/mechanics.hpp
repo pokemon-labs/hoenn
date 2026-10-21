@@ -1195,10 +1195,13 @@ constexpr void strike(Battle& battle, Player player, MoveState& m, Hit h, uint32
                       uint8_t i, O& options) {
   uint32_t d = fixed;
   if (d == 0) {
-    if (can_crit(battle, player)) {
-      h.crit = rolls::crit(battle, player, i, crit_stage(battle, player, m.move), options);
-    }
-    d = apply_roll(damage(battle, player, h), rolls::damage(battle, player, i, options));
+    const bool crits = can_crit(battle, player);
+    const ActivePokemon& t = battle.side(foe(player)).active;
+    const uint32_t cap = t.volatiles.substitute && t.substitute_hp != 0
+                             ? t.substitute_hp
+                             : battle.side(foe(player)).get(1).hp;
+    d = rolls::hit_damage(battle, player, foe(player), i, h, crits,
+                          crits ? crit_stage(battle, player, m.move) : uint8_t(0), cap, options);
     log_modifiers(battle, player, m, h.crit, options);
   }
   d = survive(battle, player, m, d, i, options);

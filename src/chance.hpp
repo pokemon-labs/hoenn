@@ -271,13 +271,18 @@ namespace hoenn {
 
 // One damaging hit. A multi-hit move fills hits[0..n-1].
 //
-// A confusion self-hit shares hits[0] (damage and focus_band only) with the
+// A confusion self-hit shares hits[0] (damage, lethal and focus_band) with the
 // move's first hit. That's safe: a self-hit replaces the move, so the two
 // never happen in the same update, and Action::confusion == True says which
 // one hits[0] holds. The key stays exact.
 struct HitDraws {
   Optional crit;       // bsc:1282
   uint8_t damage;      // the roll as a percentage, 85-100 (bsc:1662, 1705)
+  Optional lethal;     // instead of crit and damage, a hit that reached its
+                       // cap (the target's HP, or its Substitute's): every
+                       // such (crit, roll) leaves the same state. None when
+                       // all of them do (rolls::hit_damage). Calc forces
+                       // only True.
   Optional focus_band; // the defender's; drawn only on a lethal hit
                        // (bsc:1677, 1720, 5878)
   Optional contact;    // the defender's Static, Flame Body, Poison Point,
@@ -401,12 +406,12 @@ struct Actions {
   friend constexpr bool operator==(const Actions&, const Actions&) = default;
 };
 
-static_assert(sizeof(HitDraws) == 7);
+static_assert(sizeof(HitDraws) == 8);
 // The most hits one move execution draws for (Beat Up's six).
 inline constexpr uint8_t MAX_HITS = std::size(Action{}.hits);
 static_assert(MAX_HITS == 6);
-static_assert(sizeof(Action) == 75);
-static_assert(sizeof(Actions) == 3 + 2 * 75);
+static_assert(sizeof(Action) == 82);
+static_assert(sizeof(Actions) == 3 + 2 * 82);
 static_assert(std::is_trivial_v<Actions> && std::is_standard_layout_v<Actions>);
 static_assert(Actions{} == Actions{});
 

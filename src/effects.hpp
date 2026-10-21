@@ -528,6 +528,66 @@ constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
   return index;
 }
 
+// Hit `i`'s crit (when `crits`, at crit stage `stage`) and damage roll, for
+// p's hit `h` on `target`, which has `cap` HP to lose (its Substitute's, or
+// its own): sets h.crit and returns the damage. Every (crit, roll) that
+// reaches the cap leaves the same state, so a lethal hit records only
+// `lethal`, with the odds of any lethal pair, or nothing when every pair is;
+// Calc's lethal forces the strongest, a crit if it can and 100%. Otherwise
+// the crit and roll are recorded as drawn.
+template <typename O>
+constexpr uint32_t hit_damage(Battle& battle, Player p, Player target, uint8_t i, Hit& h,
+                              bool crits, uint8_t stage, uint32_t cap, O& options) {
+  assert(i < MAX_HITS && stage < 5 && cap > 0);
+  const uint32_t n = CRITICAL_HIT_CHANCE[stage];
+  HitDraws forced{};
+  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i];
+  assert(forced.lethal != Optional::False && forced.crit <= Optional::False);
+  assert(forced.damage == 0 || (forced.damage >= 85 && forced.damage <= 100));
+  uint8_t index = 15;
+  if (forced.lethal == Optional::True) {
+    h.crit = crits;
+  } else {
+    h.crit = crits && (forced.crit != Optional::None ? forced.crit == Optional::True
+                                                     : battle.rng.chance(1, n));
+    index = forced.damage != 0 ? uint8_t(forced.damage - 85) : uint8_t(battle.rng.range(16));
+  }
+  const uint32_t base = damage(battle, p, target, h);
+  const uint32_t d = apply_roll(base, index);
+  assert(forced.lethal != Optional::True || d >= cap);
+  if constexpr (detail::CHANCE<O>) {
+    HitDraws& a = options.chance.actions.get(p).hits[i];
+    if (d >= cap) {
+      // The lethal rolls are 15 down to the first below the cap.
+      const auto lethal = [cap](uint32_t b) {
+        uint32_t k = 0;
+        while (k < 16 && apply_roll(b, uint8_t(15 - k)) >= cap) k++;
+        return k;
+      };
+      uint32_t num = lethal(base), den = 16;
+      if (crits) {
+        Hit other = h;
+        other.crit = !h.crit;
+        const uint32_t o = lethal(damage(battle, p, target, other));
+        num = h.crit ? num + (n - 1) * o : o + (n - 1) * num;
+        den = 16 * n;
+      }
+      if (num < den) {
+        record(a.lethal, Optional::True);
+        observe(options, num, den);
+      }
+    } else {
+      if (crits) {
+        record(a.crit, optional(h.crit));
+        observe(options, h.crit ? 1 : n - 1, n);
+      }
+      record(a.damage, uint8_t(85 + index));
+      observe(options, 1, 16);
+    }
+  }
+  return d;
+}
+
 // Sleep Talk's pick: uniform over the slots in `mask`, as Showdown's sample
 // (the decomp redraws until it hits one, bsc:8266). Returns the slot, 0-3;
 // Actions holds 1-4.
@@ -1810,8 +1870,8 @@ constexpr void hurt_itself(Battle& battle, Player player, MoveState& m, O& optio
   Pokemon& mon = battle.side(player).get(1);
   m.self = true;
   m.unable = true;
-  uint32_t d = apply_roll(damage(battle, player, player, Hit::confusion()),
-                          rolls::damage(battle, player, 0, options));
+  Hit h = Hit::confusion();
+  uint32_t d = rolls::hit_damage(battle, player, player, 0, h, false, 0, mon.hp, options);
   const ItemData item = item_data(mon.item);
   if (mon.hp <= d && item.effect == HoldEffect::FocusBand &&
       rolls::focus_band(battle, player, 0, item.param, options)) {
