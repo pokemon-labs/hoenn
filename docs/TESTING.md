@@ -509,8 +509,9 @@ Showdown change closes gets crossed off here.
   per-Pokémon `staleness` from restorative berries eaten after Recycle or
   Harvest, `volatileStaleness` from Skill Swap or Entrainment's target
   (`sim/battle.ts:1344`). The engine has neither the clause nor the
-  state; adding it is a layout change and a format decision, left to the
-  user. Custom Game (truly random) has no clause.
+  state, by decision (2026-10-21): the engine keeps only the turn limit
+  (`MAX_TURNS`), which Showdown applies with or without the clause
+  (`sim/battle.ts:1843`). Custom Game (truly random) has no clause.
 - **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
   OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
   2026-10-16; left as
@@ -753,8 +754,9 @@ turn, each measured before its bars are fixed.
      missed first Rollout, Showdown keeps an inert `rollout` volatile
      (hitCount 0, duration 1, added at onModifyMove) until the residual;
      the trace has only volatile names, so check_showdown reports it
-     missing at a mid-turn request or a terminal state. Needs a decision:
-     filter it in showdown_traces.cjs (hitCount 0) or in the checker.
+     missing at a mid-turn request or a terminal state. Filtered in
+     showdown_traces.cjs (hitCount 0) since 2026-10-21; old traces still
+     show it.
    - OU game 15 (traces14, seed 8588732213306791834): Swampert's toxic
      damage after a faint replacement, ours 1/16, Showdown 2/16. Probably
      the toxic-stage gap (Known gaps); not confirmed.
@@ -775,6 +777,6 @@ the figures above as the first bars.
 Open:
 
 1. **Where the jobs run, and how often:** GitHub Actions, gating per push,
-   reporting daily (2026-10-17; "CI").
+   reporting daily (2026-10-17; "CI"). Deferred (2026-10-21).
 2. **Re-setting the bars** from measured 10,000-game baselines (OU and
    random OU-legal set 2026-10-16, truly random 2026-10-17).

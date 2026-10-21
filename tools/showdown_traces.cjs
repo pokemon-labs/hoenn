@@ -159,8 +159,11 @@ function state(battle) {
     const fm = side.slotConditions[0] && side.slotConditions[0].futuremove;
     out[side.id + 'side'].future = fm ? [fm.duration, fm.moveData.damage] : [0, 0];
     const a = side.active[0];
+    // A missed first Rollout leaves an inert volatile (hitCount 0) until the
+    // residual, which is no state of ours.
+    const inert = k => k === 'rollout' && !a.volatiles.rollout.hitCount;
     out[side.id + 'active'] = a ? {
-      boosts: a.boosts, volatiles: Object.keys(a.volatiles),
+      boosts: a.boosts, volatiles: Object.keys(a.volatiles).filter(k => !inert(k)),
       subhp: a.volatiles.substitute ? a.volatiles.substitute.hp : 0,
       stall: a.volatiles.stall ? a.volatiles.stall.duration : 0,
       moves: a.moveSlots.map(m => [m.id, m.pp, !!m.disabled]),
