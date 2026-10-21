@@ -440,10 +440,18 @@ Where it departs from the decomp, or from the draws the decomp makes:
 - **`MOVE_UNAVAILABLE` is `Move::None`** until `src/data/moves.hpp` has a sentinel
   (CLAUDE.md, "Open"). It's what `gLastMoves` and `gLastLandedMoves` record
   for a move that was stopped, which matters to Encore, Disable and Mimic.
-- *(open, an optimization)* When every roll KOs (or every roll breaks the
-  Substitute), the roll can't change state, so it needn't be drawn. Skipping
-  it would shrink search's chance nodes a lot, but it changes what the
-  `Actions` key holds; decide when search is adapted.
+- **A lethal hit records only `lethal`** (2026-10-21, `rolls::hit_damage`):
+  every (crit, roll) that reaches the cap (the target's HP, or its
+  Substitute's) leaves the same state, so the key holds `HitDraws::lethal`
+  with the odds of any lethal pair instead of the crit and roll, or nothing
+  when every pair is lethal. This changed what the `Actions` key holds
+  (153 to 167 B). The same goes for Jump Kick's crash on its user, and for
+  a future attack's landing. Non-lethal rolls that floor to equal damage
+  still split.
+- **A future attack rolls at its landing** (2026-10-21): the use stores the
+  damage before the roll and the landing draws it, in `Action::future`.
+  Showdown's `getDamage` rolls at the use; the odds are the same, and a miss,
+  a fainted target or a KO by every roll then needs no roll.
 
 `faint()` is `cleareffectsonfaint` (status cleared) and `FaintClearSetData`
 (main:3264), run where the HP reaches 0, so a residual between the faint and

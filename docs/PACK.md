@@ -18,7 +18,7 @@ bit-pack the live `Battle`. Both are dropped.
   for no gain. If copying only the live bytes is ever wanted, order
   `Battle` so the static data is one block at the end instead.
 
-Where search memory goes instead is the map key: `Actions` is 153 B,
+Where search memory goes instead is the map key: `Actions` is 167 B,
 fixed-size, with a field for every possible draw and mostly zero in a given
 turn. A lossless compact form (bit widths, or a presence mask plus values)
 would cut it several-fold without hashing, if tree memory becomes a limit.

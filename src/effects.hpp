@@ -486,14 +486,6 @@ constexpr void variable_matters(Player p, Effect effect, uint8_t value, O& optio
   (void)p, (void)effect, (void)value, (void)options;
 }
 
-// A crit on hit `i`: !(Random() % n) with n from the crit stage (bsc:1282).
-template <typename O>
-constexpr bool crit(Battle& battle, Player p, uint8_t i, uint8_t stage,
-                    O& options) {
-  assert(i < MAX_HITS && stage < 5);
-  return coin(battle, p, i, &HitDraws::crit, 1, CRITICAL_HIT_CHANCE[stage], options);
-}
-
 // The defender's Focus Band on hit `i` (or FUTURE): Random() % 100 < param
 // (bsc:1677). Only for a lethal hit.
 template <typename O>
@@ -510,53 +502,37 @@ constexpr bool future_hit(Battle& battle, Player p, uint32_t calc, O& options) {
   return coin(battle, p, &Action::future_hit, calc, 100, options);
 }
 
-// The damage roll on hit `i`: 100 - Random() % 16 percent
-// (ApplyRandomDmgMultiplier, bsc:1641). Returns apply_roll's index, 0-15;
-// Actions holds the percentage.
-template <typename O>
-constexpr uint8_t damage(Battle& battle, Player p, uint8_t i, O& options) {
-  assert(i < MAX_HITS);
-  uint8_t forced = 0;
-  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i].damage;
-  assert(forced == 0 || (forced >= 85 && forced <= 100));
-  const uint8_t index =
-      forced != 0 ? uint8_t(forced - 85) : uint8_t(battle.rng.range(16));
-  if constexpr (detail::CHANCE<O>) {
-    record(options.chance.actions.get(p).hits[i].damage, uint8_t(85 + index));
-    observe(options, 1, 16);
-  }
-  return index;
-}
-
-// Hit `i`'s crit (when `crits`, at crit stage `stage`) and damage roll, for
-// p's hit `h` on `target`, which has `cap` HP to lose (its Substitute's, or
-// its own): sets h.crit and returns the damage. Every (crit, roll) that
-// reaches the cap leaves the same state, so a lethal hit records only
-// `lethal`, with the odds of any lethal pair, or nothing when every pair is;
-// Calc's lethal forces the strongest, a crit if it can and 100%. Otherwise
-// the crit and roll are recorded as drawn.
-template <typename O>
-constexpr uint32_t hit_damage(Battle& battle, Player p, Player target, uint8_t i, Hit& h,
-                              bool crits, uint8_t stage, uint32_t cap, O& options) {
-  assert(i < MAX_HITS && stage < 5 && cap > 0);
+// Hit `i`'s (or FUTURE's) crit (when `crits`, at crit stage `stage`: 1/n,
+// bsc:1282) and damage roll (100 - Random() % 16 percent, bsc:1641), on
+// base(crit), the damage before the roll: sets `crit` and
+// returns the rolled damage. Every (crit, roll) whose damage reaches `cap`
+// leaves the same state (the target's HP, its Substitute's, or a crash's
+// equivalent), so a lethal hit records only `lethal`, with the odds of any
+// lethal pair, or nothing when every pair is; Calc's lethal forces the
+// strongest, a crit if it can and 100%. Otherwise the crit and roll are
+// recorded as drawn.
+template <typename O, typename F>
+constexpr uint32_t hit_damage(Battle& battle, Player p, uint8_t i, bool& crit, bool crits,
+                              uint8_t stage, uint32_t cap, F base_of, O& options) {
+  assert(i <= FUTURE && stage < 5 && cap > 0);
   const uint32_t n = CRITICAL_HIT_CHANCE[stage];
   HitDraws forced{};
-  if constexpr (detail::CALC<O>) forced = options.calc.overrides.get(p).hits[i];
+  if constexpr (detail::CALC<O>) forced = draws(options.calc.overrides.get(p), i);
   assert(forced.lethal != Optional::False && forced.crit <= Optional::False);
   assert(forced.damage == 0 || (forced.damage >= 85 && forced.damage <= 100));
   uint8_t index = 15;
   if (forced.lethal == Optional::True) {
-    h.crit = crits;
+    crit = crits;
   } else {
-    h.crit = crits && (forced.crit != Optional::None ? forced.crit == Optional::True
-                                                     : battle.rng.chance(1, n));
+    crit = crits && (forced.crit != Optional::None ? forced.crit == Optional::True
+                                                   : battle.rng.chance(1, n));
     index = forced.damage != 0 ? uint8_t(forced.damage - 85) : uint8_t(battle.rng.range(16));
   }
-  const uint32_t base = damage(battle, p, target, h);
+  const uint32_t base = base_of(crit);
   const uint32_t d = apply_roll(base, index);
   assert(forced.lethal != Optional::True || d >= cap);
   if constexpr (detail::CHANCE<O>) {
-    HitDraws& a = options.chance.actions.get(p).hits[i];
+    HitDraws& a = draws(options.chance.actions.get(p), i);
     if (d >= cap) {
       // The lethal rolls are 15 down to the first below the cap.
       const auto lethal = [cap](uint32_t b) {
@@ -566,10 +542,8 @@ constexpr uint32_t hit_damage(Battle& battle, Player p, Player target, uint8_t i
       };
       uint32_t num = lethal(base), den = 16;
       if (crits) {
-        Hit other = h;
-        other.crit = !h.crit;
-        const uint32_t o = lethal(damage(battle, p, target, other));
-        num = h.crit ? num + (n - 1) * o : o + (n - 1) * num;
+        const uint32_t o = lethal(base_of(!crit));
+        num = crit ? num + (n - 1) * o : o + (n - 1) * num;
         den = 16 * n;
       }
       if (num < den) {
@@ -578,14 +552,27 @@ constexpr uint32_t hit_damage(Battle& battle, Player p, Player target, uint8_t i
       }
     } else {
       if (crits) {
-        record(a.crit, optional(h.crit));
-        observe(options, h.crit ? 1 : n - 1, n);
+        record(a.crit, optional(crit));
+        observe(options, crit ? 1 : n - 1, n);
       }
       record(a.damage, uint8_t(85 + index));
       observe(options, 1, 16);
     }
   }
   return d;
+}
+
+// hit_damage for p's hit `h` on `target`, from damage(): sets h.crit.
+template <typename O>
+constexpr uint32_t hit_damage(Battle& battle, Player p, Player target, uint8_t i, Hit& h,
+                              bool crits, uint8_t stage, uint32_t cap, O& options) {
+  assert(i < MAX_HITS);
+  const auto base_of = [&](bool c) {
+    Hit x = h;
+    x.crit = c;
+    return damage(battle, p, target, x);
+  };
+  return hit_damage(battle, p, i, h.crit, crits, stage, cap, base_of, options);
 }
 
 // Sleep Talk's pick: uniform over the slots in `mask`, as Showdown's sample
@@ -2510,7 +2497,8 @@ constexpr uint32_t survive(Battle& battle, Player player, const MoveState& m,
 // Fighting costs the user half the damage `h` would have dealt, at least 1 and
 // at most half the target's max HP. Showdown's damage draws a crit and a roll,
 // and the user's Focus Band can save it, all in hits[1]; the decomp's has no
-// crit and no cap (bsc:6747).
+// crit and no cap (bsc:6747). A crash that KOs (or meets the Focus Band) does
+// whatever the roll, so it records only lethal.
 template <typename O>
 constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
                      O& options) {
@@ -2519,10 +2507,15 @@ constexpr void crash(Battle& battle, Player player, const MoveState& m, Hit h,
   if (user.fainted() || (matchup(battle, player, h) & MoveResult::DOESNT_AFFECT_FOE)) {
     return;
   }
-  h.crit = can_crit(battle, player) &&
-           rolls::crit(battle, player, 1, crit_stage(battle, player, m.move), options);
-  uint32_t d = apply_roll(damage(battle, player, h), rolls::damage(battle, player, 1, options)) / 2;
   const uint32_t cap = target.stats.hp / 2u;
+  // The rolled damage at which d below reaches the user's HP; never when the
+  // cap is below it.
+  const uint32_t lethal = user.hp == 1 ? 1 : cap < user.hp ? UINT32_MAX : 2u * user.hp;
+  const bool crits = can_crit(battle, player);
+  uint32_t d = rolls::hit_damage(battle, player, foe(player), 1, h, crits,
+                                 crits ? crit_stage(battle, player, m.move) : uint8_t(0),
+                                 lethal, options) /
+               2;
   if (d > cap) d = cap;
   if (d == 0) d = 1;
   const ItemData item = item_data(user.item);
@@ -3897,17 +3890,18 @@ constexpr void swallow(Battle& battle, Player player, MoveState& m, O& options) 
 // Future Sight and Doom Desire (bs1:2061, bsc:8357), as Showdown's gen3 onTry
 // (data/mods/gen3/moves.ts:218): it fails silently while one is pending on the
 // foe's side. Otherwise the damage is computed now: a typeless hit of power 80
-// (special) or 120 (physical), no crit, with the roll. Protect and
-// semi-invulnerability don't stop it. The decomp's has no roll and keeps the
-// type. It lands in future_attack.
+// (special) or 120 (physical), no crit. Protect and semi-invulnerability don't
+// stop it. The decomp's has no roll and keeps the type. It lands in
+// future_attack, which draws the roll: Showdown's getDamage rolls it now, but
+// the odds are the same, and an attack that misses, finds its target fainted
+// or KOs with every roll then needs no roll.
 template <typename O>
 constexpr void future_sight_move(Battle& battle, Player player, MoveState& m,
                                  O& options) {
   Side& foe_side = battle.side(foe(player));
   if (foe_side.conditions.future_sight != 0) return mark_failed(m);
   const Hit h = Hit::of(m.move);
-  foe_side.future_sight_damage =
-      apply_roll(damage(battle, player, h), rolls::damage(battle, player, 0, options));
+  foe_side.future_sight_damage = damage(battle, player, h);
   foe_side.future_sight_move = m.move;
   foe_side.conditions.future_sight = 3;
   foe_side.conditions.future_user = battle.side(player).order[0];
@@ -4860,7 +4854,7 @@ constexpr void perish_count(Battle& battle, Player player, O& options) {
 // fainted. A semi-invulnerable target is missed unless locked on; the accuracy
 // uses the user's stage only while it is in, its ability wherever it is, and
 // the target's evasion. No Protect; Wonder Guard lets it through. The stored
-// damage goes through a Substitute, with Focus Band but no Endure
+// damage takes its roll and goes through a Substitute, with Focus Band but no Endure
 // (data/mods/gen4/moves.ts:434), and no Destiny Bond. The decomp (util:1781)
 // lands it after the replacements, with its own request.
 template <typename O>
@@ -4903,7 +4897,13 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   m.chosen = move;
   m.type = Type::Mystery;
   m.slot = NO_SLOT;
-  const uint32_t d = survive(battle, user, m, stored, rolls::FUTURE, options);
+  const uint32_t cap = t.volatiles.substitute && t.substitute_hp != 0 ? t.substitute_hp
+                                                                      : target.hp;
+  bool crit = false;
+  const uint32_t rolled = rolls::hit_damage(
+      battle, user, rolls::FUTURE, crit, false, 0, cap,
+      [stored](bool) { return stored; }, options);
+  const uint32_t d = survive(battle, user, m, rolled, rolls::FUTURE, options);
   m.hp_dealt = hp_update(battle, player, d, m, options);
   // It enters attackedBy, and both moves are noMirror, so Mirror Move fails
   // until the next attack; unless its user is out, since the next turn drops

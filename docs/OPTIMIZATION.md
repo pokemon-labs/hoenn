@@ -179,7 +179,7 @@ meaning.
 - **The null log** costs nothing: every message is behind
   `if constexpr (L::enabled)`. The real log's writers are about 1% each at
   most.
-- **Chance bookkeeping:** a 153 B `Actions` reset per update and two double
+- **Chance bookkeeping:** a 167 B `Actions` reset per update and two double
   multiplies per draw. RL runs without Chance; the Python wrapper on
   `pybind` builds `Chance<>` with the log, and needn't.
 - **Packing the battle** (`Volatiles` bools to bits): a copy is about 20 ns

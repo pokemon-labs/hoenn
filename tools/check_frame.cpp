@@ -1495,6 +1495,85 @@ void check_lethal() {
   }
 }
 
+// A future attack's roll and Jump Kick's crash merge lethal pairs as a hit
+// does: the use stores the damage before the roll and records nothing, the
+// landing records the roll or lethal in Action::future; a crash that KOs its
+// user records lethal in hits[1], or nothing when every pair does.
+void check_lethal_landings() {
+  const helpers::Pokemon seer = {
+      .species = Species::Snorlax,
+      .moves = {Move::FutureSight},
+      .ability = Ability::Immunity,
+      .nature = Nature::Adamant,
+      .gender = Gender::Male,
+  };
+  const Battle fresh = started({seer}, {IDLE});
+  const uint32_t base = damage(fresh, Player::P1, Hit::of(Move::FutureSight));
+  const uint16_t hp = uint16_t(apply_roll(base, 8));
+  CHECK(apply_roll(base, 0) < hp);
+  const auto land = [&](uint16_t foe_hp, uint8_t roll) {
+    Battle b = fresh;
+    Observed used{};
+    update(b, Choice::move(1), Choice::move(1), used);
+    CHECK(b.sides[1].future_sight_damage == base && used.chance.actions.p1 == Action{});
+    Null null{};
+    update(b, Choice::move(1), Choice::move(1), null);
+    b.sides[1].get(1).hp = foe_hp;
+    Observed o{};
+    o.calc.overrides.p1.future_hit = Optional::True;
+    o.calc.overrides.p1.future.damage = roll;
+    update(b, Choice::move(1), Choice::move(1), o);
+    CHECK(b.sides[1].conditions.future_sight == 0);
+    return std::pair{b, o.chance.actions.p1.future};
+  };
+  {
+    const auto [b, f] = land(hp, 100);
+    CHECK(b.sides[1].get(1).fainted() && f.lethal == Optional::True && f.damage == 0);
+  }
+  {
+    const auto [b, f] = land(hp, 85);
+    CHECK(b.sides[1].get(1).hp == hp - apply_roll(base, 0));
+    CHECK(f.lethal == Optional::None && f.damage == 85);
+  }
+
+  const helpers::Pokemon kicker = {
+      .species = Species::Snorlax,
+      .moves = {Move::JumpKick},
+      .ability = Ability::Immunity,
+      .nature = Nature::Adamant,
+      .gender = Gender::Male,
+  };
+  const Battle start = started({kicker}, {IDLE});
+  const uint32_t kick = damage(start, Player::P1, Hit::of(Move::JumpKick));
+  const uint16_t user_hp = uint16_t(apply_roll(kick, 8) / 2);
+  CHECK(apply_roll(kick, 0) / 2 < user_hp && user_hp <= start.sides[1].get(1).stats.hp / 2);
+  const auto crash = [&](uint16_t hp_, Optional crit, uint8_t roll) {
+    Battle b = start;
+    b.sides[0].get(1).hp = hp_;
+    Observed o{};
+    o.calc.overrides.p1.hit = Optional::False;
+    o.calc.overrides.p1.hits[1].crit = crit;
+    o.calc.overrides.p1.hits[1].damage = roll;
+    update(b, Choice::move(1), Choice::move(1), o);
+    return std::pair{b, o.chance.actions.p1.hits[1]};
+  };
+  {
+    const auto [b, d] = crash(user_hp, Optional::False, 100);
+    CHECK(b.sides[0].get(1).fainted());
+    CHECK(d.lethal == Optional::True && d.crit == Optional::None && d.damage == 0);
+  }
+  {
+    const auto [b, d] = crash(user_hp, Optional::False, 85);
+    CHECK(b.sides[0].get(1).hp == user_hp - apply_roll(kick, 0) / 2);
+    CHECK(d.lethal == Optional::None && d.crit == Optional::False && d.damage == 85);
+  }
+  {
+    // Every pair lethal: nothing recorded.
+    const auto [b, d] = crash(1, Optional::None, 0);
+    CHECK(b.sides[0].get(1).fainted() && d == HitDraws{});
+  }
+}
+
 // Mimic: Mimic's slot takes the target's last move with min(5, base PP),
 // the party keeps Mimic, and it fails with no last move, on a Substitute,
 // or on a move the user knows.
@@ -3015,6 +3094,7 @@ int main(int argc, char** argv) {
   check_destiny_bond();
   check_multi_hit();
   check_lethal();
+  check_lethal_landings();
   check_mimic();
   check_misc_moves();
   check_perish_song();

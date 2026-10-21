@@ -515,11 +515,16 @@ std::string field_mismatch(const Battle& battle, const json::Value& state) {
              std::to_string(sc["spikes"].integer()) + ";";
     }
     // The future attack's turns left and stored damage (absent from old
-    // traces).
+    // traces). Showdown's is rolled at the use, ours at the landing, so it
+    // must be one of our base's rolls.
     if (const json::Value& f = sc["future"]; !f.array.empty()) {
       const Side& side_ = battle.sides[s];
       const int64_t turns = c.future_sight, damage = side_.future_sight_damage;
-      if (turns != f.array[0].integer() || damage != f.array[1].integer()) {
+      bool rolled = damage == 0 && f.array[1].integer() == 0;
+      for (uint8_t k = 0; k < 16 && !rolled && damage != 0; k++) {
+        rolled = int64_t(apply_roll(uint32_t(damage), k)) == f.array[1].integer();
+      }
+      if (turns != f.array[0].integer() || !rolled) {
         why += " " + side + " future attack " + std::to_string(turns) + "/" +
                std::to_string(damage) + ", Showdown " +
                std::to_string(f.array[0].integer()) + "/" +

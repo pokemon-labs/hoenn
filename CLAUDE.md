@@ -129,23 +129,23 @@ then `cmake --build --preset X` and `ctest --preset X`. Tests build with
 teams; `tools/fixtures/showdown.jsonl` one committed game per fixed failure.
 `src/data/` was generated once from the decomp and is edited by hand now.
 
-## Status (2026-10-18)
+## Status (2026-10-21)
 
 The engine is complete: every move, item and the log are written. All three
 environments pass their bars (OU 99.96%, OU-legal 99.89%, random 99.92% at
 619f1e4, with 4 fixes since). Work is fixing what the tests find and speed:
 three optimizations (2026-10-17) gave about +22% on `bench --log`; PGO and
-the next candidates are in `docs/OPTIMIZATION.md`.
+the next candidates are in `docs/OPTIMIZATION.md`. Chance merges lethal
+hits and multi-hit counts that leave the same state (2026-10-21;
+`docs/ENGINE.md`, "Hit backbone").
 
 **Open:**
-- A Rollout checker artifact (2 games, needs a decision) and OU game 15
-  (toxic, unconfirmed); `docs/TESTING.md`, step 8.
+- OU game 15 (toxic, unconfirmed); `docs/TESTING.md`, step 8.
 - `build/runs/classify.py`'s KNOWN list is out of date.
 - `MAX_LOG_SIZE` is a placeholder 2048 until the bound is derived (the debug
   `Writer` asserts it).
 - A `Move` sentinel for `MOVE_UNAVAILABLE` in `src/data/`.
-- Skipping the damage roll when every roll KOs (fewer chance nodes, but it
-  changes the `Actions` key).
 
 **Deferred:** `min_ko_roll` (spec in `calc.hpp`), Calc's `Summaries`,
-explicit state tracking from the log, and the search adaptation.
+explicit state tracking from the log, the search adaptation
+(`docs/NODES.md`), and CI.

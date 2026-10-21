@@ -762,7 +762,8 @@ struct Side {
   Pokemon pokemon[6];
   ActivePokemon active;
   // The future attack on this side's Pokémon (futureSightDmg, by target):
-  // its damage, rolled at the use (Showdown's getDamage); u32 settled
+  // its damage before the roll, computed at the use (Showdown's getDamage,
+  // which rolls it there too; ours rolls at the landing); u32 settled
   // (ENGINE.md, decision 15). The move is Future Sight or Doom Desire, None
   // when no attack is pending.
   uint32_t future_sight_damage;
