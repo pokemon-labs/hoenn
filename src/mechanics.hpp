@@ -344,8 +344,9 @@ constexpr void turn_cleanup(Battle& battle) {
 // p's active Pokémon has just reached 0 HP: cleareffectsonfaint (bsc), then
 // FaintClearSetData (main:3264). It stays in the slot until its replacement
 // comes in, keeping its species, stats, moves and ability (and, as the decomp,
-// gLockedMoves and gBideDmg); its other state goes, and so does what the foe
-// had from it.
+// gLockedMoves); its other state goes, and so does what the foe had from it.
+// gBideDmg goes too, unlike the decomp: only a Biding active reads it, and
+// this ends Bide, so it was dead, and a lethal hit's size leaves no trace.
 template <typename O>
 constexpr void faint(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
@@ -357,7 +358,6 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   ActivePokemon& a = side.active;
   const ActivePokemon kept = a;
   a = ActivePokemon{};
-  a.bide_damage = kept.bide_damage;
   a.stats = kept.stats;
   for (uint8_t i = 0; i < 4; i++) a.moves[i] = kept.moves[i];
   a.species = kept.species;
