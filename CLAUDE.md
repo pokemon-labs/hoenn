@@ -148,4 +148,4 @@ hits and multi-hit counts that leave the same state (2026-10-21;
 
 **Deferred:** `min_ko_roll` (spec in `calc.hpp`), Calc's `Summaries`,
 explicit state tracking from the log, the search adaptation
-(`docs/NODES.md`), and CI.
+(`docs/NODES.md`), and where and how often CI runs.

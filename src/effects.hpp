@@ -510,7 +510,8 @@ constexpr bool future_hit(Battle& battle, Player p, uint32_t calc, O& options) {
 // equivalent), so a lethal hit records only `lethal`, with the odds of any
 // lethal pair, or nothing when every pair is; Calc's lethal forces the
 // strongest, a crit if it can and 100%. Otherwise the crit and roll are
-// recorded as drawn.
+// recorded as drawn, forced lethal included: a replay whose hidden end went
+// the other way (check_chance) can bring it to another hit.
 template <typename O, typename F>
 constexpr uint32_t hit_damage(Battle& battle, Player p, uint8_t i, bool& crit, bool crits,
                               uint8_t stage, uint32_t cap, F base_of, O& options) {
@@ -530,7 +531,6 @@ constexpr uint32_t hit_damage(Battle& battle, Player p, uint8_t i, bool& crit, b
   }
   const uint32_t base = base_of(crit);
   const uint32_t d = apply_roll(base, index);
-  assert(forced.lethal != Optional::True || d >= cap);
   if constexpr (detail::CHANCE<O>) {
     HitDraws& a = draws(options.chance.actions.get(p), i);
     if (d >= cap) {

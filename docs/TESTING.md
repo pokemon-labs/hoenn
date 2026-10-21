@@ -763,7 +763,7 @@ turn, each measured before its bars are fixed.
    Run dirs: `build/runs/{ou-20261017-130000-11790484726086414745,
    ou_legal-20261017-130920-6875604541531664515,
    random-20261017-131911-13486077069381815800}`.
-9. CI: the gating and reporting workflows ("CI"), not yet run on GitHub.
+9. CI: the gating and reporting workflows ("CI"); `test` runs on every push to main (passing since at least 2026-10-19).
 
 ## Decisions
 
