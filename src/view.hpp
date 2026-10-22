@@ -21,6 +21,9 @@
 //     true positions, as our request does.
 // Side relabelling (the viewer always p1) is the driver's: Showdown's p2
 // stream still says p1 and p2.
+//
+// The spectators' stream (Showdown's channel 0, every triplet's shared line)
+// is one player's view of the other's: Spectator.
 
 #pragma once
 
@@ -218,5 +221,17 @@ struct View {
 };
 
 static_assert(std::is_trivially_copyable_v<View>);
+
+// The spectators' view: P2's view of P1's view, which hides both sides. Each
+// View touches only the other side, so P1's view of P2's gives the same
+// bytes (check_view).
+struct Spectator {
+  View p1{Player::P1};
+  View p2{Player::P2};
+
+  size_t apply(std::span<uint8_t> bytes) { return p2.apply(bytes.first(p1.apply(bytes))); }
+};
+
+static_assert(std::is_trivially_copyable_v<Spectator>);
 
 } // namespace hoenn::protocol

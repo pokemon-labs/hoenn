@@ -317,6 +317,11 @@ comparison, since the log hides some state.
   order of appearance); our own HP is untouched. 2026-10-20: 0 failures
   over 1,000 OU and 1,000 group-team games; dropping the renumbering,
   Leech Seed's `[of]` or Wish's wisher each fails it.
+  The spectators' view is checked against channel 0 the same way, and P2's
+  view of P1's view must equal P1's of P2's and `Spectator`'s bytes.
+  2026-10-22: 0 failures over 1,000 OU and 1,000 group-team games;
+  dropping P2's view from `Spectator`, or one player's Pressure filter,
+  fails it.
 
 ## Pass criteria (proposed)
 

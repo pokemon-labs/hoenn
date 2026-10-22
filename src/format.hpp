@@ -90,8 +90,9 @@ struct Reader {
 } // namespace detail
 
 // Omniscient: the raw log, a |split| triplet for each line with HP (and
-// Pressure). View: bytes a player's view already (view.hpp), so each
-// triplet is only its secret line: Showdown's stream for that player.
+// Pressure). View: bytes a player's or the spectators' view already
+// (view.hpp), so each triplet is only its secret line: Showdown's stream for
+// that player, or the spectators'.
 enum class Stream : uint8_t { Omniscient, View };
 
 // Formats one update's messages, up to the terminating None (or the end of

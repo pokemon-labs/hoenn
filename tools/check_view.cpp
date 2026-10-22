@@ -9,6 +9,10 @@
 // numbered in order of appearance), and it leaves p's own HP fields as they
 // were.
 //
+// The spectators' view (protocol::Spectator) is checked the same way against
+// the split filter's channel 0, and P1's view of P2's view must give the
+// same bytes as P2's of P1's.
+//
 // Usage: check_view [--seed N] [--games N] team files...
 
 #include <array>
@@ -39,9 +43,9 @@ using Logged = Options<protocol::FixedLog, NullChance, NullCalc>;
 // The test's reference, from Showdown's extractChannelMessages
 // (showdown/sim/battle.ts:35), not from format.hpp: a |split|pX triplet is
 // its secret line for player X and its shared line for anyone else, skipped
-// when empty; the regex's `.+` skips any other empty line.
-std::vector<std::string> split_filter(Player p, const std::vector<std::string>& lines) {
-  const int channel = p == Player::P1 ? 1 : 2;
+// when empty; the regex's `.+` skips any other empty line. Channel 1 or 2 is
+// that player's, 0 the spectators'.
+std::vector<std::string> split_filter(int channel, const std::vector<std::string>& lines) {
   std::vector<std::string> out;
   for (size_t i = 0; i < lines.size(); i++) {
     const std::string& line = lines[i];
@@ -85,13 +89,14 @@ std::vector<uint32_t> own_hp(Player p, std::span<const uint8_t> bytes) {
 
 int failures = 0;
 
-void report(uint64_t game_seed, uint64_t update, Player p, bool exact, const char* what,
+// `channel` as split_filter's.
+void report(uint64_t game_seed, uint64_t update, int channel, bool exact, const char* what,
             const std::vector<std::string>& want, const std::vector<std::string>& got) {
   failures++;
   if (failures > 10) return;
-  std::printf("game %llu, update %llu, p%d%s: %s\n", (unsigned long long)game_seed,
-              (unsigned long long)update, p == Player::P1 ? 1 : 2, exact ? " (exact HP)" : "",
-              what);
+  std::printf("game %llu, update %llu, %s%s: %s\n", (unsigned long long)game_seed,
+              (unsigned long long)update, channel == 0 ? "spectator" : channel == 1 ? "p1" : "p2",
+              exact ? " (exact HP)" : "", what);
   const size_t n = std::max(want.size(), got.size());
   for (size_t i = 0; i < n; i++) {
     const std::string& a = i < want.size() ? want[i] : "<none>";
@@ -101,16 +106,18 @@ void report(uint64_t game_seed, uint64_t update, Player p, bool exact, const cha
   }
 }
 
-// One player's views over a game: `view` of the log and `again` of its output.
+// One player's views over a game: `view` of the log, `again` of its output,
+// and `spectate`, the other player's view of its output.
 struct Viewer {
   protocol::View view;
   protocol::View again;
+  protocol::View spectate;
 };
 
 // The names as `view` numbers the other side: its nth Pokémon to appear is
 // party position n.
-format::Names viewed_names(const format::Names& names, const protocol::View& view) {
-  format::Names out = names;
+format::Names viewed_names(format::Names out, const format::Names& names,
+                           const protocol::View& view) {
   const size_t other = view.player == Player::P1 ? 1 : 0;
   for (size_t i = 0; i < 6; i++) {
     out.nickname[other][i] = "<unseen>";
@@ -127,30 +134,51 @@ format::Names viewed_names(const format::Names& names, const protocol::View& vie
 
 // Checks one update's bytes; returns the lines compared.
 uint64_t check(const format::Names& names, std::array<std::array<Viewer, 2>, 2>& viewers,
-               std::span<const uint8_t> bytes, uint64_t game_seed, uint64_t update) {
+               std::array<protocol::Spectator, 2>& spectators, std::span<const uint8_t> bytes,
+               uint64_t game_seed, uint64_t update) {
   uint64_t lines = 0;
   for (const bool exact : {false, true}) {
     format::Formatter omniscient(names, exact);
     const std::vector<std::string> text = omniscient.format(bytes);
+    std::array<std::vector<uint8_t>, 2> spectated;
     for (const Player p : {Player::P1, Player::P2}) {
+      const int channel = p == Player::P1 ? 1 : 2;
       Viewer& viewer = viewers[exact][size_t(p)];
-      const std::vector<std::string> want = split_filter(p, text);
+      const std::vector<std::string> want = split_filter(channel, text);
       std::vector<uint8_t> v(bytes.begin(), bytes.end());
       v.resize(viewer.view.apply(v));
-      const format::Names permuted = viewed_names(names, viewer.view);
+      const format::Names permuted = viewed_names(names, names, viewer.view);
       format::Formatter viewed(permuted, exact, format::Stream::View);
       const std::vector<std::string> got = viewed.format(v);
       lines += want.size();
-      if (got != want) report(game_seed, update, p, exact, "the square doesn't commute", want, got);
+      if (got != want) report(game_seed, update, channel, exact, "the square doesn't commute", want, got);
 
       std::vector<uint8_t> twice = v;
       twice.resize(viewer.again.apply(twice));
-      if (twice != v) report(game_seed, update, p, exact, "view isn't idempotent", got, viewed.format(twice));
+      if (twice != v) report(game_seed, update, channel, exact, "view isn't idempotent", got, viewed.format(twice));
 
       if (own_hp(p, bytes) != own_hp(p, v)) {
-        report(game_seed, update, p, exact, "view changed its own HP", want, got);
+        report(game_seed, update, channel, exact, "view changed its own HP", want, got);
       }
+
+      spectated[size_t(p)] = v;
+      spectated[size_t(p)].resize(viewer.spectate.apply(spectated[size_t(p)]));
     }
+
+    // Through P1's view, through P2's, and protocol::Spectator.
+    const Viewer& via_p1 = viewers[exact][0];
+    const format::Names permuted =
+        viewed_names(viewed_names(names, names, via_p1.view), names, via_p1.spectate);
+    format::Formatter viewed(permuted, exact, format::Stream::View);
+    const std::vector<std::string> want = split_filter(0, text);
+    const std::vector<std::string> got = viewed.format(spectated[0]);
+    if (got != want) report(game_seed, update, 0, exact, "the square doesn't commute", want, got);
+    if (spectated[1] != spectated[0]) {
+      report(game_seed, update, 0, exact, "p1 then p2 isn't p2 then p1", got, viewed.format(spectated[1]));
+    }
+    std::vector<uint8_t> s(bytes.begin(), bytes.end());
+    s.resize(spectators[exact].apply(s));
+    if (s != spectated[0]) report(game_seed, update, 0, exact, "Spectator isn't p2 of p1", got, viewed.format(s));
   }
   return lines;
 }
@@ -179,15 +207,20 @@ void play(const Teams& teams, uint64_t game_seed, Totals& totals) {
   std::array<std::array<Viewer, 2>, 2> viewers;
   for (const bool exact : {false, true}) {
     for (const Player p : {Player::P1, Player::P2}) {
-      viewers[exact][size_t(p)] = {{p, exact}, {p, exact}};
+      const Player other = p == Player::P1 ? Player::P2 : Player::P1;
+      viewers[exact][size_t(p)] = {{p, exact}, {p, exact}, {other, exact}};
     }
+  }
+  std::array<protocol::Spectator, 2> spectators;
+  for (const bool exact : {false, true}) {
+    spectators[exact] = {{Player::P1, exact}, {Player::P2, exact}};
   }
 
   std::vector<uint8_t> buffer(protocol::MAX_LOG_SIZE);
   protocol::Writer writer{buffer.data(), buffer.size(), 0};
   Logged o{protocol::fixed_log(writer), {}, {}};
   Result r = update(battle, Choice::pass(), Choice::pass(), o);
-  totals.lines += check(names, viewers, std::span(buffer.data(), writer.pos), game_seed, totals.updates++);
+  totals.lines += check(names, viewers, spectators, std::span(buffer.data(), writer.pos), game_seed, totals.updates++);
   std::array<Choice, MAX_CHOICES> c1{}, c2{};
   while (!r.over()) {
     const uint8_t n1 = choices(battle, Player::P1, r.p1(), c1);
@@ -196,7 +229,7 @@ void play(const Teams& teams, uint64_t game_seed, Totals& totals) {
     const Choice y = c2[rng.range(n2)];
     writer.reset();
     r = update(battle, x, y, o);
-    totals.lines += check(names, viewers, std::span(buffer.data(), writer.pos), game_seed, totals.updates++);
+    totals.lines += check(names, viewers, spectators, std::span(buffer.data(), writer.pos), game_seed, totals.updates++);
   }
 }
 

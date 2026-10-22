@@ -671,6 +671,10 @@ Decided (2026-10-20):
   permuted the same way (`Stream::View`) gives Showdown's split filter of
   the omniscient text; `check_view` tests it. Side relabelling (the viewer
   always p1) is the driver's.
+- **The spectators' view** (`protocol::Spectator`, 2026-10-22) is one
+  player's view of the other's: Showdown's channel 0, every triplet's
+  shared line. Each `View` touches only the other side, so the order
+  doesn't matter; `check_view` tests that too.
 
 ## Teams
 
