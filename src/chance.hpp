@@ -547,11 +547,11 @@ constexpr void randomize_hidden(Battle& battle, const Durations& durations) {
     if (d.confusion != 0 && v.confusion != 0) {
       v.confusion = detail::resample(battle.rng, d.confusion, 2, 5);
     }
-    if (d.disable != 0 && a.disable_timer != 0) {
-      a.disable_timer = detail::resample(battle.rng, d.disable, 3, 6);
+    if (d.disable != 0 && v.disable_timer != 0) {
+      v.disable_timer = detail::resample(battle.rng, d.disable, 3, 6);
     }
-    if (d.encore != 0 && a.encore_timer != 0) {
-      a.encore_timer = detail::resample(battle.rng, d.encore, 3, 6);
+    if (d.encore != 0 && v.encore_timer != 0) {
+      v.encore_timer = detail::resample(battle.rng, d.encore, 3, 6);
     }
     if (d.binding != 0 && v.wrapped != 0) {
       v.wrapped = detail::resample(battle.rng, d.binding, 3, 6);
@@ -589,8 +589,8 @@ constexpr void mask_hidden(Battle& battle) {
     v.wrapped = mask(v.wrapped);
     v.uproar = mask(v.uproar);
     v.thrash = mask(v.thrash);
-    a.disable_timer = mask(a.disable_timer);
-    a.encore_timer = mask(a.encore_timer);
+    v.disable_timer = mask(v.disable_timer);
+    v.encore_timer = mask(v.encore_timer);
   }
 }
 

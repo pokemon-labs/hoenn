@@ -93,7 +93,7 @@ void check_start() {
   CHECK(b.sides[0].active.species == Species::Snorlax);
   CHECK(b.sides[1].active.species == Species::Jolteon);
   // Switch-in sets 2, and the cleanup before turn 1 takes it to 1.
-  CHECK(b.sides[0].active.first_turn == 1);
+  CHECK(b.sides[0].active.volatiles.first_turn == 1);
   CHECK(o.chance.actions == Actions{});
   // Two moves and one switch for P1; one move and no switch for P2.
   CHECK(choices(b, Player::P1, Choice::Move, out) == 3);
@@ -199,7 +199,7 @@ void check_switch() {
   CHECK(b.sides[0].order[0] == 2 && b.sides[0].order[1] == 1);
   CHECK(b.sides[0].active.species == Species::Jolteon);
   // Switched in this turn: 2, then 1 after the cleanup.
-  CHECK(b.sides[0].active.first_turn == 1);
+  CHECK(b.sides[0].active.volatiles.first_turn == 1);
   CHECK(o.chance.durations.p1.sleep[0] == 3 && o.chance.durations.p1.sleep[1] == 0);
   CHECK(o.chance.durations.p1.confusion == 0);
 }
@@ -282,7 +282,7 @@ void check_moves() {
     CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::QuickAttack) - 1);
     CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash) - 1);
     // Mirror Move's record is kept only where it can be read.
-    CHECK(b.sides[1].active.last_taken_move == Move::None);
+    CHECK(b.sides[1].active.volatiles.last_taken_move == Move::None);
   }
   {
     // A Ground move into a Flying type: no effect, no draws, PP used.
@@ -440,14 +440,14 @@ void check_confusion() {
     Battle b = started({holding(SNORLAX, Item::FocusBand)}, {IDLE});
     b.sides[0].active.volatiles.confusion = 3;
     b.sides[0].active.volatiles.substitute = true;
-    b.sides[0].active.substitute_hp = 50;
+    b.sides[0].active.volatiles.substitute_hp = 50;
     b.sides[0].get(1).hp = 2;
     Observed o{};
     o.calc.overrides.p1.confusion = Optional::True;
     o.calc.overrides.p1.hits[0].focus_band = Optional::True;
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(b.sides[0].get(1).hp == 1);
-    CHECK(b.sides[0].active.substitute_hp == 50);
+    CHECK(b.sides[0].active.volatiles.substitute_hp == 50);
     CHECK(o.chance.actions.p1.hits[0].focus_band == Optional::True);
   }
   {
@@ -498,7 +498,7 @@ void check_confuse() {
 
     Battle c = started({confuser}, {IDLE});
     c.sides[1].active.volatiles.substitute = true;
-    c.sides[1].active.substitute_hp = 10;
+    c.sides[1].active.volatiles.substitute_hp = 10;
     update(c, Choice::move(1), Choice::move(1), null);
     CHECK(c.sides[1].active.volatiles.confusion == 0);
 
@@ -506,7 +506,7 @@ void check_confuse() {
     d.sides[1].conditions.safeguard = 5;
     update(d, Choice::move(1), Choice::move(1), null);
     CHECK(d.sides[1].active.volatiles.confusion == 0);
-    CHECK(d.sides[0].active.last_move == Move::ConfuseRay);
+    CHECK(d.sides[0].active.volatiles.last_move == Move::ConfuseRay);
 
     Battle e = started({confuser}, {IDLE});
     e.sides[1].active.volatiles.confusion = 5;
@@ -601,11 +601,11 @@ void check_status_moves() {
   {
     CHECK(!after(2, plain, [](Battle& b) {
              b.sides[1].active.volatiles.substitute = true;
-             b.sides[1].active.substitute_hp = 10;
+             b.sides[1].active.volatiles.substitute_hp = 10;
            }).sides[1].get(1).status.any());
     Battle b = after(2, plain, [](Battle& b) { b.sides[1].conditions.safeguard = 5; });
     CHECK(!b.sides[1].get(1).status.any());
-    CHECK(b.sides[0].active.last_move == Move::ThunderWave);
+    CHECK(b.sides[0].active.volatiles.last_move == Move::ThunderWave);
     CHECK(after(2, plain, [](Battle& b) {
             b.sides[1].get(1).status = Status::brn();
           }).sides[1].get(1).status.burned());
@@ -703,7 +703,7 @@ void check_stat_moves() {
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
     b = after(gengar, 1, [](Battle& b) {
       b.sides[1].active.volatiles.substitute = true;
-      b.sides[1].active.substitute_hp = 10;
+      b.sides[1].active.volatiles.substitute_hp = 10;
     });
     CHECK(!b.sides[1].active.volatiles.cursed);
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
@@ -806,7 +806,7 @@ void check_baton_pass() {
     ActivePokemon& a = b.sides[0].active;
     a.boosts.atk = 2;
     a.volatiles.substitute = true;
-    a.substitute_hp = 20;
+    a.volatiles.substitute_hp = 20;
     a.volatiles.confusion = 3;
     a.volatiles.focus_energy = true;
     a.volatiles.escape_prevention = true; // Baton Pass ignores trapping
@@ -814,7 +814,7 @@ void check_baton_pass() {
     // passer stays on the foe but no longer applies.
     a.volatiles.lock_on = uint8_t(2 | b.sides[1].order[0] << 2);
     a.volatiles.infatuated = true;
-    a.toxic = 3;
+    a.volatiles.toxic = 3;
     b.sides[1].active.volatiles.lock_on = uint8_t(2 | b.sides[0].order[0] << 2);
     Observed o{};
     o.chance.durations.p1.confusion = 2;
@@ -831,12 +831,12 @@ void check_baton_pass() {
     const ActivePokemon& in = b.sides[0].active;
     CHECK(in.species == Species::Dugtrio);
     CHECK(in.boosts.atk == 2);
-    CHECK(in.volatiles.substitute && in.substitute_hp == 20);
+    CHECK(in.volatiles.substitute && in.volatiles.substitute_hp == 20);
     // Confusion stepped once, on Baton Pass itself.
     CHECK(in.volatiles.confusion == 2 && o.chance.durations.p1.confusion == 3);
     CHECK(in.volatiles.focus_energy && in.volatiles.escape_prevention);
     CHECK(in.volatiles.lock_on == uint8_t(1 | b.sides[1].order[0] << 2));
-    CHECK(!in.volatiles.infatuated && in.toxic == 0);
+    CHECK(!in.volatiles.infatuated && in.volatiles.toxic == 0);
     CHECK(b.sides[1].active.volatiles.lock_on % 4 == 1);
     CHECK(!detail::locked_on(b, Player::P2));
     // The foe's Splash ran after the switch.
@@ -953,7 +953,7 @@ void check_leech_seed() {
   {
     auto [b, o] = after(IDLE, Optional::None, [](Battle& b) {
       b.sides[1].active.volatiles.substitute = true;
-      b.sides[1].active.substitute_hp = 10;
+      b.sides[1].active.volatiles.substitute_hp = 10;
     });
     CHECK(!b.sides[1].active.volatiles.leech_seed);
     CHECK(o.chance.actions.p1.hit == Optional::None);
@@ -983,10 +983,10 @@ void check_cures() {
   {
     Battle b = started({user}, {IDLE});
     b.sides[0].get(1).status = Status::tox();
-    b.sides[0].active.toxic = 4;
+    b.sides[0].active.volatiles.toxic = 4;
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
-    CHECK(!b.sides[0].get(1).status.any() && b.sides[0].active.toxic == 0);
+    CHECK(!b.sides[0].get(1).status.any() && b.sides[0].active.volatiles.toxic == 0);
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Refresh) - 2);
   }
@@ -1017,7 +1017,7 @@ void check_cures() {
     o.calc.overrides.p1.move_slot = 2; // Heal Bell
     update(b, Choice::move(4), Choice::move(1), o);
     CHECK(!b.sides[0].get(1).status.any());
-    CHECK(b.sides[0].active.sleep_skipped == 0);
+    CHECK(b.sides[0].active.volatiles.sleep_skipped == 0);
   }
 }
 
@@ -1098,7 +1098,7 @@ void check_drain() {
   {
     Battle b = run(IDLE, [](Battle& b) {
       b.sides[1].active.volatiles.substitute = true;
-      b.sides[1].active.substitute_hp = 5;
+      b.sides[1].active.volatiles.substitute_hp = 5;
     });
     CHECK(b.sides[0].get(1).hp == 103); // ceil(5 / 2)
   }
@@ -1125,7 +1125,7 @@ void check_taunt() {
   Battle b = started({taunter}, {target});
   // Faster Taunt stops this turn's Splash, without PP.
   update(b, Choice::move(1), Choice::move(3), null);
-  CHECK(b.sides[1].active.taunt == 1);
+  CHECK(b.sides[1].active.volatiles.taunt == 1);
   CHECK(b.sides[1].get(1).moves[2].pp == max_pp(Move::Splash));
   std::array<Choice, MAX_CHOICES> out{};
   const uint8_t n = choices(b, Player::P2, Choice::Move, out);
@@ -1135,7 +1135,7 @@ void check_taunt() {
   // A second Taunt fails; then it runs out.
   update(b, Choice::move(1), Choice::move(1), null);
   CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::Taunt) - 2);
-  CHECK(b.sides[1].active.taunt == 0);
+  CHECK(b.sides[1].active.volatiles.taunt == 0);
 }
 
 // Encore: fails with no last move or on an encored target; a target that
@@ -1158,25 +1158,25 @@ void check_encore() {
   };
   // Faster, before the target has a last move: fails.
   update(b, Choice::move(1), Choice::move(3), o);
-  CHECK(b.sides[1].active.encored_move == Move::None);
-  CHECK(b.sides[1].active.last_move == Move::Splash);
+  CHECK(b.sides[1].active.volatiles.encored_move == Move::None);
+  CHECK(b.sides[1].active.volatiles.last_move == Move::Splash);
   // Now it works, and Body Slam turns into Splash this turn.
   o.calc.overrides.p1.hit = Optional::True;
   update(b, Choice::move(1), Choice::move(1), o);
-  CHECK(b.sides[1].active.encored_move == Move::Splash);
+  CHECK(b.sides[1].active.volatiles.encored_move == Move::Splash);
   CHECK(pp(0) == max_pp(Move::BodySlam));
   CHECK(pp(2) == max_pp(Move::Splash) - 2);
   CHECK(o.chance.durations.p2.encore == 2);
   CHECK(only(Choice::move(3)));
   // A second Encore fails; the timer runs out within 6 ends of turn.
   update(b, Choice::move(1), Choice::move(3), o);
-  CHECK(b.sides[1].active.encored_move == Move::Splash);
-  for (int i = 0; i < 4 && b.sides[1].active.encore_timer != 0; i++) {
+  CHECK(b.sides[1].active.volatiles.encored_move == Move::Splash);
+  for (int i = 0; i < 4 && b.sides[1].active.volatiles.encore_timer != 0; i++) {
     CHECK(only(Choice::move(3)));
     update(b, Choice::move(2), Choice::move(3), o);
   }
-  CHECK(b.sides[1].active.encore_timer == 0);
-  CHECK(b.sides[1].active.encored_move == Move::None);
+  CHECK(b.sides[1].active.volatiles.encore_timer == 0);
+  CHECK(b.sides[1].active.volatiles.encored_move == Move::None);
   CHECK(o.chance.durations.p2.encore == 0);
   CHECK(!only(Choice::move(3)));
 
@@ -1185,10 +1185,10 @@ void check_encore() {
   o.calc.overrides = {};
   o.calc.overrides.p2.paralysis = Optional::True;
   update(b, Choice::move(2), Choice::move(1), o);
-  CHECK(b.sides[1].active.last_move == Move::Splash);
+  CHECK(b.sides[1].active.volatiles.last_move == Move::Splash);
   o.calc.overrides.p1.hit = Optional::True;
   update(b, Choice::move(1), Choice::move(1), o);
-  CHECK(b.sides[1].active.encored_move == Move::Splash);
+  CHECK(b.sides[1].active.volatiles.encored_move == Move::Splash);
 }
 
 // Solar Beam: charges a turn (PP spent, the move locked, Protect no help),
@@ -1215,7 +1215,7 @@ void check_solar_beam() {
   // Charging through Protect.
   update(b, Choice::move(1), Choice::move(4), o);
   CHECK(t.hp == t.stats.hp);
-  CHECK(a.volatiles.multiple_turns && a.locked_move == Move::SolarBeam);
+  CHECK(a.volatiles.multiple_turns && a.volatiles.locked_move == Move::SolarBeam);
   CHECK(b.sides[0].get(1).moves[0].pp == pp - 1);
   CHECK(forced());
   update(b, Choice::move(0), Choice::move(3), o);
@@ -1457,7 +1457,7 @@ void check_lethal() {
     Battle b = fresh;
     b.sides[1].get(1).hp = foe_hp;
     b.sides[1].active.volatiles.substitute = sub != 0;
-    b.sides[1].active.substitute_hp = sub;
+    b.sides[1].active.volatiles.substitute_hp = sub;
     Observed o{};
     o.calc.overrides.p1.hits[0] = {c, roll, lethal, Optional::None, Optional::None, 0,
                                    Optional::None, Optional::None};
@@ -1490,7 +1490,7 @@ void check_lethal() {
   {
     // A Substitute's HP is the cap.
     const auto [b, c] = run(hp, 1, Optional::None, 0, Optional::None);
-    CHECK(b.sides[1].get(1).hp == hp && b.sides[1].active.substitute_hp == 0);
+    CHECK(b.sides[1].get(1).hp == hp && b.sides[1].active.volatiles.substitute_hp == 0);
     CHECK(c.actions == Actions{});
   }
 }
@@ -1624,7 +1624,7 @@ void check_mimic() {
     Battle b = started({user}, {target});
     update(b, Choice::move(2), Choice::move(2), null);
     b.sides[1].active.volatiles.substitute = true;
-    b.sides[1].active.substitute_hp = 100;
+    b.sides[1].active.volatiles.substitute_hp = 100;
     update(b, Choice::move(1), Choice::move(3), null);
     CHECK(b.sides[0].active.moves[0].id == Move::Mimic);
   }
@@ -1820,10 +1820,10 @@ void check_knock_off() {
   const auto none = [](Battle&) {};
   {
     Battle b = run(holding(IDLE, Item::Leftovers), [](Battle& b) {
-      b.sides[1].active.choice_move = Move::Splash;
+      b.sides[1].active.volatiles.choice_move = Move::Splash;
     });
     CHECK(b.sides[1].get(1).item == Item::KnockedOff);
-    CHECK(b.sides[1].active.choice_move == Move::None);
+    CHECK(b.sides[1].active.volatiles.choice_move == Move::None);
     // Leftovers no longer heal.
     const Pokemon& t = b.sides[1].get(1);
     CHECK(t.hp < t.stats.hp);
@@ -1837,7 +1837,7 @@ void check_knock_off() {
   {
     Battle b = run(holding(IDLE, Item::Leftovers), [](Battle& b) {
       b.sides[1].active.volatiles.substitute = true;
-      b.sides[1].active.substitute_hp = 200;
+      b.sides[1].active.volatiles.substitute_hp = 200;
     });
     CHECK(b.sides[1].get(1).item == Item::Leftovers);
   }
@@ -1863,12 +1863,12 @@ void check_thief() {
   const auto none = [](Battle&) {};
   {
     Battle b = run(user, holding(IDLE, Item::ChoiceBand), [](Battle& b) {
-      b.sides[1].active.choice_move = Move::Splash;
+      b.sides[1].active.volatiles.choice_move = Move::Splash;
     });
     CHECK(b.sides[0].get(1).item == Item::ChoiceBand);
-    CHECK(b.sides[0].active.choice_move == Move::Thief);
+    CHECK(b.sides[0].active.volatiles.choice_move == Move::Thief);
     CHECK(b.sides[1].get(1).item == Item::None);
-    CHECK(b.sides[1].active.choice_move == Move::None);
+    CHECK(b.sides[1].active.volatiles.choice_move == Move::None);
   }
   CHECK(run(holding(user, Item::Leftovers), holding(IDLE, Item::ChoiceBand),
             none).sides[1].get(1).item == Item::ChoiceBand);
@@ -1883,7 +1883,7 @@ void check_thief() {
   {
     Battle b = run(user, holding(IDLE, Item::Leftovers), [](Battle& b) {
       b.sides[1].active.volatiles.substitute = true;
-      b.sides[1].active.substitute_hp = 200;
+      b.sides[1].active.volatiles.substitute_hp = 200;
     });
     CHECK(b.sides[1].get(1).item == Item::Leftovers);
     CHECK(b.sides[0].get(1).item == Item::None);
@@ -1900,7 +1900,7 @@ void check_perish_song() {
   {
     Battle b = started({singer, DUGTRIO}, {IDLE, SNORLAX});
     update(b, Choice::move(1), Choice::move(1), null);
-    CHECK(b.sides[0].active.perish_song_timer == 2 && b.sides[1].active.perish_song_timer == 2);
+    CHECK(b.sides[0].active.volatiles.perish_song_timer == 2 && b.sides[1].active.volatiles.perish_song_timer == 2);
     update(b, Choice::move(2), Choice::move(1), null);
     update(b, Choice::move(2), Choice::move(1), null);
     const Result r = update(b, Choice::move(2), Choice::move(1), null);
@@ -1956,7 +1956,7 @@ void check_stat_changes() {
     // gen3, bypasssub, checks one).
     Battle b = started({user}, {IDLE});
     b.sides[1].active.volatiles.substitute = true;
-    b.sides[1].active.substitute_hp = 10;
+    b.sides[1].active.volatiles.substitute_hp = 10;
     update(b, Choice::move(2), Choice::move(1), o);
     CHECK(b.sides[1].active.boosts.atk == -1 && b.sides[1].active.boosts.def == -1);
   }
@@ -2051,7 +2051,7 @@ void check_mean_look() {
   {
     Battle b = started({user}, {IDLE});
     b.sides[1].active.volatiles.substitute = true;
-    b.sides[1].active.substitute_hp = 10;
+    b.sides[1].active.volatiles.substitute_hp = 10;
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(!b.sides[1].active.volatiles.escape_prevention);
   }
@@ -2074,7 +2074,7 @@ void check_substitute() {
     Battle b = after(IDLE, none);
     const Pokemon& mon = b.sides[0].get(1);
     CHECK(b.sides[0].active.volatiles.substitute);
-    CHECK(b.sides[0].active.substitute_hp == mon.stats.hp / 4);
+    CHECK(b.sides[0].active.volatiles.substitute_hp == mon.stats.hp / 4);
     CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 4);
     CHECK(mon.moves[0].pp == max_pp(Move::Substitute) - 1);
   }
@@ -2087,19 +2087,19 @@ void check_substitute() {
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp / 4);
     b = after(IDLE, [](Battle& b) {
       b.sides[0].active.volatiles.substitute = true;
-      b.sides[0].active.substitute_hp = 7;
+      b.sides[0].active.volatiles.substitute_hp = 7;
     });
-    CHECK(b.sides[0].active.substitute_hp == 7);
+    CHECK(b.sides[0].active.volatiles.substitute_hp == 7);
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
   }
   // It ends a binding on the user.
   {
     Battle b = after(IDLE, [](Battle& b) {
       b.sides[0].active.volatiles.wrapped = 3;
-      b.sides[0].active.wrapped_move = Move::Wrap;
+      b.sides[0].active.volatiles.wrapped_move = Move::Wrap;
     });
     CHECK(b.sides[0].active.volatiles.wrapped == 0);
-    CHECK(b.sides[0].active.wrapped_move == Move::None);
+    CHECK(b.sides[0].active.volatiles.wrapped_move == Move::None);
   }
   // A slower foe's hit (forced) lands on the Substitute, not the Pokémon.
   {
@@ -2110,7 +2110,7 @@ void check_substitute() {
     update(b, Choice::move(1), Choice::move(1), o);
     const Pokemon& mon = b.sides[0].get(1);
     CHECK(mon.hp == mon.stats.hp - mon.stats.hp / 4);
-    CHECK(b.sides[0].active.substitute_hp < mon.stats.hp / 4 ||
+    CHECK(b.sides[0].active.volatiles.substitute_hp < mon.stats.hp / 4 ||
           !b.sides[0].active.volatiles.substitute);
   }
 }
@@ -2131,17 +2131,17 @@ void check_protect() {
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
     CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Earthquake) - 1);
-    CHECK(b.sides[0].active.protect_uses == 1);
+    CHECK(b.sides[0].active.volatiles.protect_uses == 1);
   }
   // Acting last (the foe switches, which goes first), it fails with no
   // draw and restarts the count.
   {
     Battle b = started({user}, {DUGTRIO, JOLTEON});
-    b.sides[0].active.protect_uses = 2;
-    b.sides[0].active.stall = 1;
+    b.sides[0].active.volatiles.protect_uses = 2;
+    b.sides[0].active.volatiles.stall = 1;
     Observed o{};
     update(b, Choice::move(1), Choice::swap(2), o);
-    CHECK(b.sides[0].active.protect_uses == 0);
+    CHECK(b.sides[0].active.volatiles.protect_uses == 0);
     CHECK(o.chance.actions.p1.protect == Optional::None);
   }
   // A second use draws 1/2; a third, 1/4.
@@ -2157,17 +2157,17 @@ void check_protect() {
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(o.chance.actions.p1.protect == Optional::False);
     o.chance.probability.reduce();
-    CHECK(b.sides[0].active.protect_uses == 0);
+    CHECK(b.sides[0].active.volatiles.protect_uses == 0);
     CHECK(b.sides[0].get(1).hp < b.sides[0].get(1).stats.hp);
     Observed p{};
     p.calc.overrides.p1.protect = Optional::True;
     update(c, Choice::move(1), Choice::move(1), p);
-    CHECK(c.sides[0].active.protect_uses == 2);
+    CHECK(c.sides[0].active.volatiles.protect_uses == 2);
     Observed q{};
     q.calc.overrides.p1.protect = Optional::True;
     update(c, Choice::move(1), Choice::move(1), q);
     q.chance.probability.reduce();
-    CHECK(c.sides[0].active.protect_uses == 3);
+    CHECK(c.sides[0].active.volatiles.protect_uses == 3);
     CHECK(q.chance.probability.p == 1 && q.chance.probability.q == 4);
   }
   // As Showdown's stall, the chain ends after a turn without a successful
@@ -2178,13 +2178,12 @@ void check_protect() {
     first(b);
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
-    CHECK(b.sides[0].active.stall == 1 && b.sides[0].active.protect_uses == 1);
-    b.sides[0].active.stall = 0; // as after a turn without acting
-    b.sides[0].active.last_resulting_move = Move::Protect;
+    CHECK(b.sides[0].active.volatiles.stall == 1 && b.sides[0].active.volatiles.protect_uses == 1);
+    b.sides[0].active.volatiles.stall = 0; // as after a turn without acting
     Observed o{};
     update(b, Choice::move(1), Choice::move(1), o);
     CHECK(o.chance.actions.p1.protect == Optional::None);
-    CHECK(b.sides[0].active.protect_uses == 1);
+    CHECK(b.sides[0].active.volatiles.protect_uses == 1);
   }
   // A locked Thrash into Protect: the accuracy roll comes first, and only a
   // hit (blocked) renews the lock, so the roll is recorded.
@@ -2231,8 +2230,8 @@ void check_protect() {
     Null null{};
     update(b, Choice::move(1), Choice::move(1), null);
     CHECK(b.sides[0].get(1).species == Species::Snorlax);
-    b.sides[0].active.protect_uses = 0;
-    b.sides[0].active.stall = 0;
+    b.sides[0].active.volatiles.protect_uses = 0;
+    b.sides[0].active.volatiles.stall = 0;
     update(b, Choice::move(1), Choice::move(2), null);
     CHECK(!b.sides[0].get(1).status.any());
     helpers::Pokemon gengar = {
@@ -2307,7 +2306,7 @@ void check_focus_punch() {
   {
     Battle b = after(DUGTRIO, [](Battle& b) {
       b.sides[0].active.volatiles.substitute = true;
-      b.sides[0].active.substitute_hp = 200;
+      b.sides[0].active.volatiles.substitute_hp = 200;
     });
     CHECK(b.sides[0].get(1).hp == b.sides[0].get(1).stats.hp);
     CHECK(b.sides[1].get(1).hp < b.sides[1].get(1).stats.hp);
@@ -2338,7 +2337,7 @@ void check_residuals() {
     CHECK(t.hp == t.stats.hp - t.stats.hp / 16);
     turn(c);
     CHECK(t.hp == t.stats.hp - 3 * (t.stats.hp / 16));
-    CHECK(c.sides[0].active.toxic == 2);
+    CHECK(c.sides[0].active.volatiles.toxic == 2);
   }
   {
     // Leftovers: 1/16, capped at max HP, before poison in the same pass, so
@@ -2861,7 +2860,7 @@ void check_sleep() {
     CHECK(fails(plain, [](Battle& b) { b.sides[1].active.volatiles.uproar = 3; }));
     CHECK(fails(plain, [](Battle& b) {
       b.sides[1].active.volatiles.substitute = true;
-      b.sides[1].active.substitute_hp = 10;
+      b.sides[1].active.volatiles.substitute_hp = 10;
     }));
     CHECK(fails(plain, [](Battle& b) { b.sides[1].conditions.safeguard = 5; }));
     CHECK(fails(plain, [](Battle& b) { b.sides[1].get(1).status = Status::par(); }));
@@ -2912,9 +2911,9 @@ void check_sleep() {
     CHECK(b.sides[1].get(1).hp < b.sides[1].get(1).stats.hp);
     CHECK(b.sides[0].get(1).moves[0].pp == max_pp(Move::SleepTalk) - 1);
     CHECK(b.sides[0].get(1).moves[1].pp == max_pp(Move::BodySlam));
-    CHECK(b.sides[0].active.last_move == Move::SleepTalk);
+    CHECK(b.sides[0].active.volatiles.last_move == Move::SleepTalk);
     CHECK(o.chance.actions.p1.move_slot == 2);
-    CHECK(b.sides[0].active.sleep_skipped == 1);
+    CHECK(b.sides[0].active.volatiles.sleep_skipped == 1);
     // A pick with no PP fails.
     Battle c = started({talker}, {plain});
     c.sides[0].get(1).status = Status::slp(4);

@@ -316,7 +316,7 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   }
   // Bounce's condition doubles Gust and Twister as base power; Fly's
   // doubles them as damage, below.
-  if (defender.volatiles.on_air && defender.locked_move == Move::Bounce &&
+  if (defender.volatiles.on_air && defender.volatiles.locked_move == Move::Bounce &&
       (hit.move == Move::Gust || hit.move == Move::Twister)) {
     m = chain(m, mod::DOUBLE);
   }
@@ -453,7 +453,7 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   const Volatiles& v = defender.volatiles;
   if ((v.underground && (move == Move::Earthquake || move == Move::Magnitude)) ||
       (v.underwater && (move == Move::Surf || move == Move::Whirlpool)) ||
-      (v.on_air && defender.locked_move != Move::Bounce &&
+      (v.on_air && v.locked_move != Move::Bounce &&
        (move == Move::Gust || move == Move::Twister)) ||
       (v.minimized && effect == Effect::FlinchMinimizeHit)) {
     d = modify(d, mod::DOUBLE);

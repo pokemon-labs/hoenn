@@ -35,11 +35,6 @@ constexpr uint8_t index(Player p) { return uint8_t(p); }
 // The turn's state
 // ---------------------------------------------------------------------------
 
-// The decomp's MOVE_UNAVAILABLE, which gLastMoves and gLastLandedMoves record
-// for a stopped move. None stands in until src/data/moves.hpp has a sentinel
-// (CLAUDE.md, "Open").
-inline constexpr Move UNAVAILABLE = Move::None;
-
 // MOVE_EFFECT_* bytes this code applies, in the decomp's order.
 enum class Secondary : uint8_t {
   None, Sleep, Poison, Burn, Freeze, Paralysis, Toxic, Confusion, Flinch,
@@ -262,12 +257,12 @@ constexpr uint8_t usable_moves(const Battle& battle, Player player) {
   for (uint8_t i = 0; i < 4; i++) {
     const Move m = a.moves[i].id;
     if (m == Move::None || a.moves[i].pp == 0) continue;
-    if (m == a.disabled_move) continue;
-    if (a.volatiles.torment && m == a.last_move) continue;
-    if (a.taunt != 0 && get(m).bp == 0) continue;
+    if (m == a.volatiles.disabled_move) continue;
+    if (a.volatiles.torment && m == a.volatiles.last_move) continue;
+    if (a.volatiles.taunt != 0 && get(m).bp == 0) continue;
     if (imprisoned(f, m)) continue;
-    if (a.encore_timer != 0 && a.encored_move != m) continue;
-    if (choice_band && a.choice_move != Move::None && a.choice_move != m) {
+    if (a.volatiles.encore_timer != 0 && a.volatiles.encored_move != m) continue;
+    if (choice_band && a.volatiles.choice_move != Move::None && a.volatiles.choice_move != m) {
       continue;
     }
     mask |= uint8_t(1 << i);
@@ -300,12 +295,12 @@ constexpr void select(Battle& battle, Player player, Choice choice) {
     r.move[i] = Move::None;
   } else if (forced(a)) {
     assert(choice.data() == 0);
-    r.move[i] = a.locked_move;
+    r.move[i] = a.volatiles.locked_move;
   } else if (choice.data() == 0) {
     r.move[i] = Move::Struggle;
   } else {
-    assert(a.encored_move == Move::None ||
-           choice.data() - 1 == a.encored_slot);
+    assert(a.volatiles.encored_move == Move::None ||
+           choice.data() - 1 == a.volatiles.encored_slot);
     r.move[i] = a.moves[choice.data() - 1].id;
   }
 }
@@ -320,23 +315,23 @@ constexpr void turn_cleanup(Battle& battle) {
   for (const Player p : {Player::P1, Player::P2}) {
     Side& side = battle.side(p);
     ActivePokemon& a = side.active;
-    if (a.first_turn != 0) a.first_turn--;
-    if (a.recharge_timer != 0 && --a.recharge_timer == 0) {
+    if (a.volatiles.first_turn != 0) a.volatiles.first_turn--;
+    if (a.volatiles.recharge_timer != 0 && --a.volatiles.recharge_timer == 0) {
       a.volatiles.recharge = false;
       // A charge whose second turn never came ends with the turn, as Showdown's
       // twoturnmove (duration 2); the decomp keeps the lock.
-      if (two_turn(get(a.locked_move).effect)) end_charge(a.volatiles);
+      if (two_turn(get(a.volatiles.locked_move).effect)) end_charge(a.volatiles);
     }
-    if (a.substitute_hp == 0) a.volatiles.substitute = false;
+    if (a.volatiles.substitute_hp == 0) a.volatiles.substitute = false;
     // Showdown's endTurn drops an attackedBy entry whose source isn't active
     // (sim/battle.ts:1707).
-    if (a.last_taken_from != battle.side(foe(p)).order[0]) {
-      a.last_taken_move = Move::None;
-      a.last_taken_from = 0;
+    if (a.volatiles.last_taken_from != battle.side(foe(p)).order[0]) {
+      a.volatiles.last_taken_move = Move::None;
+      a.volatiles.last_taken_from = 0;
     }
     // Showdown's choicelock onDisableMove.
-    if (slot_of(a, a.choice_move) == NO_SLOT || !holds(side, HoldEffect::ChoiceBand)) {
-      a.choice_move = Move::None;
+    if (slot_of(a, a.volatiles.choice_move) == NO_SLOT || !holds(side, HoldEffect::ChoiceBand)) {
+      a.volatiles.choice_move = Move::None;
     }
   }
 }
@@ -361,11 +356,11 @@ constexpr void faint(Battle& battle, Player player, O& options) {
   a.stats = kept.stats;
   for (uint8_t i = 0; i < 4; i++) a.moves[i] = kept.moves[i];
   a.species = kept.species;
-  a.locked_move = kept.locked_move;
+  a.volatiles.locked_move = kept.volatiles.locked_move;
   a.types[0] = get(a.species).types[0];
   a.types[1] = get(a.species).types[1];
   a.ability = kept.ability;
-  a.first_turn = 2;
+  a.volatiles.first_turn = 2;
   // Showdown's faintMessages runs the ability's End after the faint line.
   if (a.ability == Ability::CloudNine || a.ability == Ability::AirLock) {
     forecast(battle, foe(player), effective_weather(battle), options,
@@ -438,7 +433,7 @@ constexpr void enter(Battle& battle, Player player) {
   a.ability = mon.ability;
   a.hidden_power = mon.hidden_power;
   a.hidden_power_type = mon.hidden_power_type;
-  a.first_turn = 2; // main:3220, decision 14
+  a.volatiles.first_turn = 2; // main:3220, decision 14
 }
 
 // switchineffects (bsc:5180) for the Pokémon that just entered, in Showdown's
@@ -460,7 +455,7 @@ constexpr void arrive(Battle& battle, Player player, O& options) {
   white_herbs(battle, options);
   ActivePokemon& a = battle.side(player).active;
   // bsc:5258; at the battle start Truant acts on turn 1 (Showdown agrees).
-  if (a.ability == Ability::Truant) a.truant = battle.turn != 0;
+  if (a.ability == Ability::Truant) a.volatiles.truant = battle.turn != 0;
   ability_switch_in(battle, player, options);
   // A traced immunity cures after runSwitch.
   ability_immunity(battle, options);
@@ -529,7 +524,7 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   }
   // Showdown's gen3 skippedTime (ENGINE.md, field map): the Sleep Talk and
   // Snore turns go back on the sleep counter.
-  if (const uint8_t k = side.active.sleep_skipped; k != 0 && out.status.asleep()) {
+  if (const uint8_t k = side.active.volatiles.sleep_skipped; k != 0 && out.status.asleep()) {
     assert(out.status.sleep() + k <= Status::MAX_SLEEP);
     out.status.bits = uint8_t(out.status.bits + k);
     if constexpr (CHANCE<O>) {
@@ -694,8 +689,8 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
   assert(!mon.fainted());
   const auto go = [&] {
     log_move(battle, player, m, options);
-    a.last_used_move = m.move;
-    a.last_used_type = m.type;
+    v.last_used_move = m.move;
+    v.last_used_type = m.type;
     m.obeys = true;
     return true;
   };
@@ -718,7 +713,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
   // CANCELER_RECHARGE
   if (v.recharge) {
     v.recharge = false;
-    a.recharge_timer = 0;
+    v.recharge_timer = 0;
     return stop(protocol::Cant::Recharge);
   }
 
@@ -742,11 +737,11 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
     if (woke) {
       wake(battle, player, options);
     } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
-      a.sleep_skipped = 0;
+      v.sleep_skipped = 0;
       return stop(protocol::Cant::Sleep);
     } else {
       protocol::cant(options.log, id, protocol::Cant::Sleep, m.move);
-      a.sleep_skipped++;
+      v.sleep_skipped++;
     }
   }
 
@@ -765,7 +760,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // CANCELER_TRUANT; the counter toggles at the end of each turn.
-  if (a.ability == Ability::Truant && a.truant) {
+  if (a.ability == Ability::Truant && v.truant) {
     m.result |= MoveResult::MISSED;
     return stop(protocol::Cant::Truant);
   }
@@ -777,7 +772,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
   }
 
   // CANCELER_DISABLED, CANCELER_IMPRISONED
-  if (a.disabled_move != Move::None && a.disabled_move == m.move) {
+  if (v.disabled_move != Move::None && v.disabled_move == m.move) {
     return stop(protocol::Cant::Disable);
   }
   if (imprisoned(battle.side(foe(player)).active, m.move)) return stop(protocol::Cant::Imprison);
@@ -816,10 +811,10 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
 
   // Showdown's choicelock onBeforeMove: a lock whose band has gone ends here
   // (or at the end of the turn), so a band Tricked back this turn keeps it.
-  if (!holds(side, HoldEffect::ChoiceBand)) a.choice_move = Move::None;
+  if (!holds(side, HoldEffect::ChoiceBand)) v.choice_move = Move::None;
 
   // CANCELER_TAUNTED
-  if (a.taunt != 0 && get(m.move).bp == 0) return stop(protocol::Cant::Taunt);
+  if (v.taunt != 0 && get(m.move).bp == 0) return stop(protocol::Cant::Taunt);
 
   // CANCELER_BIDE, as Showdown's gen3 onBeforeMove: at 2 only -activate; at 1
   // it ends, and fails if nothing took HP from it, else releases (bide()).
@@ -831,7 +826,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
       return false;
     }
     protocol::end_effect(options.log, id, protocol::End::Bide);
-    if (a.bide_damage == 0) {
+    if (v.bide_damage == 0) {
       protocol::fail(options.log, id);
       abort_move(battle, player, options);
       m.unable = true;
@@ -995,9 +990,9 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
 
   // MOVEEND_CHOICE_MOVE, as Showdown's: any move locks, even Struggle or a
   // called move; a working Baton Pass doesn't.
-  if (m.obeys && holds(side, HoldEffect::ChoiceBand) && a.choice_move == Move::None &&
+  if (m.obeys && holds(side, HoldEffect::ChoiceBand) && a.volatiles.choice_move == Move::None &&
       !(m.chosen == Move::BatonPass && !(m.result & MoveResult::FAILED))) {
-    a.choice_move = m.chosen;
+    a.volatiles.choice_move = m.chosen;
   }
 
   // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends a
@@ -1037,25 +1032,22 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
 
   // MOVEEND_SUBSTITUTE
   for (Side& s : battle.sides) {
-    if (s.active.substitute_hp == 0) s.active.volatiles.substitute = false;
+    if (s.active.volatiles.substitute_hp == 0) s.active.volatiles.substitute = false;
   }
 
-  // MOVEEND_UPDATE_LAST_MOVES: gChosenMove for the printed and last moves,
-  // gCurrentMove for the resulting one.
-  if (m.attackstring) a.last_printed_move = m.chosen;
-  // A Baton Pass that worked leaves them to the recipient.
+  // MOVEEND_UPDATE_LAST_MOVES: gChosenMove for the last move.
+  // A Baton Pass that worked leaves it to the recipient.
   if (get(m.chosen).effect != Effect::BatonPass || (m.result & MoveResult::FAILED)) {
     // As Showdown's lastMove, a move stopped before it was used, or Bide's
     // release, leaves the last move as it was; the decomp writes
     // MOVE_UNAVAILABLE.
-    if (m.obeys && !m.release) a.last_move = m.chosen;
-    a.last_resulting_move = m.obeys ? m.move : UNAVAILABLE;
+    if (m.obeys && !m.release) a.volatiles.last_move = m.chosen;
   }
 
   // MOVEEND_MIRROR_MOVE, as Showdown's attackedBy.
   if (m.attacked && !m.self && mirrors(t)) {
-    t.last_taken_move = m.move;
-    t.last_taken_from = side.order[0];
+    t.volatiles.last_taken_move = m.move;
+    t.volatiles.last_taken_from = side.order[0];
   }
 
   // White Herb, in Showdown's AfterMove (skipped by a move stopped before it
@@ -1083,8 +1075,8 @@ constexpr bool fails_early(Battle& battle, Player player, MoveState& m, O& optio
     return true;
   }
   if ((effect == Effect::Snore && !battle.side(player).get(1).status.asleep()) ||
-      (effect == Effect::FakeOut && a.move_actions > 1) ||
-      (effect == Effect::SpitUp && a.stockpile == 0)) {
+      (effect == Effect::FakeOut && a.volatiles.move_actions > 1) ||
+      (effect == Effect::SpitUp && a.volatiles.stockpile == 0)) {
     m.attackstring = true;
     pp_reduce(battle, player, m);
     m.result |= MoveResult::FAILED;
@@ -1121,8 +1113,8 @@ constexpr bool charges(Battle& battle, Player player, MoveState& m, O& options) 
   pp_reduce(battle, player, m);
   if (effect == Effect::SkullBash) protocol::boost(options.log, id, DEF, raise(a, DEF, 1, m), false);
   v.multiple_turns = true;
-  a.locked_move = m.move;
-  a.recharge_timer = 2;
+  v.locked_move = m.move;
+  v.recharge_timer = 2;
   if (effect == Effect::SemiInvulnerable) {
     v.on_air = m.move == Move::Fly || m.move == Move::Bounce;
     v.underground = m.move == Move::Dig;
@@ -1197,8 +1189,8 @@ constexpr void strike(Battle& battle, Player player, MoveState& m, Hit h, uint32
   if (d == 0) {
     const bool crits = can_crit(battle, player);
     const ActivePokemon& t = battle.side(foe(player)).active;
-    const uint32_t cap = t.volatiles.substitute && t.substitute_hp != 0
-                             ? t.substitute_hp
+    const uint32_t cap = t.volatiles.substitute && t.volatiles.substitute_hp != 0
+                             ? t.volatiles.substitute_hp
                              : battle.side(foe(player)).get(1).hp;
     d = rolls::hit_damage(battle, player, foe(player), i, h, crits,
                           crits ? crit_stage(battle, player, m.move) : uint8_t(0), cap, options);
@@ -1316,23 +1308,23 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // its count.
   if (effect == Effect::Rollout) {
     ActivePokemon& a = side.active;
-    h.power = uint16_t(get(m.move).bp << a.rollout);
+    h.power = uint16_t(get(m.move).bp << a.volatiles.rollout);
     if (!side.get(1).status.asleep()) {
-      a.rollout++;
-      if (a.rollout < 5) {
-        a.renewed |= ActivePokemon::RENEWED_LOCK;
+      a.volatiles.rollout++;
+      if (a.volatiles.rollout < 5) {
+        a.volatiles.renewed |= Volatiles::RENEWED_LOCK;
         a.volatiles.multiple_turns = true;
-        a.locked_move = m.move;
+        a.volatiles.locked_move = m.move;
       }
     }
     if (a.volatiles.defense_curl) h.power = uint16_t(h.power * 2);
   } else if (effect == Effect::FuryCutter) {
     ActivePokemon& a = side.active;
-    if (a.fury_cutter == 0) {
-      a.fury_cutter = 1;
-      a.renewed |= ActivePokemon::RENEWED_FURY_CUTTER;
+    if (a.volatiles.fury_cutter == 0) {
+      a.volatiles.fury_cutter = 1;
+      a.volatiles.renewed |= Volatiles::RENEWED_FURY_CUTTER;
     }
-    h.power = uint16_t(std::min(get(m.move).bp << (a.fury_cutter - 1), 160));
+    h.power = uint16_t(std::min(get(m.move).bp << (a.volatiles.fury_cutter - 1), 160));
   }
   if (effect == Effect::Magnitude) rolls::variable_matters(player, effect, variable, options);
   if (effect == Effect::Psywave || effect == Effect::Present) {
@@ -1587,7 +1579,7 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
   const uint8_t data = r.choice[i].data();
 
   // Showdown's runMove counts the action before anything can stop it.
-  if (a.move_actions < 2) a.move_actions++;
+  if (a.volatiles.move_actions < 2) a.volatiles.move_actions++;
 
   MoveState m{};
   m.slot = NO_SLOT;
@@ -1598,20 +1590,20 @@ constexpr After use_move(Battle& battle, Player player, bool first, Turn& turn,
     // gCurrMovePos keeps the slot chosen when the lock began (unverified). A
     // locked move uses no PP (Showdown's runMove skips deductPP). Known gap:
     // Showdown's Encore on a lock Metronome called runs Metronome instead.
-    m.move = a.locked_move;
+    m.move = a.volatiles.locked_move;
     m.locked = true;
     m.no_pp = true;
     m.slot = slot_of(a, m.move);
-  } else if (a.encored_move != Move::None &&
-             a.moves[a.encored_slot].id == a.encored_move) {
-    m.move = a.encored_move;
-    m.slot = a.encored_slot;
-  } else if (a.encored_move != Move::None) {
-    m.slot = a.encored_slot;
+  } else if (a.volatiles.encored_move != Move::None &&
+             a.moves[a.volatiles.encored_slot].id == a.volatiles.encored_move) {
+    m.move = a.volatiles.encored_move;
+    m.slot = a.volatiles.encored_slot;
+  } else if (a.volatiles.encored_move != Move::None) {
+    m.slot = a.volatiles.encored_slot;
     m.move = a.moves[m.slot].id;
-    a.encored_move = Move::None;
-    a.encored_slot = 0;
-    a.encore_timer = 0;
+    a.volatiles.encored_move = Move::None;
+    a.volatiles.encored_slot = 0;
+    a.volatiles.encore_timer = 0;
     if constexpr (CHANCE<O>) options.chance.durations.get(player).encore = 0;
   } else {
     assert(data >= 1 && data <= 4);
@@ -1637,7 +1629,7 @@ constexpr bool pursues(const Battle& battle, Player player) {
   const Pokemon& mon = side.get(1);
   return r.choice[i].type() == Choice::Move && r.move[i] == Move::Pursuit &&
          !mon.fainted() && !mon.status.asleep() && !mon.status.frozen() &&
-         !(side.active.ability == Ability::Truant && side.active.truant);
+         !(side.active.ability == Ability::Truant && side.active.volatiles.truant);
 }
 
 // Pursuit on `p`'s switching Pokémon (bs1:3088; Showdown's gen3
@@ -2015,7 +2007,7 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
   // (protect()).
   for (Side& side : battle.sides) {
     ActivePokemon& a = side.active;
-    if (a.stall != 0 && --a.stall == 0) a.protect_uses = 0;
+    if (a.volatiles.stall != 0 && --a.volatiles.stall == 0) a.volatiles.protect_uses = 0;
   }
   if (Flow over = outcome(battle)) return over;
   // Showdown's gen3 Update after the residuals (sim/battle.ts:2915), unless a

@@ -543,9 +543,11 @@ struct Pokemon {
   friend constexpr bool operator==(const Pokemon&, const Pokemon&) = default;
 };
 
-// The flags and small counters the decomp packs into status2 and status3,
-// named after their constants. Never take a pointer or reference to a member:
-// packing will make them bitfields (decision 6).
+// The active Pokémon's battle state, all cleared at switch-in: the decomp's
+// status2 and status3 flags and counters, named after their constants, then
+// DisableStruct, the per-battler globals and Showdown's additions. Never take
+// a pointer or reference to a flag: packing will make them bitfields
+// (decision 6).
 struct Volatiles {
   // status2
   uint8_t confusion;      // STATUS2_CONFUSION, 0-5. Hidden. Baton Pass keeps.
@@ -593,6 +595,61 @@ struct Volatiles {
   // RESOURCE_FLAG_FLASH_FIRE
   bool flash_fire;
 
+  uint32_t bide_damage;     // gBideDmg; u32 settled (ENGINE.md, decision 15)
+  // The last-move fields differ in when they're written; see the field map.
+  Move locked_move;         // gLockedMoves
+  Move choice_move;         // gBattleStruct->choicedMove (Choice Band)
+  Move wrapped_move;        // gBattleStruct->wrappedMove, for the log
+  Move disabled_move;       // DisableStruct
+  Move encored_move;        // DisableStruct
+  Move last_move;           // gLastMoves: Disable, Encore, Spite, Mimic
+  // Showdown's lastMoveUsed (Conversion 2), set as each move starts
+  // (useMoveInner), called ones included; None since the switch-in. Its
+  // type as used: Weather Ball's and Hidden Power's.
+  Move last_used_move;
+  Move last_taken_move;     // lastTakenMove: Mirror Move
+  Type last_used_type;
+  // DisableStruct and status1's counter
+  uint8_t toxic;            // STATUS1_TOXIC_COUNTER, 0-15; resets on switch-in
+  uint8_t substitute_hp;    // max HP / 4 fits. Baton Pass keeps.
+  uint8_t disable_timer;    // 0-6. Hidden.
+  uint8_t encore_timer;     // 0-6. Hidden.
+  uint8_t encored_slot;     // 0-3
+  uint8_t protect_uses;     // unbounded in the decomp: saturate
+  uint8_t stall;            // Showdown's stall duration, 0-2 (protect())
+  uint8_t stockpile;        // 0-3
+  uint8_t perish_song_timer;// 0-3. Baton Pass keeps.
+  uint8_t fury_cutter;      // Showdown's furycutter: 0 off, else the power
+                            // multiplier's log2 + 1, 1-5
+  uint8_t rollout;          // Showdown's rollout hitCount, 0-5
+  uint8_t charge_timer;     // 0-2; unused: Showdown's Charge has no timer
+  uint8_t taunt;            // 0-2
+  uint8_t first_turn;       // isFirstTurn, 0-2 (decision 14)
+  uint8_t recharge_timer;   // 0-2; also a two-turn move's charge (turn_cleanup)
+  uint8_t mimicked;         // mimickedMoves: a 4-bit mask of move slots
+  bool truant;              // truantCounter
+  // Showdown's gen3 skippedTime: move attempts spent asleep on Sleep Talk or
+  // Snore since the last that did nothing, 0-4. The cartridge writes the
+  // sleep counter back to the party only when the canceler stops the move
+  // or the Pokémon wakes (util:2259), so a switch-out gives these back.
+  uint8_t sleep_skipped;
+  // Showdown's activeMoveActions, 0-2 (saturating): move actions since the
+  // switch-in, counted as each starts (runMove), so an action a faint
+  // cancelled doesn't count. Fake Out fails above 1.
+  uint8_t move_actions;
+  // Showdown's duration 2, for the volatiles that a turn's move renews and
+  // whose duration otherwise runs out at that turn's residuals: bit 0 for the
+  // lock (lockedmove or rollout), bit 1 for furycutter (RENEWED_*).
+  uint8_t renewed;
+  // The party position (Side::order value, 1-6) of the Pokémon whose move
+  // set last_taken_move: Showdown's attackedBy source, kept while it's away
+  // until the end of the turn (turn_cleanup).
+  uint8_t last_taken_from;
+
+  static constexpr uint8_t RENEWED_LOCK = 1;
+  static constexpr uint8_t RENEWED_FURY_CUTTER = 2;
+  static constexpr uint8_t MAX_TOXIC = 15;
+
   // STATUS2_WRAPPED | STATUS2_ESCAPE_PREVENTION
   constexpr bool trapped() const {
     return (wrapped != 0 && !wrapper_gone) || escape_prevention;
@@ -603,9 +660,22 @@ struct Volatiles {
   }
 
   constexpr bool valid() const {
+    for (Move m : {locked_move, choice_move, wrapped_move, disabled_move,
+                   encored_move, last_move, last_used_move,
+                   last_taken_move}) {
+      if (!detail::valid(m)) return false;
+    }
     return confusion <= 5 && uproar <= 5 && bide <= 3 && thrash <= 3 &&
            wrapped <= 6 && (!wrapper_gone || wrapped != 0) && (lock_on == 0 || (lock_on % 4 != 0 && lock_on % 4 <= 2 && lock_on >> 2 >= 1 && lock_on >> 2 <= 6)) && yawn <= 2 &&
-           (on_air + underground + underwater) <= 1;
+           (on_air + underground + underwater) <= 1 &&
+           detail::valid(last_used_type) &&
+           toxic <= MAX_TOXIC && sleep_skipped <= Status::MAX_SLEEP - 1 &&
+           disable_timer <= 6 && encore_timer <= 6 && encored_slot <= 3 &&
+           stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
+           rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
+           first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
+           move_actions <= 2 && renewed <= 3 && last_taken_from <= 6 &&
+           stall <= 2;
   }
 
   friend constexpr bool operator==(const Volatiles&, const Volatiles&) = default;
@@ -636,98 +706,29 @@ struct Boosts {
 // and ability from the Pokemon and zeroes the rest (decision 4). The field
 // map with citations is in docs/ENGINE.md.
 struct ActivePokemon {
-  uint32_t bide_damage;     // gBideDmg; u32 settled (ENGINE.md, decision 15)
   // atk..spd (hp unused: HP lives on the Pokemon). Transform changes them.
   Stats stats;
   MoveSlot moves[4];
   Species species;
-  // The last-move fields differ in when they're written; see the field map.
-  Move locked_move;         // gLockedMoves
-  Move choice_move;         // gBattleStruct->choicedMove (Choice Band)
-  Move wrapped_move;        // gBattleStruct->wrappedMove, for the log
-  Move disabled_move;       // DisableStruct
-  Move encored_move;        // DisableStruct
-  Move last_move;           // gLastMoves: Disable, Encore, Spite, Mimic
-  // Showdown's lastMoveUsed (Conversion 2), set as each move starts
-  // (useMoveInner), called ones included; None since the switch-in. Its
-  // type as used: Weather Ball's and Hidden Power's.
-  Move last_used_move;
-  Move last_resulting_move; // gLastResultingMoves: Protect's reset
-  Move last_printed_move;   // gLastPrintedMoves: Sketch
-  Move last_taken_move;     // lastTakenMove: Mirror Move
   Type types[2];
-  Type last_used_type;
   Ability ability;
-  Boosts boosts;
-  Volatiles volatiles;
-  // DisableStruct and status1's counter
-  uint8_t toxic;            // STATUS1_TOXIC_COUNTER, 0-15; resets on switch-in
-  uint8_t substitute_hp;    // max HP / 4 fits. Baton Pass keeps.
-  uint8_t disable_timer;    // 0-6. Hidden.
-  uint8_t encore_timer;     // 0-6. Hidden.
-  uint8_t encored_slot;     // 0-3
-  uint8_t protect_uses;     // unbounded in the decomp: saturate
-  uint8_t stall;            // Showdown's stall duration, 0-2 (protect())
-  uint8_t stockpile;        // 0-3
-  uint8_t perish_song_timer;// 0-3. Baton Pass keeps.
-  uint8_t fury_cutter;      // Showdown's furycutter: 0 off, else the power
-                            // multiplier's log2 + 1, 1-5
-  uint8_t rollout;          // Showdown's rollout hitCount, 0-5
-  uint8_t charge_timer;     // 0-2; unused: Showdown's Charge has no timer
-  uint8_t taunt;            // 0-2
-  uint8_t first_turn;       // isFirstTurn, 0-2 (decision 14)
-  uint8_t recharge_timer;   // 0-2; also a two-turn move's charge (turn_cleanup)
-  uint8_t mimicked;         // mimickedMoves: a 4-bit mask of move slots
-  bool truant;              // truantCounter
-  // Showdown's gen3 skippedTime: move attempts spent asleep on Sleep Talk or
-  // Snore since the last that did nothing, 0-4. The cartridge writes the
-  // sleep counter back to the party only when the canceler stops the move
-  // or the Pokémon wakes (util:2259), so a switch-out gives these back.
-  uint8_t sleep_skipped;
-  // Showdown's activeMoveActions, 0-2 (saturating): move actions since the
-  // switch-in, counted as each starts (runMove), so an action a faint
-  // cancelled doesn't count. Fake Out fails above 1.
-  uint8_t move_actions;
   // Hidden Power's power (30-70) and type (Fighting..Dark): the Pokémon's
   // own, or the target's after Transform (Showdown's hpPower and hpType).
   uint8_t hidden_power;
   Type hidden_power_type;
-  // Showdown's duration 2, for the volatiles that a turn's move renews and
-  // whose duration otherwise runs out at that turn's residuals: bit 0 for the
-  // lock (lockedmove or rollout), bit 1 for furycutter (RENEWED_*).
-  uint8_t renewed;
-  // The party position (Side::order value, 1-6) of the Pokémon whose move
-  // set last_taken_move: Showdown's attackedBy source, kept while it's away
-  // until the end of the turn (turn_cleanup).
-  uint8_t last_taken_from;
-
-  static constexpr uint8_t RENEWED_LOCK = 1;
-  static constexpr uint8_t RENEWED_FURY_CUTTER = 2;
-  static constexpr uint8_t MAX_TOXIC = 15;
+  Boosts boosts;
+  Volatiles volatiles;
 
   constexpr bool valid() const {
     if (!detail::valid(species) || !detail::valid(types[0]) ||
-        !detail::valid(types[1]) || !detail::valid(last_used_type) ||
-        !detail::valid(hidden_power_type) ||
+        !detail::valid(types[1]) || !detail::valid(hidden_power_type) ||
         !detail::valid(ability)) {
       return false;
-    }
-    for (Move m : {locked_move, choice_move, wrapped_move, disabled_move,
-                   encored_move, last_move, last_used_move,
-                   last_resulting_move, last_printed_move, last_taken_move}) {
-      if (!detail::valid(m)) return false;
     }
     for (const MoveSlot& m : moves) {
       if (!detail::valid(m.id)) return false;
     }
-    return boosts.valid() && volatiles.valid() && toxic <= MAX_TOXIC &&
-           sleep_skipped <= Status::MAX_SLEEP - 1 &&
-           disable_timer <= 6 && encore_timer <= 6 && encored_slot <= 3 &&
-           stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
-           rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
-           first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
-           move_actions <= 2 && renewed <= 3 && last_taken_from <= 6 &&
-           stall <= 2;
+    return boosts.valid() && volatiles.valid();
   }
 
   friend constexpr bool operator==(const ActivePokemon&, const ActivePokemon&) = default;
@@ -847,7 +848,7 @@ struct Battle {
 static_assert(sizeof(Stats) == 12);
 static_assert(sizeof(MoveSlot) == 4);
 static_assert(sizeof(Pokemon) == 42);
-static_assert(sizeof(Volatiles) == 36);
+static_assert(sizeof(Volatiles) == 80);
 static_assert(sizeof(Boosts) == 7);
 static_assert(sizeof(ActivePokemon) == 124);
 static_assert(sizeof(SideConditions) == 9);

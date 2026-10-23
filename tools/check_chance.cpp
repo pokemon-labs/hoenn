@@ -242,8 +242,8 @@ void mask(Battle& battle) {
     if (masked & BINDING) v.wrapped = one(v.wrapped);
     if (masked & UPROAR) v.uproar = one(v.uproar);
     if (masked & THRASH) v.thrash = one(v.thrash);
-    if (masked & DISABLE) a.disable_timer = one(a.disable_timer);
-    if (masked & ENCORE) a.encore_timer = one(a.encore_timer);
+    if (masked & DISABLE) a.volatiles.disable_timer = one(a.volatiles.disable_timer);
+    if (masked & ENCORE) a.volatiles.encore_timer = one(a.volatiles.encore_timer);
   }
 }
 

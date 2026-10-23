@@ -408,9 +408,9 @@ constexpr VolatileName VOLATILES[] = {
     {"confusion", [](const ActivePokemon& a) { return a.volatiles.confusion != 0; }},
     {"substitute", [](const ActivePokemon& a) { return a.volatiles.substitute; }},
     {"leechseed", [](const ActivePokemon& a) { return a.volatiles.leech_seed; }},
-    {"encore", [](const ActivePokemon& a) { return a.encored_move != Move::None; }},
-    {"taunt", [](const ActivePokemon& a) { return a.taunt != 0; }},
-    {"disable", [](const ActivePokemon& a) { return a.disabled_move != Move::None; }},
+    {"encore", [](const ActivePokemon& a) { return a.volatiles.encored_move != Move::None; }},
+    {"taunt", [](const ActivePokemon& a) { return a.volatiles.taunt != 0; }},
+    {"disable", [](const ActivePokemon& a) { return a.volatiles.disabled_move != Move::None; }},
     {"focusenergy", [](const ActivePokemon& a) { return a.volatiles.focus_energy; }},
     {"ingrain", [](const ActivePokemon& a) { return a.volatiles.rooted; }},
     {"perishsong", [](const ActivePokemon& a) { return a.volatiles.perish_song; }},
@@ -421,7 +421,7 @@ constexpr VolatileName VOLATILES[] = {
     {"trapped", [](const ActivePokemon& a) { return a.volatiles.escape_prevention; }},
     {"partiallytrapped", [](const ActivePokemon& a) { return a.volatiles.wrapped != 0; }},
     {"flashfire", [](const ActivePokemon& a) { return a.volatiles.flash_fire; }},
-    {"choicelock", [](const ActivePokemon& a) { return a.choice_move != Move::None; }},
+    {"choicelock", [](const ActivePokemon& a) { return a.volatiles.choice_move != Move::None; }},
     {"foresight", [](const ActivePokemon& a) { return a.volatiles.foresight; }},
     {"torment", [](const ActivePokemon& a) { return a.volatiles.torment; }},
     {"charge", [](const ActivePokemon& a) { return a.volatiles.charged_up; }},
@@ -429,19 +429,19 @@ constexpr VolatileName VOLATILES[] = {
     {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.recharge; }},
     // Step 5 group 4: the locked moves and Rage.
     {"lockedmove", [](const ActivePokemon& a) {
-       return a.volatiles.multiple_turns && get(a.locked_move).effect == Effect::Rampage;
+       return a.volatiles.multiple_turns && get(a.volatiles.locked_move).effect == Effect::Rampage;
      }},
     {"uproar", [](const ActivePokemon& a) { return a.volatiles.uproar != 0; }},
     {"bide", [](const ActivePokemon& a) { return a.volatiles.bide != 0; }},
-    {"rollout", [](const ActivePokemon& a) { return a.rollout != 0 && a.locked_move == Move::Rollout; }},
-    {"iceball", [](const ActivePokemon& a) { return a.rollout != 0 && a.locked_move == Move::IceBall; }},
-    {"furycutter", [](const ActivePokemon& a) { return a.fury_cutter != 0; }},
+    {"rollout", [](const ActivePokemon& a) { return a.volatiles.rollout != 0 && a.volatiles.locked_move == Move::Rollout; }},
+    {"iceball", [](const ActivePokemon& a) { return a.volatiles.rollout != 0 && a.volatiles.locked_move == Move::IceBall; }},
+    {"furycutter", [](const ActivePokemon& a) { return a.volatiles.fury_cutter != 0; }},
     {"rage", [](const ActivePokemon& a) { return a.volatiles.rage; }},
     // The semi-invulnerable turn, by the move's own volatile. Not
     // twoturnmove: Showdown keeps it until the residuals after the second
     // turn, so a request in between would differ.
-    {"fly", [](const ActivePokemon& a) { return a.volatiles.on_air && a.locked_move == Move::Fly; }},
-    {"bounce", [](const ActivePokemon& a) { return a.volatiles.on_air && a.locked_move == Move::Bounce; }},
+    {"fly", [](const ActivePokemon& a) { return a.volatiles.on_air && a.volatiles.locked_move == Move::Fly; }},
+    {"bounce", [](const ActivePokemon& a) { return a.volatiles.on_air && a.volatiles.locked_move == Move::Bounce; }},
     {"dig", [](const ActivePokemon& a) { return a.volatiles.underground; }},
     {"dive", [](const ActivePokemon& a) { return a.volatiles.underwater; }},
 };
@@ -471,13 +471,13 @@ std::string active_mismatch(const Battle& battle, Player p,
   // once the battle is over: Showdown's residual loop flushes a faint that
   // ends it only at the next handler, so its count can stop part way
   // (decided with the user, 2026-10-09).
-  if (!over && a.stall != sa["stall"].integer()) {
-    why += std::string(" ") + side + " stall " + std::to_string(a.stall) +
+  if (!over && a.volatiles.stall != sa["stall"].integer()) {
+    why += std::string(" ") + side + " stall " + std::to_string(a.volatiles.stall) +
            ", Showdown " + std::to_string(sa["stall"].integer()) + ";";
   }
-  if (a.volatiles.substitute && a.substitute_hp != sa["subhp"].integer()) {
+  if (a.volatiles.substitute && a.volatiles.substitute_hp != sa["subhp"].integer()) {
     why += std::string(" ") + side + " Substitute HP " +
-           std::to_string(a.substitute_hp) + ", Showdown " +
+           std::to_string(a.volatiles.substitute_hp) + ", Showdown " +
            std::to_string(sa["subhp"].integer()) + ";";
   }
   for (const VolatileName& v : VOLATILES) {
@@ -489,7 +489,7 @@ std::string active_mismatch(const Battle& battle, Player p,
     }
     // A lock whose band was traded or knocked away stays in Showdown until
     // the holder's next DisableMove, inert.
-    if (std::string_view(v.name) == "choicelock" && a.choice_move == Move::None &&
+    if (std::string_view(v.name) == "choicelock" && a.volatiles.choice_move == Move::None &&
         !detail::holds(battle.side(p), HoldEffect::ChoiceBand)) {
       continue;
     }
