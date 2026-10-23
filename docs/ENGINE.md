@@ -747,13 +747,13 @@ main = `src/battle_main.c`.
    Forecast and Color Change.
 5. **Baton Pass's switch-in is its own function:** the normal switch-in, then
    restore what passes (`baton_pass_in`).
-6. **Volatiles are named fields** in one `Volatiles` struct: a `bool` per
-   flag, a `uint8_t` per small counter, each named after and citing its decomp
-   constant. About 274 decomp uses touch one flag; the 8 that combine flags
-   become helpers (`trapped()`, `semi_invulnerable()`, Baton Pass's
-   keep-list). Packing will make them bitfields, so never take a pointer or
-   reference to a member. Before packing, check whether search reads raw
-   `Battle` bytes (unverified).
+6. **Volatiles are named fields** in one `Volatiles` struct, each named
+   after and citing its decomp constant: a 1-bit `bool` per flag, whole bytes
+   for the hottest moves and counters, bitfields for the rest (`PACK.md`).
+   About 274 decomp uses touch one flag; the 8 that combine flags become
+   helpers (`trapped()`, `semi_invulnerable()`, Baton Pass's keep-list).
+   Never take a pointer or reference to a member. Nothing reads raw `Battle`
+   bytes but `check_chance`'s diff printer.
 7. **Types live on `Pokemon`** and switch-in copies them. Equivalent to the
    decomp, which recomputes them from the species.
 8. **Knock Off sets the item to the sentinel `Item::KnockedOff`** (inert, no
@@ -791,7 +791,7 @@ main = `src/battle_main.c`.
     From `Charge` on it is the decomp's `multiple_turns`, with `locked_move`.
     `lock` holds the kind's Showdown `trueDuration`, duration or `hitCount`;
     Fury Cutter keeps its own multiplier, since it overlaps a lock for the
-    turn after it (field map). `ActivePokemon::renewed` stands for Showdown's duration 2
+    turn after it (field map). `renewed_lock` and `renewed_fury_cutter` stand for Showdown's duration 2
     of the volatiles a turn's move renews (lockedmove, rollout,
     furycutter). A move the canceler stops loses only a two-turn charge
     and Bide (`abort_move`, Showdown's MoveAborted); the other locks run
@@ -817,9 +817,8 @@ main = `src/battle_main.c`.
     2026-10-19). No bound is derived; Bide's sum saturates. Packing leaves
     them as they are.
 
-Packing comes last: natural alignment for now (`Battle` is 800 B against a
-~700 B target). Revisit padding and `has_unique_object_representations_v`
-once the layout is settled.
+`Volatiles` is partly packed (68 -> 36 B, `Battle` 800 -> 736 B); the rest
+of `Battle` keeps natural alignment (`PACK.md`).
 
 ## `ActivePokemon` field map
 
@@ -879,7 +878,7 @@ the changes.
 |---|---|---|---|---|
 | `LEECHSEED_BATTLER` | — | | | dropped: the drain heals the foe's active Pokémon (util:1507) |
 | `LEECHSEED` | `leech_seed` | bool | **BP** | |
-| `ALWAYS_HITS` (2 bits) | `lock_on` | u8: turns 0–2, target position 1–6 | **BP** | on the user, as Showdown (decision 9); set 2 (bsc:8137), steps at the user's end of turn (util:1736) |
+| `ALWAYS_HITS` (2 bits) | `lock_on`, `lock_on_target` | 0–2 turns, 1–6 target position | **BP** | on the user, as Showdown (decision 9); set 2 (bsc:8137), steps at the user's end of turn (util:1736) |
 | `PERISH_SONG` | `perish_song` | u8 0–4 | **BP** | with the decomp's `perishSongTimer`: Showdown's duration, 0 off; set 4, printed after each residual's −1, fainting at 0 |
 | `ON_AIR`, `UNDERGROUND`, `UNDERWATER` | `kind` `OnAir`, `Underground`, `Underwater` | | | `semi_invulnerable()`; a charge, so `lock` counts its turns as `Charge`'s |
 | `MINIMIZED` | `minimized` | bool | | |
@@ -899,12 +898,12 @@ the changes.
 | `transformedMonPersonality` | — | | | | dropped |
 | `disabledMove`, `disableTimer` | `disabled_move`, `disable_timer` | `Move`, u8 0–6 | | yes | set 2–5, +1 if the target already moved (Showdown's gen3; bsc:8007 has no +1) |
 | `encoredMove`, `encoredMovePos`, `encoreTimer` | `encored_move`, `encored_slot`, `encore_timer` | `Move`, u8 0–3, u8 0–6 | | yes | set 3–6 (bsc:8039) |
-| `protectUses` | `protect_uses` | u8 | | | ++ on success (bsc:6526); reset when `stall` runs out (Showdown), where the decomp resets unless the last resulting move was Protect, Detect or Endure (bsc:6506). Unbounded in the decomp: saturate, and clamp the rate index |
+| `protectUses` | `protect_uses` | 0–3 | | | ++ on success (bsc:6526); reset when `stall` runs out (Showdown), where the decomp resets unless the last resulting move was Protect, Detect or Endure (bsc:6506). Unbounded in the decomp: saturates at 3, the last rate index |
 | — | `stall` | u8 | | | Showdown's stall duration, 0-2: 2 on a success, counted down after the residuals; at 0 the chain ends |
 | `stockpileCounter` | `stockpile` | u8 0–3 | | | |
 | `substituteHP` | `substitute_hp` | u8 | **BP** | | max HP / 4 ≤ 178, fits |
 | `perishSongTimer` | `perish_song` | | **BP** | | status3 |
-| `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | Showdown's multiplier as log2 + 1; renewed by `renewed` |
+| `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | Showdown's multiplier as log2 + 1; renewed by `renewed_fury_cutter` |
 | `rolloutTimer` | `kind` `Rollout`, `lock` | u8 1–5 | | | Showdown's `hitCount`, counting up (bsc:8549 counts down from 5) |
 | `chargeTimer` | — | | | | dropped: Charge follows Showdown, ending after the user's next move (bsc:9103 sets 2) |
 | `tauntTimer` | `taunt` | u8 0–2 | | | set 2 (bsc:9160) |

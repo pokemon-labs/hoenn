@@ -880,7 +880,7 @@ constexpr void pp_reduce(Battle& battle, Player player, const MoveState& m);
 // the lock renews for the turn, which lock_residuals reads (trueDuration
 // changes only there).
 constexpr void lock_renew(Battle& battle, Player player) {
-  battle.side(player).active.volatiles.renewed |= Volatiles::RENEWED_LOCK;
+  battle.side(player).active.volatiles.renewed_lock = true;
 }
 
 // Ends p's Bide: a silent -end, unless it fainted (sim/pokemon.ts:2036), and
@@ -937,8 +937,8 @@ constexpr bool protected_from(const MoveState& m, Player player) {
 
 // Whether p's Lock-On or Mind Reader is on the foe now in (Volatiles::lock_on).
 constexpr bool locked_on(const Battle& battle, Player p) {
-  const uint8_t lock = battle.side(p).active.volatiles.lock_on;
-  return lock != 0 && lock >> 2 == battle.side(foe(p)).order[0];
+  const Volatiles& v = battle.side(p).active.volatiles;
+  return v.lock_on != 0 && v.lock_on_target == battle.side(foe(p)).order[0];
 }
 
 // Showdown's Invulnerability event (gen3 tryMoveHit, before the accuracy
@@ -1633,6 +1633,7 @@ constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
   n.wrapped = v.wrapped;
   n.wrapper_gone = v.wrapper_gone;
   n.lock_on = v.lock_on;
+  n.lock_on_target = v.lock_on_target;
   n.wrapped_move = v.wrapped_move;
   // Showdown's gen3 Update after the action, before the recipient's runSwitch:
   // a berry takes what was passed.
@@ -2720,7 +2721,7 @@ constexpr void on_hit(Battle& battle, Player player, MoveState& m, O& options) {
   if (effect == Effect::FuryCutter && m.damaged) {
     ActivePokemon& a = battle.side(player).active;
     if (a.volatiles.fury_cutter < 5) a.volatiles.fury_cutter++;
-    a.volatiles.renewed |= Volatiles::RENEWED_FURY_CUTTER;
+    a.volatiles.renewed_fury_cutter = true;
   }
   if (effect == Effect::Smellingsalt && m.damaged && !target.fainted() &&
       target.status.paralyzed()) {
@@ -2769,7 +2770,7 @@ constexpr void self_effects(Battle& battle, Player player, MoveState& m, O& opti
       a.volatiles.kind = K::Thrash;
       a.volatiles.locked_move = m.move;
       a.volatiles.lock = uint8_t(2 + battle.rng.range(2));
-      a.volatiles.renewed |= Volatiles::RENEWED_LOCK;
+      a.volatiles.renewed_lock = true;
       if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 1;
     }
   } else if (effect == Effect::Uproar && a.volatiles.kind != K::Uproar) {
@@ -3326,7 +3327,7 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
                        O& options) {
   ActivePokemon& a = battle.side(player).active;
   if (a.volatiles.stall == 0) a.volatiles.protect_uses = 0;
-  const uint8_t n = a.volatiles.protect_uses < 3 ? a.volatiles.protect_uses : 3;
+  const uint8_t n = a.volatiles.protect_uses;
   if (!m.first || (n != 0 && !rolls::protect(battle, player, n, options))) {
     a.volatiles.protect_uses = 0;
     return but_it_failed(battle, player, m, options, MoveResult::MISSED);
@@ -3335,7 +3336,7 @@ constexpr void protect(Battle& battle, Player player, MoveState& m,
   (endure ? m.turn->endure : m.turn->protect)[index(player)] = true;
   protocol::single_turn(options.log, protocol::ident(battle, player),
                         endure ? protocol::SingleTurn::Endure : protocol::SingleTurn::Protect);
-  if (a.volatiles.protect_uses != UINT8_MAX) a.volatiles.protect_uses++;
+  if (a.volatiles.protect_uses < 3) a.volatiles.protect_uses++;
   a.volatiles.stall = 2;
 }
 
@@ -4072,7 +4073,8 @@ constexpr void lock_on(Battle& battle, Player player, MoveState& m, O& options) 
     return;
   }
   if (fails) return but_it_failed(battle, player, m, options);
-  v.lock_on = uint8_t(2 | battle.side(target).order[0] << 2);
+  v.lock_on = 2;
+  v.lock_on_target = battle.side(target).order[0];
   protocol::activate_with(options.log, protocol::ident(battle, player),
                           m.move == Move::MindReader ? protocol::Activate::MindReader
                                                      : protocol::Activate::LockOn,
@@ -4088,13 +4090,19 @@ template <typename O>
 constexpr void self_volatile(Battle& battle, Player player, MoveState& m, O& options) {
   Volatiles& v = battle.side(player).active.volatiles;
   const Effect effect = get(m.move).effect;
-  bool& on = effect == Effect::FocusEnergy ? v.focus_energy
-             : effect == Effect::Ingrain   ? v.rooted
-             : effect == Effect::MudSport  ? v.mud_sport
-             : effect == Effect::WaterSport ? v.water_sport
-                                           : v.charged_up;
+  const bool on = effect == Effect::FocusEnergy ? v.focus_energy
+                  : effect == Effect::Ingrain   ? v.rooted
+                  : effect == Effect::MudSport  ? v.mud_sport
+                  : effect == Effect::WaterSport ? v.water_sport
+                                                : v.charged_up;
   if (on && effect != Effect::Charge) return but_it_failed(battle, player, m, options);
-  on = true;
+  switch (effect) {
+  case Effect::FocusEnergy: v.focus_energy = true; break;
+  case Effect::Ingrain: v.rooted = true; break;
+  case Effect::MudSport: v.mud_sport = true; break;
+  case Effect::WaterSport: v.water_sport = true; break;
+  default: v.charged_up = true; break;
+  }
   protocol::start(options.log, protocol::ident(battle, player),
                   effect == Effect::FocusEnergy  ? protocol::Start::FocusEnergy
                   : effect == Effect::Ingrain    ? protocol::Start::Ingrain
@@ -4818,7 +4826,7 @@ template <typename O>
 
   // ENDTURN_LOCK_ON, TAUNT (util:1734-1748). Lock-On is on its user, as
   // Showdown's.
-  if (v.lock_on != 0 && --v.lock_on % 4 == 0) v.lock_on = 0;
+  if (v.lock_on != 0 && --v.lock_on == 0) v.lock_on_target = 0;
   if (v.taunt != 0 && --v.taunt == 0) {
     protocol::end_effect(options.log, id, protocol::End::Taunt);
   }
@@ -4944,7 +4952,7 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
 
 // The durations with no residual order, which Showdown runs after every other
 // residual, Perish Song's included. Each lasts while its move renews it
-// (ActivePokemon::renewed: Showdown's duration 2).
+// (Volatiles::renewed_*: Showdown's duration 2).
 // - lockedmove (data/conditions.ts:253): ending with trueDuration 1, the user
 //   is confused (-start confusion [fatigue]) unless confused already or Own
 //   Tempo. A sleeping user loses the lock silently. The decomp (util:1673)
@@ -4970,7 +4978,7 @@ constexpr void lock_residuals(Battle& battle, Player player, O& options) {
         c = 0;
       }
     }
-    if ((v.renewed & Volatiles::RENEWED_LOCK) && v.lock >= 2) {
+    if ((v.renewed_lock) && v.lock >= 2) {
       if (side.get(1).status.asleep()) {
         end_kind(v);
         if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 0;
@@ -4990,11 +4998,12 @@ constexpr void lock_residuals(Battle& battle, Player player, O& options) {
       }
     }
   }
-  if (v.kind == K::Rollout && !(v.renewed & Volatiles::RENEWED_LOCK)) end_kind(v);
-  if (v.fury_cutter != 0 && !(v.renewed & Volatiles::RENEWED_FURY_CUTTER)) {
+  if (v.kind == K::Rollout && !(v.renewed_lock)) end_kind(v);
+  if (v.fury_cutter != 0 && !(v.renewed_fury_cutter)) {
     v.fury_cutter = 0;
   }
-  v.renewed = 0;
+  v.renewed_lock = false;
+  v.renewed_fury_cutter = false;
   if (v.kind == K::Bide && --v.lock == 0) end_bide(battle, player, options);
 }
 

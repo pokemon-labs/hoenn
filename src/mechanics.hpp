@@ -1311,14 +1311,14 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
       v.kind = Volatiles::Kind::Rollout;
       v.lock = uint8_t(count + 1);
       v.locked_move = m.move;
-      if (v.lock < 5) v.renewed |= Volatiles::RENEWED_LOCK;
+      if (v.lock < 5) v.renewed_lock = true;
     }
     if (a.volatiles.defense_curl) h.power = uint16_t(h.power * 2);
   } else if (effect == Effect::FuryCutter) {
     ActivePokemon& a = side.active;
     if (a.volatiles.fury_cutter == 0) {
       a.volatiles.fury_cutter = 1;
-      a.volatiles.renewed |= Volatiles::RENEWED_FURY_CUTTER;
+      a.volatiles.renewed_fury_cutter = true;
     }
     h.power = uint16_t(std::min(get(m.move).bp << (a.volatiles.fury_cutter - 1), 160));
   }

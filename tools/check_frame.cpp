@@ -812,11 +812,13 @@ void check_baton_pass() {
     a.volatiles.escape_prevention = true; // Baton Pass ignores trapping
     // The passer's lock on the foe passes with its count; the foe's on the
     // passer stays on the foe but no longer applies.
-    a.volatiles.lock_on = uint8_t(2 | b.sides[1].order[0] << 2);
+    a.volatiles.lock_on = 2;
+    a.volatiles.lock_on_target = b.sides[1].order[0];
     a.volatiles.infatuated = true;
     b.sides[0].get(1).status = Status::tox();
     a.volatiles.status_counter = 3;
-    b.sides[1].active.volatiles.lock_on = uint8_t(2 | b.sides[0].order[0] << 2);
+    b.sides[1].active.volatiles.lock_on = 2;
+    b.sides[1].active.volatiles.lock_on_target = b.sides[0].order[0];
     Observed o{};
     o.chance.durations.p1.confusion = 2;
     o.calc.overrides.p1.confusion = Optional::False;
@@ -836,9 +838,10 @@ void check_baton_pass() {
     // Confusion stepped once, on Baton Pass itself.
     CHECK(in.volatiles.confusion == 2 && o.chance.durations.p1.confusion == 3);
     CHECK(in.volatiles.focus_energy && in.volatiles.escape_prevention);
-    CHECK(in.volatiles.lock_on == uint8_t(1 | b.sides[1].order[0] << 2));
+    CHECK(in.volatiles.lock_on == 1 &&
+          in.volatiles.lock_on_target == b.sides[1].order[0]);
     CHECK(!in.volatiles.infatuated && in.volatiles.status_counter == 0);
-    CHECK(b.sides[1].active.volatiles.lock_on % 4 == 1);
+    CHECK(b.sides[1].active.volatiles.lock_on == 1);
     CHECK(!detail::locked_on(b, Player::P2));
     // The foe's Splash ran after the switch.
     CHECK(b.sides[1].get(1).moves[0].pp == max_pp(Move::Splash) - 1);

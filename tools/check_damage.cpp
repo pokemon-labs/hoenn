@@ -78,7 +78,7 @@ void switch_in(Side& side) {
   for (int i = 0; i < 4; i++) a.moves[i] = p.moves[i];
 }
 
-void set_flags(Volatiles& v, Move& locked, std::string_view flags) {
+void set_flags(Volatiles& v, std::string_view flags) {
   v.flash_fire = has(flags, "flashfire");
   v.charged_up = has(flags, "charge");
   v.mud_sport = has(flags, "mudsport");
@@ -92,7 +92,7 @@ void set_flags(Volatiles& v, Move& locked, std::string_view flags) {
     if (has(flags, flag)) {
       v.kind = kind;
       v.lock = 1;
-      locked = move;
+      v.locked_move = move;
     }
   }
 }
@@ -154,8 +154,8 @@ int main() {
     if (c.reflect) def.conditions.reflect = 5;
     if (c.light_screen) def.conditions.light_screen = 5;
     if (c.attacker_hp != 0) att.get(1).hp = uint16_t(c.attacker_hp);
-    set_flags(att.active.volatiles, att.active.volatiles.locked_move, c.attacker_flags);
-    set_flags(def.active.volatiles, def.active.volatiles.locked_move, c.defender_flags);
+    set_flags(att.active.volatiles, c.attacker_flags);
+    set_flags(def.active.volatiles, c.defender_flags);
     if (!b.valid()) {
       std::printf("%s: invalid battle\n", c.name);
       failures++;
