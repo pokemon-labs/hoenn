@@ -550,25 +550,43 @@ struct Pokemon {
 // (decision 6).
 struct Volatiles {
   // status2
+  // What the user's own moves left on it, one at a time: every move attempt
+  // ends Rage, Destiny Bond and Grudge (cancel()), and the others force the
+  // attempts until they end, so no move can start one while another holds.
+  // From Charge on, STATUS2_MULTIPLETURNS, with locked_move.
+  enum class Kind : uint8_t {
+    None,
+    Rage,        // STATUS2_RAGE
+    DestinyBond, // STATUS2_DESTINY_BOND
+    Grudge,      // STATUS3_GRUDGE
+    Recharge,    // STATUS2_RECHARGE
+    Charge,      // a two-turn move's first turn
+    OnAir,       // STATUS3_ON_AIR: Fly's or Bounce's
+    Underground, // STATUS3_UNDERGROUND
+    Underwater,  // STATUS3_UNDERWATER
+    Thrash,      // STATUS2_LOCK_CONFUSE
+    Uproar,      // STATUS2_UPROAR
+    Rollout,     // Rollout and Ice Ball
+    Bide,        // STATUS2_BIDE
+  };
+  Kind kind;
+  // The kind's counter, 0 for the first four. Recharge and the charges: the
+  // turns left, 1-2, as Showdown's mustrecharge and twoturnmove duration 2.
+  // Thrash: Showdown's lockedmove trueDuration, 1-3. Hidden. Uproar: its
+  // duration left, 1-5. Hidden. Rollout: Showdown's hitCount, 1-5. Bide: its
+  // duration left, 1-3.
+  uint8_t lock;
   uint8_t confusion;      // STATUS2_CONFUSION, 0-5. Hidden. Baton Pass keeps.
-  uint8_t uproar;         // STATUS2_UPROAR: Showdown's duration left, 0-5. Hidden.
-  uint8_t bide;           // STATUS2_BIDE: Showdown's duration left, 0-3.
-  uint8_t thrash;         // STATUS2_LOCK_CONFUSE: Showdown's lockedmove
-                          // trueDuration, 0-3. Hidden.
   uint8_t wrapped;        // STATUS2_WRAPPED, 0-6. Hidden. The wrapper is the foe.
   // The binder has left (switched out or fainted) since: Showdown's
   // partiallytrapped stays until the victim's next residual, where it ends,
   // but no longer traps (its source isn't active). See Stage::Bind.
   bool wrapper_gone;
   bool flinched;          // STATUS2_FLINCHED
-  bool multiple_turns;    // STATUS2_MULTIPLETURNS, with locked_move
   bool infatuated;        // STATUS2_INFATUATION, with the foe
   bool focus_energy;      // STATUS2_FOCUS_ENERGY. Baton Pass keeps.
   bool transformed;       // STATUS2_TRANSFORMED
-  bool recharge;          // STATUS2_RECHARGE, with recharge_timer
-  bool rage;              // STATUS2_RAGE
   bool substitute;        // STATUS2_SUBSTITUTE, with substitute_hp. Baton Pass keeps.
-  bool destiny_bond;      // STATUS2_DESTINY_BOND
   bool escape_prevention; // STATUS2_ESCAPE_PREVENTION, by the foe. Baton Pass keeps.
   bool nightmare;         // STATUS2_NIGHTMARE
   bool cursed;            // STATUS2_CURSED. Baton Pass keeps.
@@ -581,15 +599,13 @@ struct Volatiles {
   uint8_t lock_on;
   uint8_t yawn;           // STATUS3_YAWN, 0-2
   bool leech_seed;        // STATUS3_LEECHSEED. Baton Pass keeps.
-  bool perish_song;       // STATUS3_PERISH_SONG, with perish_song_timer. Baton Pass keeps.
-  bool on_air;            // STATUS3_ON_AIR
-  bool underground;       // STATUS3_UNDERGROUND
-  bool underwater;        // STATUS3_UNDERWATER
+  // STATUS3_PERISH_SONG: Showdown's perishsong duration, 0 off, else 1-4.
+  // Baton Pass keeps.
+  uint8_t perish_song;
   bool minimized;         // STATUS3_MINIMIZED
-  bool charged_up;        // STATUS3_CHARGED_UP, with charge_timer
+  bool charged_up;        // STATUS3_CHARGED_UP; Showdown's Charge has no timer
   bool rooted;            // STATUS3_ROOTED (Ingrain). Baton Pass keeps.
   bool imprisoned_others; // STATUS3_IMPRISONED_OTHERS
-  bool grudge;            // STATUS3_GRUDGE
   bool mud_sport;         // STATUS3_MUDSPORT. Baton Pass keeps.
   bool water_sport;       // STATUS3_WATERSPORT. Baton Pass keeps.
   // RESOURCE_FLAG_FLASH_FIRE
@@ -609,8 +625,14 @@ struct Volatiles {
   Move last_used_move;
   Move last_taken_move;     // lastTakenMove: Mirror Move
   Type last_used_type;
-  // DisableStruct and status1's counter
-  uint8_t toxic;            // STATUS1_TOXIC_COUNTER, 0-15; resets on switch-in
+  // DisableStruct and status1's counter. While badly poisoned, the toxic
+  // counter (STATUS1_TOXIC_COUNTER, 0-15; resets on switch-in). While asleep,
+  // Showdown's gen3 skippedTime: move attempts spent on Sleep Talk or Snore
+  // since the last that did nothing, 0-4; the cartridge writes the sleep
+  // counter back to the party only when the canceler stops the move or the
+  // Pokémon wakes (util:2259), so a switch-out gives these back. Every major
+  // status and Rest zero it, and so does waking.
+  uint8_t status_counter;
   uint8_t substitute_hp;    // max HP / 4 fits. Baton Pass keeps.
   uint8_t disable_timer;    // 0-6. Hidden.
   uint8_t encore_timer;     // 0-6. Hidden.
@@ -618,21 +640,12 @@ struct Volatiles {
   uint8_t protect_uses;     // unbounded in the decomp: saturate
   uint8_t stall;            // Showdown's stall duration, 0-2 (protect())
   uint8_t stockpile;        // 0-3
-  uint8_t perish_song_timer;// 0-3. Baton Pass keeps.
   uint8_t fury_cutter;      // Showdown's furycutter: 0 off, else the power
                             // multiplier's log2 + 1, 1-5
-  uint8_t rollout;          // Showdown's rollout hitCount, 0-5
-  uint8_t charge_timer;     // 0-2; unused: Showdown's Charge has no timer
   uint8_t taunt;            // 0-2
   uint8_t first_turn;       // isFirstTurn, 0-2 (decision 14)
-  uint8_t recharge_timer;   // 0-2; also a two-turn move's charge (turn_cleanup)
   uint8_t mimicked;         // mimickedMoves: a 4-bit mask of move slots
   bool truant;              // truantCounter
-  // Showdown's gen3 skippedTime: move attempts spent asleep on Sleep Talk or
-  // Snore since the last that did nothing, 0-4. The cartridge writes the
-  // sleep counter back to the party only when the canceler stops the move
-  // or the Pokémon wakes (util:2259), so a switch-out gives these back.
-  uint8_t sleep_skipped;
   // Showdown's activeMoveActions, 0-2 (saturating): move actions since the
   // switch-in, counted as each starts (runMove), so an action a faint
   // cancelled doesn't count. Fake Out fails above 1.
@@ -654,9 +667,34 @@ struct Volatiles {
   constexpr bool trapped() const {
     return (wrapped != 0 && !wrapper_gone) || escape_prevention;
   }
+  // STATUS2_MULTIPLETURNS
+  constexpr bool multiple_turns() const { return kind >= Kind::Charge; }
+  // A two-turn move's charge.
+  constexpr bool charging() const {
+    return kind >= Kind::Charge && kind <= Kind::Underwater;
+  }
   // STATUS3_SEMI_INVULNERABLE
   constexpr bool semi_invulnerable() const {
-    return on_air || underground || underwater;
+    return kind >= Kind::OnAir && kind <= Kind::Underwater;
+  }
+  // The counter's range for the kind.
+  constexpr bool lock_valid() const {
+    switch (kind) {
+    case Kind::None:
+    case Kind::Rage:
+    case Kind::DestinyBond:
+    case Kind::Grudge: return lock == 0;
+    case Kind::Recharge:
+    case Kind::Charge:
+    case Kind::OnAir:
+    case Kind::Underground:
+    case Kind::Underwater: return lock >= 1 && lock <= 2;
+    case Kind::Thrash:
+    case Kind::Bide: return lock >= 1 && lock <= 3;
+    case Kind::Uproar:
+    case Kind::Rollout: return lock >= 1 && lock <= 5;
+    }
+    return false;
   }
 
   constexpr bool valid() const {
@@ -665,15 +703,15 @@ struct Volatiles {
                    last_taken_move}) {
       if (!detail::valid(m)) return false;
     }
-    return confusion <= 5 && uproar <= 5 && bide <= 3 && thrash <= 3 &&
+    if (kind >= Kind::Recharge && locked_move == Move::None) return false;
+    return lock_valid() && confusion <= 5 &&
            wrapped <= 6 && (!wrapper_gone || wrapped != 0) && (lock_on == 0 || (lock_on % 4 != 0 && lock_on % 4 <= 2 && lock_on >> 2 >= 1 && lock_on >> 2 <= 6)) && yawn <= 2 &&
-           (on_air + underground + underwater) <= 1 &&
            detail::valid(last_used_type) &&
-           toxic <= MAX_TOXIC && sleep_skipped <= Status::MAX_SLEEP - 1 &&
+           status_counter <= MAX_TOXIC &&
            disable_timer <= 6 && encore_timer <= 6 && encored_slot <= 3 &&
-           stockpile <= 3 && perish_song_timer <= 3 && fury_cutter <= 5 &&
-           rollout <= 5 && charge_timer <= 2 && taunt <= 2 &&
-           first_turn <= 2 && recharge_timer <= 2 && mimicked <= 0xF &&
+           stockpile <= 3 && perish_song <= 4 && fury_cutter <= 5 &&
+           taunt <= 2 &&
+           first_turn <= 2 && mimicked <= 0xF &&
            move_actions <= 2 && renewed <= 3 && last_taken_from <= 6 &&
            stall <= 2;
   }
@@ -789,6 +827,11 @@ struct Side {
       if (!p.valid()) return false;
     }
     if (get(1).species == Species::None) return false;
+    const uint8_t counter = active.volatiles.status_counter;
+    if (get(1).status.asleep() ? counter > Status::MAX_SLEEP - 1
+                               : counter != 0 && !get(1).status.badly_poisoned()) {
+      return false;
+    }
     return active.valid() && conditions.valid() &&
            detail::valid(future_sight_move) && detail::valid(recycle_item) &&
            (conditions.future_sight == 0) == (future_sight_move == Move::None);
@@ -848,13 +891,13 @@ struct Battle {
 static_assert(sizeof(Stats) == 12);
 static_assert(sizeof(MoveSlot) == 4);
 static_assert(sizeof(Pokemon) == 42);
-static_assert(sizeof(Volatiles) == 80);
+static_assert(sizeof(Volatiles) == 68);
 static_assert(sizeof(Boosts) == 7);
-static_assert(sizeof(ActivePokemon) == 124);
+static_assert(sizeof(ActivePokemon) == 112);
 static_assert(sizeof(SideConditions) == 9);
-static_assert(sizeof(Side) == 400);
+static_assert(sizeof(Side) == 388);
 static_assert(sizeof(Field) == 3);
-static_assert(sizeof(Battle) == 824);
+static_assert(sizeof(Battle) == 800);
 
 static_assert(std::is_trivially_copyable_v<Battle>);
 static_assert(std::is_trivial_v<Battle> && std::is_standard_layout_v<Battle>);

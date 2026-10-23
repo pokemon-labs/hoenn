@@ -413,7 +413,7 @@ constexpr VolatileName VOLATILES[] = {
     {"disable", [](const ActivePokemon& a) { return a.volatiles.disabled_move != Move::None; }},
     {"focusenergy", [](const ActivePokemon& a) { return a.volatiles.focus_energy; }},
     {"ingrain", [](const ActivePokemon& a) { return a.volatiles.rooted; }},
-    {"perishsong", [](const ActivePokemon& a) { return a.volatiles.perish_song; }},
+    {"perishsong", [](const ActivePokemon& a) { return a.volatiles.perish_song != 0; }},
     {"curse", [](const ActivePokemon& a) { return a.volatiles.cursed; }},
     {"nightmare", [](const ActivePokemon& a) { return a.volatiles.nightmare; }},
     {"yawn", [](const ActivePokemon& a) { return a.volatiles.yawn != 0; }},
@@ -425,25 +425,25 @@ constexpr VolatileName VOLATILES[] = {
     {"foresight", [](const ActivePokemon& a) { return a.volatiles.foresight; }},
     {"torment", [](const ActivePokemon& a) { return a.volatiles.torment; }},
     {"charge", [](const ActivePokemon& a) { return a.volatiles.charged_up; }},
-    {"grudge", [](const ActivePokemon& a) { return a.volatiles.grudge; }},
-    {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.recharge; }},
+    {"grudge", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Grudge; }},
+    {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Recharge; }},
     // Step 5 group 4: the locked moves and Rage.
     {"lockedmove", [](const ActivePokemon& a) {
-       return a.volatiles.multiple_turns && get(a.volatiles.locked_move).effect == Effect::Rampage;
+       return a.volatiles.kind == Volatiles::Kind::Thrash;
      }},
-    {"uproar", [](const ActivePokemon& a) { return a.volatiles.uproar != 0; }},
-    {"bide", [](const ActivePokemon& a) { return a.volatiles.bide != 0; }},
-    {"rollout", [](const ActivePokemon& a) { return a.volatiles.rollout != 0 && a.volatiles.locked_move == Move::Rollout; }},
-    {"iceball", [](const ActivePokemon& a) { return a.volatiles.rollout != 0 && a.volatiles.locked_move == Move::IceBall; }},
+    {"uproar", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Uproar; }},
+    {"bide", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Bide; }},
+    {"rollout", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Rollout && a.volatiles.locked_move == Move::Rollout; }},
+    {"iceball", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Rollout && a.volatiles.locked_move == Move::IceBall; }},
     {"furycutter", [](const ActivePokemon& a) { return a.volatiles.fury_cutter != 0; }},
-    {"rage", [](const ActivePokemon& a) { return a.volatiles.rage; }},
+    {"rage", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Rage; }},
     // The semi-invulnerable turn, by the move's own volatile. Not
     // twoturnmove: Showdown keeps it until the residuals after the second
     // turn, so a request in between would differ.
-    {"fly", [](const ActivePokemon& a) { return a.volatiles.on_air && a.volatiles.locked_move == Move::Fly; }},
-    {"bounce", [](const ActivePokemon& a) { return a.volatiles.on_air && a.volatiles.locked_move == Move::Bounce; }},
-    {"dig", [](const ActivePokemon& a) { return a.volatiles.underground; }},
-    {"dive", [](const ActivePokemon& a) { return a.volatiles.underwater; }},
+    {"fly", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::OnAir && a.volatiles.locked_move == Move::Fly; }},
+    {"bounce", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::OnAir && a.volatiles.locked_move == Move::Bounce; }},
+    {"dig", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Underground; }},
+    {"dive", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Underwater; }},
 };
 
 // The active Pokémon's boosts and guarded volatiles against Showdown's.

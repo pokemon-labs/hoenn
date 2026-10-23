@@ -316,12 +316,10 @@ constexpr void turn_cleanup(Battle& battle) {
     Side& side = battle.side(p);
     ActivePokemon& a = side.active;
     if (a.volatiles.first_turn != 0) a.volatiles.first_turn--;
-    if (a.volatiles.recharge_timer != 0 && --a.volatiles.recharge_timer == 0) {
-      a.volatiles.recharge = false;
-      // A charge whose second turn never came ends with the turn, as Showdown's
-      // twoturnmove (duration 2); the decomp keeps the lock.
-      if (two_turn(get(a.volatiles.locked_move).effect)) end_charge(a.volatiles);
-    }
+    // A charge whose second turn never came ends with the turn, as Showdown's
+    // twoturnmove (duration 2); the decomp keeps the lock.
+    Volatiles& v = a.volatiles;
+    if ((v.kind == Volatiles::Kind::Recharge || v.charging()) && --v.lock == 0) end_kind(v);
     if (a.volatiles.substitute_hp == 0) a.volatiles.substitute = false;
     // Showdown's endTurn drops an attackedBy entry whose source isn't active
     // (sim/battle.ts:1707).
@@ -389,9 +387,10 @@ constexpr void faint_target(Battle& battle, Player player, Move used, bool& grud
                             uint16_t& bonded_hp, O& options) {
   const Player defender = foe(player);
   if (!battle.side(defender).get(1).fainted()) return;
-  const bool bond = battle.side(defender).active.volatiles.destiny_bond;
+  const Volatiles::Kind kind = battle.side(defender).active.volatiles.kind;
+  const bool bond = kind == Volatiles::Kind::DestinyBond;
   if (bond) protocol::faint(options.log, protocol::ident(battle, defender), true);
-  if (battle.side(defender).active.volatiles.grudge &&
+  if (kind == Volatiles::Kind::Grudge &&
       get(used).effect != Effect::Explosion) {
     const ActivePokemon& a = battle.side(player).active;
     if (const uint8_t s = slot_of(a, used); s != NO_SLOT && a.moves[s].pp != 0) {
@@ -524,7 +523,7 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
   }
   // Showdown's gen3 skippedTime (ENGINE.md, field map): the Sleep Talk and
   // Snore turns go back on the sleep counter.
-  if (const uint8_t k = side.active.volatiles.sleep_skipped; k != 0 && out.status.asleep()) {
+  if (const uint8_t k = side.active.volatiles.status_counter; k != 0 && out.status.asleep()) {
     assert(out.status.sleep() + k <= Status::MAX_SLEEP);
     out.status.bits = uint8_t(out.status.bits + k);
     if constexpr (CHANCE<O>) {
@@ -704,16 +703,13 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
     return false;
   };
   // Showdown's rage onBeforeMove (priority 100) ends Rage at any move attempt;
-  // the decomp's waits for a turn without it.
-  v.rage = false;
-  // CANCELER_FLAGS
-  v.destiny_bond = false;
-  v.grudge = false;
+  // the decomp's waits for a turn without it. CANCELER_FLAGS ends Destiny Bond
+  // and Grudge.
+  if (v.kind <= Volatiles::Kind::Grudge) end_kind(v);
 
   // CANCELER_RECHARGE
-  if (v.recharge) {
-    v.recharge = false;
-    v.recharge_timer = 0;
+  if (v.kind == Volatiles::Kind::Recharge) {
+    end_kind(v);
     return stop(protocol::Cant::Recharge);
   }
 
@@ -737,11 +733,11 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
     if (woke) {
       wake(battle, player, options);
     } else if (m.move != Move::Snore && m.move != Move::SleepTalk) {
-      v.sleep_skipped = 0;
+      v.status_counter = 0;
       return stop(protocol::Cant::Sleep);
     } else {
       protocol::cant(options.log, id, protocol::Cant::Sleep, m.move);
-      v.sleep_skipped++;
+      v.status_counter++;
     }
   }
 
@@ -818,9 +814,9 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
 
   // CANCELER_BIDE, as Showdown's gen3 onBeforeMove: at 2 only -activate; at 1
   // it ends, and fails if nothing took HP from it, else releases (bide()).
-  if (v.bide != 0) {
-    assert(m.move == Move::Bide && v.bide <= 2);
-    if (v.bide == 2) {
+  if (v.kind == Volatiles::Kind::Bide) {
+    assert(m.move == Move::Bide && v.lock <= 2);
+    if (v.lock == 2) {
       protocol::activate(options.log, id, protocol::Activate::Bide);
       m.unable = true;
       return false;
@@ -846,7 +842,7 @@ constexpr bool cancel(Battle& battle, Player player, MoveState& m, O& options) {
 
   // No PP left (bs1:3556): Spite or Pressure took the last after selection.
   if (m.slot != NO_SLOT && a.moves[m.slot].pp == 0 &&
-      m.move != Move::Struggle && !v.multiple_turns) {
+      m.move != Move::Struggle && !v.multiple_turns()) {
     protocol::cant(options.log, id, protocol::Cant::PP, m.move);
     m.attackstring = true;
     m.result |= MoveResult::MISSED;
@@ -972,7 +968,6 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
   ActivePokemon& a = side.active;
   Side& target_side = m.self ? side : battle.side(foe(player));
   ActivePokemon& t = target_side.active;
-  const bool no_effect = m.result & MoveResult::NO_EFFECT;
 
   // MOVEEND_RAGE, DEFROST and ON_DAMAGE_ABILITIES run in the hit (rage(),
   // contact()), as Showdown's onHit and DamagingHit.
@@ -995,11 +990,11 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
     a.volatiles.choice_move = m.chosen;
   }
 
-  // MOVEEND_ATTACKER_VISIBLE: a move that failed or was stopped ends a
-  // semi-invulnerable turn.
-  if (no_effect || m.unable) {
-    a.volatiles.on_air = a.volatiles.underground = a.volatiles.underwater = false;
-  }
+  // MOVEEND_ATTACKER_VISIBLE, which ends a semi-invulnerable turn when the
+  // move failed or was stopped, has nothing to do: the charge turn returns
+  // before either, and the second turn and the canceler end the charge.
+  assert(!((m.result & MoveResult::NO_EFFECT) || m.unable) ||
+         !a.volatiles.semi_invulnerable());
 
   // Showdown's AfterMove comes before the item cures.
   after_move(battle, player, m, options);
@@ -1096,8 +1091,8 @@ constexpr bool charges(Battle& battle, Player player, MoveState& m, O& options) 
   Volatiles& v = a.volatiles;
   const Effect effect = get(m.move).effect;
   const ID id = protocol::ident(battle, player);
-  if (v.multiple_turns) {
-    end_charge(v);
+  if (v.charging()) {
+    end_kind(v);
     m.no_pp = true;
     return false;
   }
@@ -1112,15 +1107,15 @@ constexpr bool charges(Battle& battle, Player player, MoveState& m, O& options) 
   protocol::prepare(options.log, id, m.move);
   pp_reduce(battle, player, m);
   if (effect == Effect::SkullBash) protocol::boost(options.log, id, DEF, raise(a, DEF, 1, m), false);
-  v.multiple_turns = true;
+  using K = Volatiles::Kind;
+  assert(v.kind == K::None);
+  v.kind = effect != Effect::SemiInvulnerable ? K::Charge
+           : m.move == Move::Dig              ? K::Underground
+           : m.move == Move::Dive             ? K::Underwater
+                                              : K::OnAir;
+  assert(v.kind != K::OnAir || m.move == Move::Fly || m.move == Move::Bounce);
+  v.lock = 2;
   v.locked_move = m.move;
-  v.recharge_timer = 2;
-  if (effect == Effect::SemiInvulnerable) {
-    v.on_air = m.move == Move::Fly || m.move == Move::Bounce;
-    v.underground = m.move == Move::Dig;
-    v.underwater = m.move == Move::Dive;
-    assert(v.semi_invulnerable());
-  }
   return true;
 }
 
@@ -1308,14 +1303,15 @@ constexpr void hit(Battle& battle, Player player, MoveState& m, O& options) {
   // its count.
   if (effect == Effect::Rollout) {
     ActivePokemon& a = side.active;
-    h.power = uint16_t(get(m.move).bp << a.volatiles.rollout);
+    Volatiles& v = a.volatiles;
+    const uint8_t count = v.kind == Volatiles::Kind::Rollout ? v.lock : 0;
+    h.power = uint16_t(get(m.move).bp << count);
     if (!side.get(1).status.asleep()) {
-      a.volatiles.rollout++;
-      if (a.volatiles.rollout < 5) {
-        a.volatiles.renewed |= Volatiles::RENEWED_LOCK;
-        a.volatiles.multiple_turns = true;
-        a.volatiles.locked_move = m.move;
-      }
+      assert(v.kind == Volatiles::Kind::None || v.kind == Volatiles::Kind::Rollout);
+      v.kind = Volatiles::Kind::Rollout;
+      v.lock = uint8_t(count + 1);
+      v.locked_move = m.move;
+      if (v.lock < 5) v.renewed |= Volatiles::RENEWED_LOCK;
     }
     if (a.volatiles.defense_curl) h.power = uint16_t(h.power * 2);
   } else if (effect == Effect::FuryCutter) {
@@ -1404,7 +1400,7 @@ constexpr void execute(Battle& battle, Player player, MoveState& m, O& options) 
   // A move that calls another ends with the called move's moveend.
   if (m.delegated) return;
   moveend(battle, player, m, options);
-  if (m.release && battle.side(player).active.volatiles.bide != 0) {
+  if (m.release && battle.side(player).active.volatiles.kind == Volatiles::Kind::Bide) {
     end_bide(battle, player, options);
   }
   // Explosion and Memento: the user, at 0 HP since the move, faints now.
@@ -1504,10 +1500,12 @@ constexpr void script(Battle& battle, Player player, MoveState& m, O& options) {
   // Destiny Bond (bsc:8279) and Grudge never fail; the user's next move clears
   // them (cancel()).
   case Effect::DestinyBond:
-    battle.side(player).active.volatiles.destiny_bond = true;
+    assert(battle.side(player).active.volatiles.kind == Volatiles::Kind::None);
+    battle.side(player).active.volatiles.kind = Volatiles::Kind::DestinyBond;
     return protocol::single_move(options.log, log(), protocol::SingleMove::DestinyBond);
   case Effect::Grudge:
-    battle.side(player).active.volatiles.grudge = true;
+    assert(battle.side(player).active.volatiles.kind == Volatiles::Kind::None);
+    battle.side(player).active.volatiles.kind = Volatiles::Kind::Grudge;
     return protocol::single_move(options.log, log(), protocol::SingleMove::Grudge);
   case Effect::MagicCoat:
   case Effect::Snatch: return coat_or_snatch(battle, player, m, options);

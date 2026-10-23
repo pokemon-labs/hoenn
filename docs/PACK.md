@@ -12,7 +12,7 @@ bit-pack the live `Battle`. Both are dropped.
   profile now"). The battle, the tables and the log buffer fit in L1 even
   with two hyperthreads per core, so a smaller battle doesn't speed it up,
   and bitfields add a shift and mask to every access.
-- **Batched policy gradient** keeps N battles per thread; at 824 B they fit
+- **Batched policy gradient** keeps N battles per thread; at 800 B they fit
   in L2 until hundreds per thread.
 - **The split** would change every signature and add a second base pointer
   for no gain. If copying only the live bytes is ever wanted, order

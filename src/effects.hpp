@@ -62,12 +62,10 @@ constexpr bool multi_hit(Effect effect) {
          effect == Effect::Twineedle || effect == Effect::TripleKick;
 }
 
-// Ends a two-turn move's charge: its lock and its semi-invulnerable turn.
-constexpr void end_charge(Volatiles& v) {
-  v.multiple_turns = false;
-  v.on_air = false;
-  v.underground = false;
-  v.underwater = false;
+// Ends the user's kind (Volatiles::Kind) and its counter.
+constexpr void end_kind(Volatiles& v) {
+  v.kind = Volatiles::Kind::None;
+  v.lock = 0;
 }
 
 // Ends a binding on `a` and forgets its move.
@@ -80,7 +78,7 @@ constexpr void unbind(ActivePokemon& a) {
 // Charging, rampage, Bide, Rollout, Uproar and recharge: the only choice is
 // Move(0), the locked move (main:4160, util:107).
 constexpr bool forced(const ActivePokemon& active) {
-  return active.volatiles.multiple_turns || active.volatiles.recharge;
+  return active.volatiles.kind >= Volatiles::Kind::Recharge;
 }
 
 // Showdown's gen3 metronome flag: every cartridge move but
@@ -890,8 +888,7 @@ constexpr void lock_renew(Battle& battle, Player player) {
 template <typename O>
 constexpr void end_bide(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
-  a.volatiles.bide = 0;
-  a.volatiles.multiple_turns = false;
+  end_kind(a.volatiles);
   if (battle.side(player).get(1).fainted()) return;
   protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::BideSilent);
 }
@@ -903,8 +900,8 @@ template <typename O>
 constexpr void abort_move(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   Volatiles& v = a.volatiles;
-  if (v.multiple_turns && two_turn(get(v.locked_move).effect)) end_charge(v);
-  if (v.bide != 0) end_bide(battle, player, options);
+  if (v.charging()) end_kind(v);
+  if (v.kind == Volatiles::Kind::Bide) end_bide(battle, player, options);
 }
 
 // Showdown's arithmetic on JavaScript numbers (IEEE doubles, as C++'s).
@@ -957,7 +954,9 @@ constexpr bool invulnerable(const Battle& battle, Player player, const MoveState
                    e == Effect::Twister;
   const bool ground = e == Effect::Earthquake || e == Effect::Magnitude;
   const bool water = m.move == Move::Surf || m.move == Move::Whirlpool;
-  return (v.on_air && !air) || (v.underground && !ground) || (v.underwater && !water);
+  using K = Volatiles::Kind;
+  return (v.kind == K::OnAir && !air) || (v.kind == K::Underground && !ground) ||
+         (v.kind == K::Underwater && !water);
 }
 
 // The accuracy arithmetic from the move's accuracy `acc` on (accuracy()), for
@@ -1144,7 +1143,8 @@ constexpr void log_hit(const Battle& battle, Player player, const MoveState& m,
   // A move's KO, so Destiny Bond applies.
   if (mon.fainted()) {
     const Volatiles& v = battle.side(target).active.volatiles;
-    protocol::faint(options.log, protocol::ident(battle, target), v.destiny_bond);
+    protocol::faint(options.log, protocol::ident(battle, target),
+                    v.kind == Volatiles::Kind::DestinyBond);
   }
 }
 
@@ -1256,7 +1256,7 @@ constexpr bool spikes(Battle& battle, Player player, O& options) {
   }
   assert(layers <= 3);
   Pokemon& mon = side.get(1);
-  a.volatiles.destiny_bond = false;
+  if (a.volatiles.kind == Volatiles::Kind::DestinyBond) end_kind(a.volatiles);
   uint16_t damage = uint16_t(mon.stats.hp / ((5 - layers) * 2));
   if (damage == 0) damage = 1;
   mon.hp = mon.hp > damage ? uint16_t(mon.hp - damage) : 0;
@@ -1296,7 +1296,7 @@ constexpr void wake(Battle& battle, Player player, O& options) {
     protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Nightmare);
   }
   a.volatiles.nightmare = false;
-  a.volatiles.sleep_skipped = 0;
+  a.volatiles.status_counter = 0;
   if constexpr (CHANCE<O>) options.chance.durations.get(player).sleep[0] = 0;
 }
 
@@ -1329,7 +1329,7 @@ constexpr bool item_cure_held(Battle& battle, Player player, O& options) {
   case HoldEffect::CurePsn:
     if (!mon.status.poisoned()) return false;
     cure();
-    v.toxic = 0;
+    v.status_counter = 0;
     break;
   case HoldEffect::CureBrn:
     if (!mon.status.burned()) return false;
@@ -1359,7 +1359,7 @@ constexpr bool item_cure_held(Battle& battle, Player player, O& options) {
       mon.status = Status::none();
     }
     if (asleep) wake(battle, player, options);
-    v.toxic = 0;
+    v.status_counter = 0;
     unconfuse();
     break;
   }
@@ -1627,7 +1627,6 @@ constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
   n.cursed = v.cursed;
   n.leech_seed = v.leech_seed;
   n.perish_song = v.perish_song;
-  n.perish_song_timer = v.perish_song_timer;
   n.rooted = v.rooted;
   n.mud_sport = v.mud_sport;
   n.water_sport = v.water_sport;
@@ -1878,14 +1877,14 @@ constexpr void hurt_itself(Battle& battle, Player player, MoveState& m, O& optio
 // Whether an Uproar is going on. Showdown's blocks every sleep
 // (data/moves.ts:20253); the decomp spares Soundproof (bsc:6807), banned in OU.
 constexpr bool uproar(const Battle& battle) {
-  return battle.sides[0].active.volatiles.uproar != 0 ||
-         battle.sides[1].active.volatiles.uproar != 0;
+  return battle.sides[0].active.volatiles.kind == Volatiles::Kind::Uproar ||
+         battle.sides[1].active.volatiles.kind == Volatiles::Kind::Uproar;
 }
 
 // The uproar's -fail for a sleep it stops on p ([msg] if p is causing it).
 template <typename O>
 constexpr void uproar_stops(const Battle& battle, Player p, O& options) {
-  const bool own = battle.side(p).active.volatiles.uproar != 0;
+  const bool own = battle.side(p).active.volatiles.kind == Volatiles::Kind::Uproar;
   protocol::fail(options.log, protocol::ident(battle, p),
                  own ? protocol::Fail::UproarMsg : protocol::Fail::Uproar);
 }
@@ -1975,7 +1974,7 @@ constexpr void inflict(Battle& battle, Player target, Secondary s,
   case Secondary::Paralysis: status = Status::par(); break;
   default: assert(false && "not a major status");
   }
-  side.active.volatiles.toxic = 0;
+  side.active.volatiles.status_counter = 0;
   if (s != Secondary::Freeze && s != Secondary::Sleep) {
     m.synchronize = s;
     m.synchronized = target;
@@ -2377,6 +2376,7 @@ template <typename O> constexpr void ability_immunity_held(Battle& battle, O& op
       protocol::activate_ability(options.log, id, side.active.ability);
       protocol::cure_status(options.log, id, st);
       mon.status = Status::none();
+      v.status_counter = 0;
     };
     switch (side.active.ability) {
     case Ability::Immunity:
@@ -2546,7 +2546,7 @@ constexpr void rage_boost(Battle& battle, Player defender, O& options) {
 template <typename O>
 constexpr void rage(Battle& battle, Player player, const MoveState& m, O& options) {
   const Player defender = foe(player);
-  if (m.self || !m.damaged || !battle.side(defender).active.volatiles.rage ||
+  if (m.self || !m.damaged || battle.side(defender).active.volatiles.kind != Volatiles::Kind::Rage ||
       get(m.move).bp == 0 || battle.side(defender).get(1).fainted()) {
     return;
   }
@@ -2689,7 +2689,7 @@ constexpr bool present_heals(Battle& battle, Player player, MoveState& m, uint8_
     heal(target, target.stats.hp / 4u);
     protocol::heal(options.log, id, target);
     if (m.turn != nullptr) m.turn->hit[index(defender)] = true;
-    if (foe_side.active.volatiles.rage) rage_boost(battle, defender, options);
+    if (foe_side.active.volatiles.kind == Volatiles::Kind::Rage) rage_boost(battle, defender, options);
   }
   return true;
 }
@@ -2753,30 +2753,35 @@ constexpr void self_effects(Battle& battle, Player player, MoveState& m, O& opti
   Side& side = battle.side(player);
   ActivePokemon& a = side.active;
   const ID id = protocol::ident(battle, player);
+  using K = Volatiles::Kind;
   if (effect == Effect::Recharge) {
-    a.volatiles.recharge = true;
-    a.volatiles.recharge_timer = 2;
+    assert(a.volatiles.kind == K::None);
+    a.volatiles.kind = K::Recharge;
+    a.volatiles.lock = 2;
     a.volatiles.locked_move = m.move;
     protocol::must_recharge(options.log, id);
   } else if (effect == Effect::Rampage) {
-    if (a.volatiles.multiple_turns) {
+    if (a.volatiles.kind == K::Thrash) {
       assert(a.volatiles.locked_move == m.move);
       lock_renew(battle, player);
     } else {
-      a.volatiles.multiple_turns = true;
+      assert(a.volatiles.kind == K::None);
+      a.volatiles.kind = K::Thrash;
       a.volatiles.locked_move = m.move;
-      a.volatiles.thrash = uint8_t(2 + battle.rng.range(2));
+      a.volatiles.lock = uint8_t(2 + battle.rng.range(2));
       a.volatiles.renewed |= Volatiles::RENEWED_LOCK;
       if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 1;
     }
-  } else if (effect == Effect::Uproar && a.volatiles.uproar == 0) {
-    a.volatiles.uproar = uint8_t(2 + battle.rng.range(4));
-    a.volatiles.multiple_turns = true;
+  } else if (effect == Effect::Uproar && a.volatiles.kind != K::Uproar) {
+    assert(a.volatiles.kind == K::None);
+    a.volatiles.kind = K::Uproar;
+    a.volatiles.lock = uint8_t(2 + battle.rng.range(4));
     a.volatiles.locked_move = m.move;
     protocol::start(options.log, id, protocol::Start::Uproar);
     if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 1;
-  } else if (effect == Effect::Rage && !a.volatiles.rage) {
-    a.volatiles.rage = true;
+  } else if (effect == Effect::Rage && a.volatiles.kind != K::Rage) {
+    assert(a.volatiles.kind == K::None);
+    a.volatiles.kind = K::Rage;
     protocol::single_move(options.log, id, protocol::SingleMove::Rage);
   }
   if (effect == Effect::RapidSpin && !side.get(1).fainted()) {
@@ -2935,8 +2940,8 @@ constexpr StatusStop status_stop(const Battle& battle, Player player, Secondary 
       // An uproar's onAnySetStatus (a Condition) goes first if its holder is
       // the target or at least as fast (Speed, then subOrder).
       const Player target = foe(player);
-      const bool first = t.volatiles.uproar != 0 ||
-                         (battle.side(player).active.volatiles.uproar != 0 &&
+      const bool first = t.volatiles.kind == Volatiles::Kind::Uproar ||
+                         (battle.side(player).active.volatiles.kind == Volatiles::Kind::Uproar &&
                           speed(battle, player) >= speed(battle, target));
       return first ? StatusStop::Uproar : StatusStop::Ability;
     }
@@ -3035,7 +3040,7 @@ constexpr void rest(Battle& battle, Player player, MoveState& m, O& options) {
     return mark_failed(m);
   }
   mon.status = Status::slf(Status::REST_SLEEP);
-  side.active.volatiles.toxic = 0;
+  side.active.volatiles.status_counter = 0;
   mon.hp = mon.stats.hp;
   const ID id = protocol::ident(battle, player);
   protocol::status(options.log, id, mon.status, protocol::StatusSource::by_move(Move::Rest));
@@ -3606,9 +3611,8 @@ constexpr void perish_song(Battle& battle, Player player, MoveState& m,
     } else if (a.ability == Ability::Soundproof) {
       protocol::immune(options.log, id, protocol::Immune::Ability, Ability::Soundproof);
       result = true;
-    } else if (!a.volatiles.perish_song) {
-      a.volatiles.perish_song = true;
-      a.volatiles.perish_song_timer = 3;
+    } else if (a.volatiles.perish_song == 0) {
+      a.volatiles.perish_song = 4;
       protocol::start(options.log, id, protocol::Start::PerishSilent);
       result = true;
       started = true;
@@ -3779,7 +3783,7 @@ constexpr void refresh(Battle& battle, Player player, MoveState& m, O& options) 
   }
   protocol::cure_status(options.log, protocol::ident(battle, player), mon.status);
   mon.status = Status::none();
-  battle.side(player).active.volatiles.toxic = 0; // status1 holds the counter
+  battle.side(player).active.volatiles.status_counter = 0; // status1 holds the counter
 }
 
 // Heal Bell and Aromatherapy (bs1:1361, Cmd_healpartystatus, bsc:8370): the
@@ -3813,7 +3817,7 @@ constexpr void heal_bell(Battle& battle, Player player, MoveState& m,
     if (s == 1) {
       if (mon.status.asleep()) wake(battle, player, options);
       side.active.volatiles.nightmare = false;
-      side.active.volatiles.toxic = 0;
+      side.active.volatiles.status_counter = 0;
     } else if constexpr (CHANCE<O>) {
       options.chance.durations.get(player).sleep[s - 1] = 0;
     }
@@ -3852,9 +3856,10 @@ constexpr void bide(Battle& battle, Player player, MoveState& m, O& options) {
   }
   // Accuracy 100, so its own stages count, and Hustle's 0.8 (it's Physical).
   if (!hits_self(battle, player, m, true, options)) return;
-  a.volatiles.bide = 3;
+  assert(a.volatiles.kind == Volatiles::Kind::None);
+  a.volatiles.kind = Volatiles::Kind::Bide;
+  a.volatiles.lock = 3;
   a.volatiles.bide_damage = 0;
-  a.volatiles.multiple_turns = true;
   a.volatiles.locked_move = m.move;
   protocol::start(options.log, protocol::ident(battle, player), protocol::Start::Bide);
 }
@@ -4558,7 +4563,8 @@ constexpr Flow field_residuals(Battle& battle, uint32_t s1, uint32_t s2,
     const ActivePokemon& a = side.active;
     if (side.get(1).fainted()) continue;
     const bool immune =
-        a.volatiles.underground || a.volatiles.underwater ||
+        a.volatiles.kind == Volatiles::Kind::Underground ||
+        a.volatiles.kind == Volatiles::Kind::Underwater ||
         (weather == Weather::Sandstorm
              ? has_type(a, Type::Rock) || has_type(a, Type::Steel) ||
                    has_type(a, Type::Ground) || a.ability == Ability::SandVeil
@@ -4585,7 +4591,8 @@ constexpr uint32_t stage_damage(const Battle& battle, Player player, Stage stage
   switch (stage) {
   case Stage::Status:
     if (mon.status.badly_poisoned()) {
-      const uint32_t toxic = v.toxic != Volatiles::MAX_TOXIC ? v.toxic + 1u : v.toxic;
+      const uint32_t toxic =
+          v.status_counter != Volatiles::MAX_TOXIC ? v.status_counter + 1u : v.status_counter;
       return fraction(mon, 16) * toxic;
     }
     return mon.status.poisoned() || mon.status.burned() ? fraction(mon, 8) : 0;
@@ -4652,6 +4659,7 @@ template <typename O>
         protocol::activate_ability(options.log, id, Ability::ShedSkin);
         protocol::cure_status(options.log, id, mon.status);
         mon.status = Status::none();
+        v.status_counter = 0;
         if (asleep) wake(battle, player, options);
       }
       break;
@@ -4708,8 +4716,8 @@ template <typename O>
     // (at most 15) / 16; 1/8.
     const uint32_t n = stage_damage(battle, player, stage);
     if (n == 0) return std::nullopt;
-    if (mon.status.badly_poisoned() && v.toxic != Volatiles::MAX_TOXIC) {
-      v.toxic++;
+    if (mon.status.badly_poisoned() && v.status_counter != Volatiles::MAX_TOXIC) {
+      v.status_counter++;
     }
     return hurt(n, mon.status.burned() ? protocol::Damage::Burn : protocol::Damage::Poison);
   }
@@ -4766,15 +4774,15 @@ template <typename O>
   case Stage::Uproar: {
     // Showdown's gen4 uproar (subOrder 11): the hidden duration ticks, ending
     // at 0. The decomp also ends it if the user couldn't move (util:1647).
-    if (v.uproar == 0 || !alive()) return std::nullopt;
-    const bool ended = --v.uproar == 0;
+    if (v.kind != Volatiles::Kind::Uproar || !alive()) return std::nullopt;
+    const bool ended = --v.lock == 0;
     if constexpr (CHANCE<O>) {
       rolls::tick(options.chance.actions.get(player).uproar,
                   options.chance.durations.get(player).attacking, ended, 2, 5, 1,
                   options);
     }
     if (ended) {
-      v.multiple_turns = false;
+      end_kind(v);
       protocol::end_effect(options.log, id, protocol::End::Uproar);
     } else {
       protocol::start(options.log, id, protocol::Start::UproarUpkeep);
@@ -4844,15 +4852,12 @@ template <typename O>
 constexpr void perish_count(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   Pokemon& mon = battle.side(player).get(1);
-  if (!a.volatiles.perish_song || mon.fainted()) return;
-  // Showdown's duration runs 4 to 0, so it prints the timer before this step.
+  if (a.volatiles.perish_song == 0 || mon.fainted()) return;
+  // Showdown's duration runs 4 to 0, printed after this step's decrement.
+  const uint8_t left = --a.volatiles.perish_song;
   protocol::start_count(options.log, protocol::ident(battle, player), protocol::Start::Perish,
-                        a.volatiles.perish_song_timer);
-  if (a.volatiles.perish_song_timer != 0) {
-    a.volatiles.perish_song_timer--;
-    return;
-  }
-  a.volatiles.perish_song = false;
+                        left);
+  if (left != 0) return;
   passive_damage(battle, player, mon.hp, options);
 }
 
@@ -4952,49 +4957,45 @@ constexpr void lock_residuals(Battle& battle, Player player, O& options) {
   ActivePokemon& a = side.active;
   Volatiles& v = a.volatiles;
   if (side.get(1).fainted()) return;
-  if (v.thrash != 0) {
+  using K = Volatiles::Kind;
+  if (v.kind == K::Thrash) {
     // trueDuration is public at the second residual: the lock goes on only at
     // 2, and ends in confusion only at 1. Recorded once, with 1/2; the count is
     // then untracked.
     if constexpr (CHANCE<O>) {
       uint8_t& c = options.chance.durations.get(player).attacking;
       if (c == 2) {
-        rolls::tick(options.chance.actions.get(player).thrash, c, v.thrash <= 1, 2, 3,
+        rolls::tick(options.chance.actions.get(player).thrash, c, v.lock <= 1, 2, 3,
                     1, options);
         c = 0;
       }
     }
-    if ((v.renewed & Volatiles::RENEWED_LOCK) && v.thrash >= 2) {
+    if ((v.renewed & Volatiles::RENEWED_LOCK) && v.lock >= 2) {
       if (side.get(1).status.asleep()) {
-        v.multiple_turns = false;
-        v.thrash = 0;
+        end_kind(v);
         if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 0;
       } else {
-        v.thrash--;
+        v.lock--;
         if constexpr (CHANCE<O>) {
           uint8_t& c = options.chance.durations.get(player).attacking;
           if (c != 0) c++;
         }
       }
     } else {
-      const bool fatigue = v.thrash <= 1;
-      v.multiple_turns = false;
-      v.thrash = 0;
+      const bool fatigue = v.lock <= 1;
+      end_kind(v);
       if constexpr (CHANCE<O>) options.chance.durations.get(player).attacking = 0;
       if (fatigue && v.confusion == 0 && a.ability != Ability::OwnTempo) {
         confuse(battle, player, options, protocol::Start::ConfusionFatigue);
       }
     }
   }
-  if (v.rollout != 0 && !(v.renewed & Volatiles::RENEWED_LOCK)) {
-    v.rollout = 0;
-    v.multiple_turns = false;
-  }
+  if (v.kind == K::Rollout && !(v.renewed & Volatiles::RENEWED_LOCK)) end_kind(v);
   if (v.fury_cutter != 0 && !(v.renewed & Volatiles::RENEWED_FURY_CUTTER)) {
     v.fury_cutter = 0;
   }
   v.renewed = 0;
-  if (v.bide != 0 && --v.bide == 0) end_bide(battle, player, options);
+  if (v.kind == K::Bide && --v.lock == 0) end_bide(battle, player, options);
 }
 
 // Disable's end, as Showdown's gen3, with no residual order

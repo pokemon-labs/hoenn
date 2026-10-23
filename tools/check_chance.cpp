@@ -240,8 +240,8 @@ void mask(Battle& battle) {
     Volatiles& v = a.volatiles;
     if (masked & CONFUSION) v.confusion = one(v.confusion);
     if (masked & BINDING) v.wrapped = one(v.wrapped);
-    if (masked & UPROAR) v.uproar = one(v.uproar);
-    if (masked & THRASH) v.thrash = one(v.thrash);
+    if ((masked & UPROAR) && v.kind == Volatiles::Kind::Uproar) v.lock = one(v.lock);
+    if ((masked & THRASH) && v.kind == Volatiles::Kind::Thrash) v.lock = one(v.lock);
     if (masked & DISABLE) a.volatiles.disable_timer = one(a.volatiles.disable_timer);
     if (masked & ENCORE) a.volatiles.encore_timer = one(a.volatiles.encore_timer);
   }

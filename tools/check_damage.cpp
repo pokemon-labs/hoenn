@@ -10,6 +10,7 @@
 #include <cstring>
 #include <span>
 #include <string_view>
+#include <tuple>
 
 #include "damage.hpp"
 #include "helpers.hpp"
@@ -83,12 +84,17 @@ void set_flags(Volatiles& v, Move& locked, std::string_view flags) {
   v.mud_sport = has(flags, "mudsport");
   v.water_sport = has(flags, "watersport");
   v.foresight = has(flags, "foresight");
-  v.underground = has(flags, "dig");
-  v.underwater = has(flags, "dive");
   v.minimized = has(flags, "minimize");
-  v.on_air = has(flags, "fly") || has(flags, "bounce");
-  if (has(flags, "fly")) locked = Move::Fly;
-  if (has(flags, "bounce")) locked = Move::Bounce;
+  using K = Volatiles::Kind;
+  for (const auto& [flag, kind, move] :
+       {std::tuple{"dig", K::Underground, Move::Dig}, std::tuple{"dive", K::Underwater, Move::Dive},
+        std::tuple{"fly", K::OnAir, Move::Fly}, std::tuple{"bounce", K::OnAir, Move::Bounce}}) {
+    if (has(flags, flag)) {
+      v.kind = kind;
+      v.lock = 1;
+      locked = move;
+    }
+  }
 }
 
 Weather weather(std::string_view w) {

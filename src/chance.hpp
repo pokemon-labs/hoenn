@@ -557,11 +557,10 @@ constexpr void randomize_hidden(Battle& battle, const Durations& durations) {
       v.wrapped = detail::resample(battle.rng, d.binding, 3, 6);
     }
     if (d.attacking != 0) {
-      assert(v.uproar == 0 || v.thrash == 0);
-      if (v.uproar != 0) {
-        v.uproar = detail::resample(battle.rng, d.attacking, 2, 5);
-      } else if (v.thrash != 0) {
-        v.thrash = detail::resample(battle.rng, d.attacking, 2, 3);
+      if (v.kind == Volatiles::Kind::Uproar) {
+        v.lock = detail::resample(battle.rng, d.attacking, 2, 5);
+      } else if (v.kind == Volatiles::Kind::Thrash) {
+        v.lock = detail::resample(battle.rng, d.attacking, 2, 3);
       }
     }
   }
@@ -587,8 +586,9 @@ constexpr void mask_hidden(Battle& battle) {
     const auto mask = [](uint8_t c) { return uint8_t(c != 0); };
     v.confusion = mask(v.confusion);
     v.wrapped = mask(v.wrapped);
-    v.uproar = mask(v.uproar);
-    v.thrash = mask(v.thrash);
+    if (v.kind == Volatiles::Kind::Uproar || v.kind == Volatiles::Kind::Thrash) {
+      v.lock = mask(v.lock);
+    }
     v.disable_timer = mask(v.disable_timer);
     v.encore_timer = mask(v.encore_timer);
   }

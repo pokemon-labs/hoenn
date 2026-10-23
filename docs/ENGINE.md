@@ -697,7 +697,8 @@ main = `src/battle_main.c`.
    (util:1533) bumps it only in `gBattleMons`, nothing writes it back while
    it's raised, and `Cmd_switchindataupdate` (bsc:4621) reloads status1 from
    the party. The sleep counter does persist: the canceler writes it back
-   (util:2259).
+   (util:2259). It is `Volatiles::status_counter`, which holds
+   `skippedTime` while asleep instead: the two statuses exclude each other.
 2. **No per-turn struct in `Battle`.** Per-turn state (`ProtectStruct`,
    `SpecialStatus`) is a local in `update`, zeroed at turn start and on
    resuming from a request.
@@ -782,11 +783,15 @@ main = `src/battle_main.c`.
 10. **Write-only fields are dropped:** every `*StartValue` in `DisableStruct`
     and `tauntTimer2` (only written: bsc:8008, 8040, 8524, 8550, 9104, 9161,
     main:3215). `Durations` does that bookkeeping.
-11. **Multi-turn state keeps the decomp's fields, with Showdown's
-    meanings:** `multiple_turns` (the lock) with `locked_move`, and
-    separate Thrash, Uproar, Bide, Rollout and Fury Cutter counters
-    holding Showdown's `trueDuration`, durations, `hitCount` and multiplier
-    (field map). `ActivePokemon::renewed` stands for Showdown's duration 2
+11. **Multi-turn state is one `Volatiles::Kind` and one counter, with
+    Showdown's meanings:** what the user's own moves left on it (Rage,
+    Destiny Bond, Grudge, recharge, a charge and its semi-invulnerable
+    turn, Thrash, Uproar, Rollout, Bide) holds one at a time, since every
+    move attempt ends the first three and the others force the attempts.
+    From `Charge` on it is the decomp's `multiple_turns`, with `locked_move`.
+    `lock` holds the kind's Showdown `trueDuration`, duration or `hitCount`;
+    Fury Cutter keeps its own multiplier, since it overlaps a lock for the
+    turn after it (field map). `ActivePokemon::renewed` stands for Showdown's duration 2
     of the volatiles a turn's move renews (lockedmove, rollout,
     furycutter). A move the canceler stops loses only a two-turn charge
     and Bide (`abort_move`, Showdown's MoveAborted); the other locks run
@@ -812,7 +817,7 @@ main = `src/battle_main.c`.
     2026-10-19). No bound is derived; Bide's sum saturates. Packing leaves
     them as they are.
 
-Packing comes last: natural alignment for now (`Battle` is 824 B against a
+Packing comes last: natural alignment for now (`Battle` is 800 B against a
 ~700 B target). Revisit padding and `has_unique_object_representations_v`
 once the layout is settled.
 
@@ -847,20 +852,20 @@ the changes.
 |---|---|---|---|---|---|
 | `CONFUSION` (3 bits) | `confusion` | u8 0–5 | **BP** | yes | set 2–5 (bsc:2541); steps at the canceler (util:2145) |
 | `FLINCHED` | `flinched` | bool | | | cleared at turn start |
-| `UPROAR` (3 bits) | `uproar` | u8 0–5 | | yes | Showdown's duration: set 2–5 (gen3 mod; bsc:2573 agrees); steps at end of turn |
+| `UPROAR` (3 bits) | `kind` `Uproar`, `lock` | u8 1–5 | | yes | Showdown's duration: set 2–5 (gen3 mod; bsc:2573 agrees); steps at end of turn |
 | `UNUSED` | — | | | | dropped |
-| `BIDE` (2 bits) | `bide` | u8 0–3 | | | Showdown's duration: set 3, −1 per residual; releases at 1 (bsc:7126 sets 2) |
-| `LOCK_CONFUSE` (2 bits) | `thrash` | u8 0–3 | | yes | Showdown's lockedmove `trueDuration`: set 2–3; steps at a residual that renews the lock |
-| `MULTIPLETURNS` | `multiple_turns` | bool | | | the lock, with `locked_move` (decision 11) |
+| `BIDE` (2 bits) | `kind` `Bide`, `lock` | u8 1–3 | | | Showdown's duration: set 3, −1 per residual; releases at 1 (bsc:7126 sets 2) |
+| `LOCK_CONFUSE` (2 bits) | `kind` `Thrash`, `lock` | u8 1–3 | | yes | Showdown's lockedmove `trueDuration`: set 2–3; steps at a residual that renews the lock |
+| `MULTIPLETURNS` | `multiple_turns()` | `kind` ≥ `Charge` | | | the lock, with `locked_move` (decision 11) |
 | `WRAPPED` (3 bits) | `wrapped` | u8 0–6 | | yes | set 3–6 (bsc:2618); steps at end of turn (util:1591). Wrapper is the foe |
 | | `wrapper_gone` | bool | | | Showdown's partiallytrapped whose source has left: no longer traps, ends at the victim's next residual (`Stage::Bind`) |
 | `INFATUATION` (4 bits) | `infatuated` | bool | | | cleared on any foe switch-out |
 | `FOCUS_ENERGY` | `focus_energy` | bool | **BP** | | |
 | `TRANSFORMED` | `transformed` | bool | | | blocks the PP write-back and Sketch |
-| `RECHARGE` | `recharge` | bool | | | with `recharge_timer` |
-| `RAGE` | `rage` | bool | | | cleared at the user's next move attempt, as Showdown (the decomp: turn start unless Rage was chosen) |
+| `RECHARGE` | `kind` `Recharge`, `lock` | u8 1–2 | | | `lock` is the decomp's `rechargeTimer`: set 2 (bsc:2730) |
+| `RAGE` | `kind` `Rage` | | | | cleared at the user's next move attempt, as Showdown (the decomp: turn start unless Rage was chosen) |
 | `SUBSTITUTE` | `substitute` | bool | **BP** | | with `substitute_hp` |
-| `DESTINY_BOND` | `destiny_bond` | bool | | | |
+| `DESTINY_BOND` | `kind` `DestinyBond` | | | | cleared at the user's next move attempt |
 | `ESCAPE_PREVENTION` | `escape_prevention` | bool | **BP** | | cleared when the foe switches out normally, not on its Baton Pass |
 | `NIGHTMARE` | `nightmare` | bool | | | |
 | `CURSED` | `cursed` | bool | **BP** | | |
@@ -875,14 +880,14 @@ the changes.
 | `LEECHSEED_BATTLER` | — | | | dropped: the drain heals the foe's active Pokémon (util:1507) |
 | `LEECHSEED` | `leech_seed` | bool | **BP** | |
 | `ALWAYS_HITS` (2 bits) | `lock_on` | u8: turns 0–2, target position 1–6 | **BP** | on the user, as Showdown (decision 9); set 2 (bsc:8137), steps at the user's end of turn (util:1736) |
-| `PERISH_SONG` | `perish_song` | bool | **BP** | with `perish_song_timer` |
-| `ON_AIR`, `UNDERGROUND`, `UNDERWATER` | `on_air`, `underground`, `underwater` | bool | | `semi_invulnerable()` |
+| `PERISH_SONG` | `perish_song` | u8 0–4 | **BP** | with the decomp's `perishSongTimer`: Showdown's duration, 0 off; set 4, printed after each residual's −1, fainting at 0 |
+| `ON_AIR`, `UNDERGROUND`, `UNDERWATER` | `kind` `OnAir`, `Underground`, `Underwater` | | | `semi_invulnerable()`; a charge, so `lock` counts its turns as `Charge`'s |
 | `MINIMIZED` | `minimized` | bool | | |
 | `CHARGED_UP` | `charged_up` | bool | | until the user's next move other than Charge (Showdown) |
 | `ROOTED` | `rooted` | bool | **BP** | Ingrain |
 | `YAWN` (2 bits) | `yawn` | u8 0–2 | | set 2 (bsc:9361); steps at end of turn (util:1752) |
 | `IMPRISONED_OTHERS` | `imprisoned_others` | bool | | |
-| `GRUDGE` | `grudge` | bool | | |
+| `GRUDGE` | `kind` `Grudge` | | | cleared at the user's next move attempt |
 | `CANT_SCORE_A_CRIT` | — | | | dropped: read (bsc:1280) but never set |
 | `MUDSPORT`, `WATERSPORT` | `mud_sport`, `water_sport` | bool | **BP** | on the user, not the field, in Gen III |
 | `INTIMIDATE_POKES`, `TRACE` | — | | | dropped: implemented directly in switch-in |
@@ -898,19 +903,19 @@ the changes.
 | — | `stall` | u8 | | | Showdown's stall duration, 0-2: 2 on a success, counted down after the residuals; at 0 the chain ends |
 | `stockpileCounter` | `stockpile` | u8 0–3 | | | |
 | `substituteHP` | `substitute_hp` | u8 | **BP** | | max HP / 4 ≤ 178, fits |
-| `perishSongTimer` | `perish_song_timer` | u8 0–3 | **BP** | | |
+| `perishSongTimer` | `perish_song` | | **BP** | | status3 |
 | `furyCutterCounter` | `fury_cutter` | u8 0–5 | | | Showdown's multiplier as log2 + 1; renewed by `renewed` |
-| `rolloutTimer` | `rollout` | u8 0–5 | | | Showdown's `hitCount`, counting up (bsc:8549 counts down from 5) |
-| `chargeTimer` | `charge_timer` | u8 0–2 | | | unused: Charge follows Showdown, ending after the user's next move (bsc:9103 sets 2) |
+| `rolloutTimer` | `kind` `Rollout`, `lock` | u8 1–5 | | | Showdown's `hitCount`, counting up (bsc:8549 counts down from 5) |
+| `chargeTimer` | — | | | | dropped: Charge follows Showdown, ending after the user's next move (bsc:9103 sets 2) |
 | `tauntTimer` | `taunt` | u8 0–2 | | | set 2 (bsc:9160) |
 | `battlerPreventingEscape`, `battlerWithSureHit` | — | | | | dropped (decision 9) |
 | `isFirstTurn` | `first_turn` | u8 0–2 | | | decision 14 |
 | (Showdown's `activeMoveActions`) | `move_actions` | u8 0–2 | | | saturating; Fake Out (decision 14) |
 | `truantCounter` | `truant` | bool | | | switch-in sets 1; flips at end of turn |
 | `truantSwitchInHack` | — | | | | dropped (Battle Arena only) |
-| — | `sleep_skipped` | u8 0–4 | | | Showdown's gen3 `skippedTime`: Sleep Talk/Snore attempts since the last asleep turn that did nothing; given back to the sleep counter on switch-out (the cartridge writes status1 to the party only at util:2259) |
+| — | `status_counter` | u8 0–4 | | | while asleep (the toxic counter's byte otherwise: every major status, Rest, cure and wake zeroes it): Showdown's gen3 `skippedTime`: Sleep Talk/Snore attempts since the last asleep turn that did nothing; given back to the sleep counter on switch-out (the cartridge writes status1 to the party only at util:2259) |
 | `mimickedMoves` | `mimicked` | u4 mask | | | slots Mimic replaced; blocks the PP write-back |
-| `rechargeTimer` | `recharge_timer` | u8 0–2 | | | set 2 (bsc:2730); also set 2 by a two-turn move's charge, which ends with it (Showdown's twoturnmove duration; the decomp has no timer) |
+| `rechargeTimer` | `lock` | u8 1–2 | | | with `kind` `Recharge`; also set 2 by a two-turn move's charge, which ends with it (Showdown's twoturnmove duration; the decomp has no timer) |
 | every `*StartValue`, `tauntTimer2`, fillers | — | | | | dropped (write-only) |
 
 ### Other per-battler globals cleared on switch-in
@@ -924,8 +929,8 @@ the changes.
 | (Showdown's `lastMoveUsed`) | `last_used_move` | `Move` | Conversion 2, as Showdown |
 | (its type as used) | `last_used_type` | `Type` | Conversion 2 |
 | `gLastHitBy` | — | | dropped: Conversion 2 reads it only to find the foe (bsc:8082) |
-| `gLastResultingMoves` | `last_resulting_move` | `Move` | Protect's consecutive-use reset (bsc:6506) |
-| `gLastPrintedMoves` | `last_printed_move` | `Move` | Sketch (bsc:8148) |
+| `gLastResultingMoves` | — | | dropped: Protect's chain follows Showdown's `stall` instead (bsc:6506) |
+| `gLastPrintedMoves` | — | | dropped: Sketch reads `last_move`, as Showdown (bsc:8148) |
 | `lastTakenMove`, `lastTakenMoveFrom` | `last_taken_move` | `Move` | Mirror Move (bsc:6640–6662). `lastTakenMoveFrom` is per attacker; in singles it collapses *(verify they're always set together)* |
 | `gBideDmg`, `gBideTarget` | `bide_damage` | u32 | Bide (util:2218, bsc:1912). The target is the foe. Accumulates raw damage, saturating (decision 15) |
 | `RESOURCE_FLAG_FLASH_FIRE` | `flash_fire` | bool | util:2692–2700 |
