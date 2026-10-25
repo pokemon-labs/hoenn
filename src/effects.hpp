@@ -1506,6 +1506,14 @@ constexpr void weather_change(Battle& battle, O& options,
   forecast(battle, foe(first), w, options);
 }
 
+// Truant's turn to loaf, as Showdown's truantTurn (Side::truant_turn) and its
+// volatile.
+constexpr void set_truant(Side& side, bool loafs) {
+  const uint16_t bit = uint16_t(1 << (side.order[0] - 1));
+  side.truant_turn = uint16_t(loafs ? side.truant_turn | bit : side.truant_turn & ~bit) & 63;
+  side.active.volatiles.truant = loafs;
+}
+
 constexpr Weather ability_weather(Ability ability) {
   switch (ability) {
   case Ability::Drizzle: return Weather::Rain;
@@ -2840,7 +2848,7 @@ constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options
   if (effect == Effect::KnockOff) {
     protocol::end_item(options.log, robbed, item, protocol::EndItemFrom::KnockOff, thief);
     target.item = Item::KnockedOff;
-    foe_side.knocked_off = uint8_t(foe_side.knocked_off | (1 << (foe_side.order[0] - 1)));
+    foe_side.knocked_off = uint16_t(foe_side.knocked_off | (1 << (foe_side.order[0] - 1))) & 63;
     return;
   }
   target.item = Item::None;
@@ -4692,7 +4700,7 @@ template <typename O>
       }
       break;
     case Ability::Truant:
-      v.truant = !v.truant;
+      set_truant(side, !(side.truant_turn & (1 << (side.order[0] - 1))));
       break;
     default:
       break;

@@ -296,6 +296,7 @@ is the same and only the messages differ.
 | Sand or hail KOs both last Pokémon | faster faints first and loses | both hit, then a tie |
 | Perish Song KOs both last Pokémon | — | both counts, then a tie |
 | Pursuit on a switching target | final damage ×2; no attack canceler; partial moveend | base power ×2; canceler (paralysis...) and full moveend |
+| Gaining Truant (Trace, Skill Swap, Transform) | counter cleared at switch-in | Showdown's `truantTurn` from the Pokémon's last Truant stint; a traced Truant runs no switch-in |
 | Stat berries with nothing to do | kept (stat at +6, Lansat under Focus Energy, Starf at all +6) | eaten anyway |
 
 Not yet compared with Showdown: everything not on `teams/ou/` (Uproar,
@@ -913,7 +914,7 @@ the changes.
 | `battlerPreventingEscape`, `battlerWithSureHit` | — | | | | dropped (decision 9) |
 | `isFirstTurn` | `first_turn` | u8 0–2 | | | decision 14 |
 | (Showdown's `activeMoveActions`) | `move_actions` | u8 0–2 | | | saturating; Fake Out (decision 14) |
-| `truantCounter` | `truant` | bool | | | switch-in sets 1; flips at end of turn |
+| `truantCounter` | `truant` | bool | | | as Showdown's volatile: loads from `Side::truant_turn` (truantTurn, kept across switches) at a Truant holder's switch-in and at the end of turn |
 | `truantSwitchInHack` | — | | | | dropped (Battle Arena only) |
 | — | `status_counter` | u8 0–4 | | | while asleep (the toxic counter's byte otherwise: every major status, Rest, cure and wake zeroes it): Showdown's gen3 `skippedTime`: Sleep Talk/Snore attempts since the last asleep turn that did nothing; given back to the sleep counter on switch-out (the cartridge writes status1 to the party only at util:2259) |
 | `mimickedMoves` | `mimicked` | u4 mask | | | slots Mimic replaced; blocks the PP write-back |

@@ -198,7 +198,7 @@ the Future Sight faint), and game 49's guard reversed.
 Adding one: take the failing game from the run's traces, keep the header
 (drop `p1.file` and `p2.file`, add `fixture`) and the steps through one
 past the failing step, renumber it, and check that it fails before the fix
-and passes after. Truant games stay out while Truant is a known gap. The
+and passes after. The
 8 failures of the two early OU runs are left out: their traces were
 deleted.
 
@@ -530,17 +530,6 @@ Showdown change closes gets crossed off here.
   state, by decision (2026-10-21): the engine keeps only the turn limit
   (`MAX_TURNS`), which Showdown applies with or without the clause
   (`sim/battle.ts:1843`). Custom Game (truly random) has no clause.
-- **Gaining Truant: Trace, Transform, Skill Swap** (1 of the random
-  OU-legal exploratory run; 6 of the 10,000-game run and 9 of the rerun,
-  2026-10-16; left as
-  a gap by decision). Showdown's `truantTurn` is a Pokemon property that
-  only Truant's own onSwitchIn resets, so a Pokémon that gains Truant
-  carries the value from its last Truant stint and may loaf or act on its
-  first turn by that history. We follow the cartridge (the counter cleared
-  at switch-in), which would need a per-party bit to change. 10 of the 16
-  state failures of the truly random 10,000-game run (2026-10-17), 7 of
-  the 11 of the next.
-
 - **Encore on a lock Metronome called** (about 30 of 10,000 group 8
   games). Showdown's Encore swaps the locked move for Metronome, runs it
   as `[from] lockedmove` without PP, and the lock's handlers keep going.

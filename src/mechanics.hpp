@@ -481,7 +481,7 @@ constexpr void run_switch(Battle& battle, Player first, bool both, O& options) {
   }
   for (uint8_t i = 0; i < n; i++) {
     // bsc:5258; at the battle start Truant acts on turn 1 (Showdown agrees).
-    if (truant[i]) battle.side(order[i]).active.volatiles.truant = battle.turn != 0;
+    if (truant[i]) set_truant(battle.side(order[i]), battle.turn != 0);
   }
   white_herbs(battle, options);
   for (uint8_t i = 0; i < n; i++) {

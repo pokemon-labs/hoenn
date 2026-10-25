@@ -833,10 +833,15 @@ struct Side {
   uint8_t order[6];             // by SLOT; 1-based indexes into pokemon
   SideConditions conditions;
   Item recycle_item;            // usedHeldItems (per position, for Recycle)
-  uint8_t knocked_off;          // knockedOffMons: bit i for pokemon[i]
+  // In Side's padding. Bit i is pokemon[i].
+  uint16_t knocked_off : 6;     // knockedOffMons
   // 1 + the party index of the Pokémon whose Attract on the foe outlived its
   // switch-out, until the side's next runSwitch (run_switch).
-  uint8_t attract_source;
+  uint16_t attract_source : 3;
+  // Showdown's truantTurn, which outlives the switch-out and the ability: only
+  // Truant's own switch-in sets it, and its residual flips it
+  // (data/mods/gen3/abilities.ts:244).
+  uint16_t truant_turn : 6;
 
   // The Pokémon in SLOT s (1-6).
   constexpr Pokemon& get(uint8_t s) { return pokemon[order[s - 1] - 1]; }
@@ -862,7 +867,7 @@ struct Side {
     for (uint8_t i = 0; i < 6; i++) {
       if (pokemon[i].item == Item::KnockedOff && !(knocked_off & (1 << i))) return false;
     }
-    return active.valid() && conditions.valid() && knocked_off < (1 << 6) && attract_source <= 6 &&
+    return active.valid() && conditions.valid() && attract_source <= 6 &&
            detail::valid(future_sight_move) && detail::valid(recycle_item) &&
            (conditions.future_sight == 0) == (future_sight_move == Move::None);
   }

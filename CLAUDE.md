@@ -148,9 +148,6 @@ hits and multi-hit counts that leave the same state (2026-10-21;
 `docs/ENGINE.md`, "Hit backbone").
 
 **Open:**
-- The Truant gap (`docs/TESTING.md`, Known gaps): Showdown's per-Pokémon
-  `truantTurn`, 6 bits packed with `Side::knocked_off` and
-  `attract_source` (decided 2026-10-24).
 - OU game 15 (toxic, unconfirmed); `docs/TESTING.md`, step 8.
 - `build/runs/classify.py`'s KNOWN list is out of date.
 - `MAX_LOG_SIZE` is a placeholder 2048 until the bound is derived (the debug
