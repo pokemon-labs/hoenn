@@ -2795,13 +2795,15 @@ void check_switch_ins() {
   }
   {
     // Both sides replace onto three layers of Spikes with their last
-    // Pokémon at 1 HP: the faster (Jolteon) arrives first and faints, and
-    // its side loses before Snorlax arrives.
+    // Pokémon at 1 HP. The replacements go in the fainted Pokémon's Speed
+    // order (instaswitch) and each lands with its switch: the faster
+    // fainted Jolteon's side lands first, faints and loses before the other
+    // replacement enters.
     const helpers::Pokemon boomer =
         mon(Species::Snorlax, Ability::ThickFat, {Move::Explosion});
     helpers::Pokemon fast = JOLTEON;
     fast.moves[0] = Move::Splash;
-    Battle b = started({boomer, fast}, {IDLE, IDLE});
+    Battle b = started({boomer, IDLE}, {fast, IDLE});
     b.sides[1].get(1).hp = 1;
     b.sides[0].get(2).hp = 1;
     b.sides[1].get(2).hp = 1;
@@ -2810,11 +2812,11 @@ void check_switch_ins() {
     Observed o{};
     o.calc.overrides.p1.hit = Optional::True;
     o.calc.overrides.p1.hits[0].crit = Optional::False;
-    o.calc.overrides.p1.hits[0].damage = 85;
+    o.calc.overrides.p1.hits[0].damage = 1;
     const Result r = update(b, Choice::move(1), Choice::move(1), o);
     CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Switch));
-    CHECK(update(b, Choice::swap(2), Choice::swap(2), null).type() == Result::Lose);
-    CHECK(b.sides[1].get(1).hp == 1);
+    CHECK(update(b, Choice::swap(2), Choice::swap(2), null).type() == Result::Win);
+    CHECK(b.sides[0].get(1).fainted() && b.sides[0].get(2).hp == 1);
   }
 }
 

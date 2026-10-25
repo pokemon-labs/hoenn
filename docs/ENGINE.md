@@ -226,7 +226,8 @@ a value (a request or the end of the battle) is returned.
   in or landed and waiting for the shared runSwitch (`Request::next`;
   Showdown's gen3 `checkFainted`, `data/mods/gen3/scripts.ts:16`; the
   decomp's `BattleScript_SpikesOnFaintedBattlerFainted`, bs1:3427). The new
-  choice goes first.
+  choice goes first. The same wait follows a switch whose pursuer fainted
+  (Rough Skin): its runSwitch waits for the pursuer's replacement.
 - **Sleep Clause and Freeze Clause** (Smogon's mods, always on) are
   compile-time rules with no field. A foe's sleep fails while a living
   Pokémon on the target's side sleeps from the foe (`sleep_clause`; Rest

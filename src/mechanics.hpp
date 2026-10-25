@@ -1723,10 +1723,16 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
     if (c.type() == Choice::Switch) {
       pursued = i == 0 && pursues(battle, foe(p));
       if (pursued) pursuit(battle, p, turn, options);
-      // A pursuer that fainted (Rough Skin) and lost ends the battle before
-      // the queued runSwitch (sim/battle.ts:2892).
       leave(battle, p, c.data(), options);
-      if (land(battle, p, options) && !lost(battle.side(foe(p)))) {
+      if (land(battle, p, options)) {
+        // A pursuer that fainted (Rough Skin) ends the battle or is replaced
+        // before the queued runSwitch, which waits for its replacement
+        // (sim/battle.ts:2892; data/mods/gen3/scripts.ts:16).
+        if (battle.side(foe(p)).get(1).fainted()) {
+          Flow f = faints(battle, Phase::FaintAfterAction);
+          if (f && !f->over()) battle.request.next = uint8_t(Request::LANDED + index(p));
+          return f;
+        }
         run_switch(battle, p, false, options);
       }
     } else {
