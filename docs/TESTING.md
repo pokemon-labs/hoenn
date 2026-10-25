@@ -176,7 +176,7 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (54 games, 2026-10-17) and the Showdown c0845f3 port (10,
+the step 6-8 runs (54 games, 2026-10-17) and the Showdown c0845f3 port (14,
 2026-10-24), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
@@ -768,6 +768,17 @@ turn, each measured before its bars are fixed.
    Run dirs: `build/runs/{ou-20261017-130000-11790484726086414745,
    ou_legal-20261017-130920-6875604541531664515,
    random-20261017-131911-13486077069381815800}`.
+
+   CI on `bf6ba4e` (run 40152795498, Showdown c0845f3, 2026-10-24): OU
+   9950/9951 (99.99%), OU-legal 9906/9910 (99.96%), random 9625/9628
+   (99.97%); soak and check_chance clean. The 8 failures: 1 rare branch
+   (OU 165, matched at 2.7M tries); 1 the Endless Battle Clause (OU-legal
+   43, Known gaps); 6 fixed in `4803574` (one fixture game per bug, 64-67):
+   Charge's end (AfterMove) follows a damaging hit's item cures and Shell
+   Bell (OU-legal 415, 226, 276); Grudge takes nothing when the user is
+   already at 0 HP (random 339, Rough Skin) and still prints on a move with
+   0 PP (random 233); Destiny Bond takes nothing when recoil fainted the
+   user first (random 180). All six match.
 9. CI: the gating and reporting workflows ("CI"); `test` runs on every push to main (passing since at least 2026-10-19).
 
 ## Decisions
