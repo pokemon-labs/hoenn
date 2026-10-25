@@ -507,8 +507,7 @@ static_assert(max_pp(Move::Growl) == 64 && max_pp(Move::Sketch) == 1);
 
 // A party Pokémon. Never reordered: Side::order maps SLOTs to it.
 //
-// Types live here and switch-in copies them (decision 7). The item
-// is Item::KnockedOff once Knock Off has hit it (decision 8). Hidden Power's type is in its move ID;
+// Types live here and switch-in copies them (decision 7). Hidden Power's type is in its move ID;
 // `hidden_power` (30-70) and `hidden_power_type` are the Pokémon's own, from
 // its IVs, set whether or not it knows the move: a Hidden Power it copies
 // (Mimic) is its own, as the decomp's hiddenpowercalc and Showdown's hpType.
@@ -863,9 +862,6 @@ struct Side {
     if (get(1).status.asleep() ? counter > Status::MAX_SLEEP - 1
                                : counter != 0 && !get(1).status.badly_poisoned()) {
       return false;
-    }
-    for (uint8_t i = 0; i < 6; i++) {
-      if (pokemon[i].item == Item::KnockedOff && !(knocked_off & (1 << i))) return false;
     }
     return active.valid() && conditions.valid() && attract_source <= 6 &&
            detail::valid(future_sight_move) && detail::valid(recycle_item) &&

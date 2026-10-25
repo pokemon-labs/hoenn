@@ -2822,9 +2822,9 @@ constexpr void self_effects(Battle& battle, Player player, MoveState& m, O& opti
 }
 
 // Showdown's onAfterHit, for a hit on the target itself with the user in: Knock
-// Off leaves Item::KnockedOff and marks the Pokémon (bsc:2858; ENGINE.md
-// decision 8), Thief and Covet take the item for an empty hand, a knocked-off
-// one too (bsc:2738), handed over at moveend. Sticky Hold keeps it. The
+// Off removes the item and marks the Pokémon (bsc:2858; ENGINE.md decision 8),
+// Thief and Covet take the item for an empty hand, a knocked-off one too
+// (bsc:2738), handed over at moveend. Sticky Hold keeps it. The
 // target's Choice Band lock goes with the band.
 template <typename O>
 constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options) {
@@ -2833,10 +2833,9 @@ constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options
   Side& foe_side = battle.side(defender);
   Pokemon& target = foe_side.get(1);
   Pokemon& user = battle.side(player).get(1);
-  const bool empty = user.item == Item::None || user.item == Item::KnockedOff;
-  const bool takes = (effect == Effect::KnockOff || (effect == Effect::Thief && empty)) &&
-                     m.damaged && !user.fainted() && target.item != Item::None &&
-                     target.item != Item::KnockedOff;
+  const bool takes = (effect == Effect::KnockOff ||
+                      (effect == Effect::Thief && user.item == Item::None)) &&
+                     m.damaged && !user.fainted() && target.item != Item::None;
   if (!takes) return;
   const ID thief = protocol::ident(battle, player);
   const ID robbed = protocol::ident(battle, defender);
@@ -2847,7 +2846,7 @@ constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options
   foe_side.active.volatiles.choice_move = Move::None;
   if (effect == Effect::KnockOff) {
     protocol::end_item(options.log, robbed, item, protocol::EndItemFrom::KnockOff, thief);
-    target.item = Item::KnockedOff;
+    target.item = Item::None;
     foe_side.knocked_off = uint16_t(foe_side.knocked_off | (1 << (foe_side.order[0] - 1))) & 63;
     return;
   }
@@ -4377,8 +4376,8 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   Side& foe_side = battle.side(foe(player));
   Pokemon& user = side.get(1);
   Pokemon& target = foe_side.get(1);
-  const Item mine = user.item == Item::KnockedOff ? Item::None : user.item;
-  const Item theirs = target.item == Item::KnockedOff ? Item::None : target.item;
+  const Item mine = user.item;
+  const Item theirs = target.item;
   const bool swaps = !foe_side.active.volatiles.substitute &&
                      (mine != Item::None || theirs != Item::None) &&
                      mine != Item::Mail && theirs != Item::Mail;
@@ -4415,8 +4414,7 @@ template <typename O>
 constexpr void recycle(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
   Pokemon& mon = side.get(1);
-  if ((mon.item != Item::None && mon.item != Item::KnockedOff) ||
-      side.recycle_item == Item::None) {
+  if (mon.item != Item::None || side.recycle_item == Item::None) {
     return but_it_failed(battle, player, m, options);
   }
   mon.item = side.recycle_item;

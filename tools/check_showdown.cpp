@@ -276,7 +276,7 @@ std::string_view species_id(Species s) { return SPECIES_IDS[uint16_t(s)]; }
 
 // The item as Showdown's Pokemon.item: '' for none or knocked off.
 std::string_view item_id(Item item) {
-  if (item == Item::None || item == Item::KnockedOff) return "";
+  if (item == Item::None) return "";
   for (const ItemName& n : ITEM_IDS) {
     if (n.item == item) return n.id;
   }
@@ -290,7 +290,7 @@ Item item_of(std::string_view id) {
   for (const ItemName& n : ITEM_IDS) {
     if (n.id == id) return n.item;
   }
-  return Item::KnockedOff; // no Showdown item maps here, so it never matches
+  return Item(ITEMS); // no item of ours, so it never matches
 }
 
 // As Showdown's Pokemon.status, which is "fnt" once fainted.
@@ -619,7 +619,7 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
         for (const json::Value& x : m[4].array) why += " " + std::to_string(x.integer());
         why += ";";
       }
-      if ((p.item == Item::KnockedOff ? Item::None : p.item) != item_of(m[5].string)) {
+      if (p.item != item_of(m[5].string)) {
         why += std::string(" ") + side + " slot " + std::to_string(slot) +
                ": item " + std::string(item_id(p.item)) + ", Showdown " +
                m[5].string + ";";

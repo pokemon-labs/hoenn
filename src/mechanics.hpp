@@ -426,9 +426,7 @@ constexpr void enter(Battle& battle, Player player) {
   assert(mon.species != Species::None && !mon.fainted());
   // A knocked-off Pokémon loses an item it gained since (bsc:4641; Showdown's
   // gen3 switchIn, sim/battle-actions.ts:163).
-  if ((side.knocked_off & (1 << (side.order[0] - 1))) && mon.item != Item::None) {
-    mon.item = Item::KnockedOff;
-  }
+  if (side.knocked_off & (1 << (side.order[0] - 1))) mon.item = Item::None;
 
   ActivePokemon& a = side.active;
   a = ActivePokemon{};

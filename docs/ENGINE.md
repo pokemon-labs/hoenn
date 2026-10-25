@@ -134,7 +134,7 @@ default is the link path, as Showdown aims to match Emerald link battles;
 entries here are the exceptions.
 
 - **Knock Off: the link path, as Showdown since 2026-10-09** (decision 8;
-  smogon/pokemon-showdown#12374). Knock Off leaves `Item::KnockedOff` and
+  smogon/pokemon-showdown#12374). Knock Off removes the item and
   sets the Pokémon's bit in `Side::knocked_off` (`knockedOffMons`,
   bsc:2880–2884). A knocked-off Pokémon can still steal or Trick for an
   item (Thief and Covet, bsc:2757; Trick, bsc:9206, which check the bit only
@@ -761,12 +761,10 @@ main = `src/battle_main.c`.
    bytes but `check_chance`'s diff printer.
 7. **Types live on `Pokemon`** and switch-in copies them. Equivalent to the
    decomp, which recomputes them from the species.
-8. **Knock Off sets the item to the sentinel `Item::KnockedOff`** (inert, no
-   hold effect) and the Pokémon's bit in `Side::knocked_off`. Link path;
-   see "Mechanics" above. It comes after `Other` in `src/data/items.hpp`.
-   Thief, Covet and Trick treat a knocked-off hand as empty, and `enter()`
-   drops an item gained since. Open: grep the decomp's `ITEM_NONE`
-   comparisons to confirm nothing else cares (Recycle?).
+8. **Knock Off sets the item to `Item::None`** and the Pokémon's bit in
+   `Side::knocked_off`. Link path; see "Mechanics" above. The hand is empty
+   (Thief, Covet, Trick and Recycle can fill it), and `enter()` drops an item
+   gained since.
 9. **Battler-ID fields become victim-side state.** In singles the other
    battler is always the foe, so clearing at the right foe switch replaces
    the IDs:
@@ -943,8 +941,7 @@ the changes.
 
 - **`MOVE_UNAVAILABLE` (0xFFFF)** is a distinct value in the last-move
   fields: Mirror Move, Sketch and Conversion 2 treat it like `MOVE_NONE`, but
-  it's written in different cases. `Move` needs a sentinel for it, like
-  `Item::KnockedOff`, or each field needs to show it never matters.
+  it's written in different cases. `Move` needs a sentinel for it, or each field needs to show it never matters.
 - **Five "last move" fields.** They differ in when they're written
   (attempted, landed, resulting, printed, taken). Keep all five until each
   writer is traced; merging any two needs proof that they never differ.

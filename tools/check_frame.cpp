@@ -1828,7 +1828,7 @@ void check_knock_off() {
     Battle b = run(holding(IDLE, Item::Leftovers), [](Battle& b) {
       b.sides[1].active.volatiles.choice_move = Move::Splash;
     });
-    CHECK(b.sides[1].get(1).item == Item::KnockedOff);
+    CHECK(b.sides[1].get(1).item == Item::None && (b.sides[1].knocked_off & 1));
     CHECK(b.sides[1].active.volatiles.choice_move == Move::None);
     // Leftovers no longer heal.
     const Pokemon& t = b.sides[1].get(1);

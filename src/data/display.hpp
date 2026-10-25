@@ -11,7 +11,7 @@
 #include "species.hpp"
 
 // Showdown's display names, for the log formatter (format.hpp). Indexed
-// by enum value; None (and Mail, Other, KnockedOff) is "".
+// by enum value; None (and Mail, Other) is "".
 namespace hoenn::display {
 
 inline constexpr std::string_view SPECIES_NAMES[SPECIES] = {
@@ -935,7 +935,6 @@ inline constexpr std::string_view ITEM_NAMES[ITEMS] = {
     "Metal Powder",
     "Thick Club",
     "Stick",
-    "",
     "",
     "",
 };

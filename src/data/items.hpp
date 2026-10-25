@@ -8,12 +8,10 @@
 namespace hoenn {
 
 // Items with a hold effect (src/data/items.h) plus the Enigma Berry, in
-// cartridge order, then two stand-ins and a sentinel. Mail is any of the 12
-// Mail items, which Trick, Thief and Covet can't move (nor the Enigma Berry).
-// Other is any other holdable item without a battle effect (balls, evolution
-// stones and so on). Those only matter to Trick, Knock Off, Thief and Covet.
-// KnockedOff is what Knock Off leaves (docs/ENGINE.md, decision 8): no
-// hold effect, and the Pokémon can never gain an item.
+// cartridge order, then two stand-ins. Mail is any of the 12 Mail items,
+// which Trick, Thief and Covet can't move (nor the Enigma Berry). Other is
+// any other holdable item without a battle effect (balls, evolution stones
+// and so on). Those only matter to Trick, Knock Off, Thief and Covet.
 enum class Item : uint8_t {
   None,
   BerryJuice,
@@ -89,10 +87,9 @@ enum class Item : uint8_t {
   Stick,
   Mail,
   Other,
-  KnockedOff,
 };
 
-inline constexpr uint8_t ITEMS = 75;
+inline constexpr uint8_t ITEMS = 74;
 
 // HOLD_EFFECT_* from include/constants/hold_effects.h, in order.
 enum class HoldEffect : uint8_t {
@@ -248,7 +245,6 @@ inline constexpr ItemData ITEM_DATA[ITEMS - 1] = {
     {HoldEffect::Stick, 0}, // Stick
     {HoldEffect::None, 0}, // Mail
     {HoldEffect::None, 0}, // Other
-    {HoldEffect::None, 0}, // KnockedOff
 };
 } // namespace detail
 
