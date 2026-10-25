@@ -1140,12 +1140,9 @@ constexpr void log_hit(const Battle& battle, Player player, const MoveState& m,
   const Player target = foe(player);
   const Pokemon& mon = battle.side(target).get(1);
   protocol::damage(options.log, protocol::ident(battle, target), mon);
-  // A move's KO, so Destiny Bond applies.
-  if (mon.fainted()) {
-    const Volatiles& v = battle.side(target).active.volatiles;
-    protocol::faint(options.log, protocol::ident(battle, target),
-                    v.kind == Volatiles::Kind::DestinyBond);
-  }
+  // Destiny Bond's mark waits for faint_target: recoil or Rough Skin may
+  // faint the user first.
+  if (mon.fainted()) protocol::faint(options.log, protocol::ident(battle, target));
 }
 
 // Showdown's gen3 modifyDamage messages for one hit
@@ -2472,7 +2469,7 @@ constexpr void stockpile_end(Battle& battle, Player player, O& options) {
   protocol::end_effect(options.log, protocol::ident(battle, player), protocol::End::Stockpile);
 }
 
-// Showdown's AfterMove (runMove, sim/battle-actions.ts:311), for the last move
+// Showdown's AfterMove (runMove, sim/battle-actions.ts:368), for the last move
 // the action ran: Charge ends after any move but Charge (gen8's condition), not
 // after Pursuit on a switching target or for a fainted user; Spit Up's layers
 // go.

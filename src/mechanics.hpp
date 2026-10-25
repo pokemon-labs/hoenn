@@ -90,6 +90,7 @@ struct MoveState {
   bool unable;       // HITMARKER_UNABLE_TO_USE_MOVE
   bool attacked;     // past the accuracy check and TryHit (Showdown's gotAttacked)
   bool damaged;      // TARGET_TURN_DAMAGED: the target itself lost HP
+  bool struck;       // a damaging hit landed, on the target or its Substitute
   uint16_t hp_dealt; // gHpDealt: what the target or its Substitute lost
   uint16_t total;    // what the target itself lost over every hit (Shell Bell)
 
@@ -378,22 +379,23 @@ constexpr void faint(Battle& battle, Player player, O& options) {
 }
 
 // tryfaintmon BS_TARGET after p's move hit the foe (bsc:2965): a foe at 0 HP
-// faints, and its Destiny Bond takes p unless p has fainted already (bs1:3379).
-// Its Grudge, as Showdown's onFaint, empties the user's last move (`used`),
-// unless the user fainted first (Explosion); the PP goes at the end of moveend.
-// `bonded_hp` keeps the user's HP for Shell Bell's log.
+// faints. Its Destiny Bond takes p and its Grudge empties p's last move
+// (`used`; the PP goes at the end of moveend), as Showdown's onFaint, unless p
+// is at 0 HP already (Explosion, recoil, Rough Skin; data/moves.ts:3501,
+// 7902). Grudge prints even on a move with no PP left. `bonded_hp` keeps the
+// user's HP for Shell Bell's log.
 template <typename O>
 constexpr void faint_target(Battle& battle, Player player, Move used, bool& grudge,
                             uint16_t& bonded_hp, O& options) {
   const Player defender = foe(player);
   if (!battle.side(defender).get(1).fainted()) return;
+  Pokemon& user = battle.side(player).get(1);
   const Volatiles::Kind kind = battle.side(defender).active.volatiles.kind;
-  const bool bond = kind == Volatiles::Kind::DestinyBond;
+  const bool bond = kind == Volatiles::Kind::DestinyBond && !user.fainted();
   if (bond) protocol::faint(options.log, protocol::ident(battle, defender), true);
-  if (kind == Volatiles::Kind::Grudge &&
-      get(used).effect != Effect::Explosion) {
+  if (kind == Volatiles::Kind::Grudge && !user.fainted()) {
     const ActivePokemon& a = battle.side(player).active;
-    if (const uint8_t s = slot_of(a, used); s != NO_SLOT && a.moves[s].pp != 0) {
+    if (slot_of(a, used) != NO_SLOT) {
       grudge = true;
       protocol::faint(options.log, protocol::ident(battle, defender));
       protocol::grudge(options.log, protocol::ident(battle, defender),
@@ -401,8 +403,7 @@ constexpr void faint_target(Battle& battle, Player player, Move used, bool& grud
     }
   }
   faint(battle, defender, options);
-  Pokemon& user = battle.side(player).get(1);
-  if (bond && !user.fainted()) {
+  if (bond) {
     bonded_hp = user.hp;
     user.hp = 0;
     faint(battle, player, options);
@@ -1054,8 +1055,10 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
   assert(!((m.result & MoveResult::NO_EFFECT) || m.unable) ||
          !a.volatiles.semi_invulnerable());
 
-  // Showdown's AfterMove comes before the item cures.
-  after_move(battle, player, m, options);
+  // Showdown's AfterMove (runMove, sim/battle-actions.ts:368) follows a
+  // damaging hit's Update and Shell Bell (tryMoveHit and useMove,
+  // data/mods/gen3/scripts.ts:488 and 278); without one, it comes first.
+  if (!m.struck) after_move(battle, player, m, options);
 
   // MOVEEND_ITEM_EFFECTS_ALL: both Pokémon, as Showdown's onUpdate (the decomp
   // stops at the first, util:3740).
@@ -1082,6 +1085,7 @@ constexpr void moveend(Battle& battle, Player player, MoveState& m, O& options) 
     protocol::heal_item(options.log, protocol::ident(battle, player), healed, user.item,
                         protocol::ident(battle, foe(player)));
   }
+  if (m.struck) after_move(battle, player, m, options);
 
   // MOVEEND_SUBSTITUTE
   for (Side& s : battle.sides) {
@@ -1250,6 +1254,7 @@ constexpr void strike(Battle& battle, Player player, MoveState& m, Hit h, uint32
     log_modifiers(battle, player, m, h.crit, options);
   }
   d = survive(battle, player, m, d, i, options);
+  m.struck = true;
   m.hp_dealt = hp_update(battle, foe(player), d, m, options);
   log_hit(battle, player, m, options);
 }

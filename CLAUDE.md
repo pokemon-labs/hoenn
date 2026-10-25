@@ -135,12 +135,11 @@ teams; `tools/fixtures/showdown.jsonl` one committed game per fixed failure.
 
 ## Status (2026-10-24)
 
-The engine is complete: every move, item and the log are written. All three
-environments pass their bars (OU 99.96%, OU-legal 99.89%, random 99.92% at
-619f1e4). The pin moved to Showdown c0845f3 (2026-10-24), whose gen3
-switch-in overhaul and Knock Off fix are ported (`docs/ENGINE.md`,
-"Mechanics"); on that run's master traces OU 99.98%, OU-legal 99.81%,
-random 99.85% before the last fixes. Work is fixing what the tests find
+The engine is complete: every move, item and the log are written. The pin
+is Showdown c0845f3 (2026-10-24), whose gen3 switch-in overhaul and Knock
+Off fix are ported (`docs/ENGINE.md`, "Mechanics"). All three environments
+pass their bars (OU 99.99%, OU-legal 99.96%, random 99.97% at bf6ba4e).
+Work is fixing what the tests find
 and speed: three optimizations (2026-10-17) gave about +22% on
 `bench --log`; PGO and
 the next candidates are in `docs/OPTIMIZATION.md`. Chance merges lethal
