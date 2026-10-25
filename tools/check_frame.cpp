@@ -2812,7 +2812,7 @@ void check_switch_ins() {
     Observed o{};
     o.calc.overrides.p1.hit = Optional::True;
     o.calc.overrides.p1.hits[0].crit = Optional::False;
-    o.calc.overrides.p1.hits[0].damage = 1;
+    o.calc.overrides.p1.hits[0].damage = 85;
     const Result r = update(b, Choice::move(1), Choice::move(1), o);
     CHECK(r == Result::init(Result::None, Choice::Switch, Choice::Switch));
     CHECK(update(b, Choice::swap(2), Choice::swap(2), null).type() == Result::Win);
