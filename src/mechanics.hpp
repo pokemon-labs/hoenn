@@ -367,8 +367,8 @@ constexpr void faint(Battle& battle, Player player, O& options) {
 
   ActivePokemon& f = battle.side(foe(player)).active;
   f.volatiles.escape_prevention = false;
-  // The foe's Attract ends when the replacement comes in (leave), its binding
-  // at its residual (Stage::Bind), as Showdown's.
+  // The foe's Attract ends when the replacement comes in (run_switch), its
+  // binding at its residual (Stage::Bind), as Showdown's.
   if (f.volatiles.wrapped != 0) f.volatiles.wrapper_gone = true;
 
   if constexpr (CHANCE<O>) {
@@ -410,17 +410,25 @@ constexpr void faint_target(Battle& battle, Player player, Move used, bool& grud
 }
 
 // ---------------------------------------------------------------------------
-// Switch-ins: each Pokémon's Spikes, ability and item run as it arrives, as
-// Showdown's runSwitch (data/mods/gen4/scripts.ts:18). The decomp runs
-// Intimidate and Trace after the action (util:1945).
+// Switch-ins, as Showdown's gen3 switchIn and runSwitch
+// (sim/battle-actions.ts:197, 228): the Pokémon lands with its switch (Spikes,
+// then after turn 0 a weather ability), and its runSwitch, one SwitchIn event
+// for every Pokémon that landed together, runs the other switch-in abilities
+// by priority, then the Update. The decomp runs Intimidate and Trace after the
+// action (util:1945).
 // ---------------------------------------------------------------------------
 
 // The Pokémon in SLOT 1 becomes active: Cmd_switchindataupdate (bsc:4621) and
 // SwitchInClearSetData (main:3152), as ENGINE.md decision 4.
 constexpr void enter(Battle& battle, Player player) {
   Side& side = battle.side(player);
-  const Pokemon& mon = side.get(1);
+  Pokemon& mon = side.get(1);
   assert(mon.species != Species::None && !mon.fainted());
+  // A knocked-off Pokémon loses an item it gained since (bsc:4641; Showdown's
+  // gen3 switchIn, sim/battle-actions.ts:163).
+  if ((side.knocked_off & (1 << (side.order[0] - 1))) && mon.item != Item::None) {
+    mon.item = Item::KnockedOff;
+  }
 
   ActivePokemon& a = side.active;
   a = ActivePokemon{};
@@ -435,62 +443,77 @@ constexpr void enter(Battle& battle, Player player) {
   a.volatiles.first_turn = 2; // main:3220, decision 14
 }
 
-// switchineffects (bsc:5180) for the Pokémon that just entered, in Showdown's
-// runSwitch order.
+// switchineffects (bsc:5180) as Showdown's switchIn after the switch line:
+// Spikes, then after turn 0 the weather ability (AfterEntryHazard,
+// sim/battle-actions.ts:204). Returns whether the Pokémon stands: a Spikes
+// faint skips the rest and its runSwitch.
 template <typename O>
-constexpr void arrive(Battle& battle, Player player, O& options) {
-  // Showdown's Update after the switch action: an immunity ability cures a
-  // status from before it, and the berries act.
-  ability_immunity(battle, options);
-  {
-    const Player first = log_order(battle);
-    for (const Player p : {first, foe(first)}) {
-      if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
+constexpr bool land(Battle& battle, Player player, O& options) {
+  if (spikes(battle, player, options)) {
+    protocol::faints(options.log);
+    return false;
+  }
+  if (battle.turn != 0) weather_ability(battle, player, options);
+  return true;
+}
+
+// runSwitch's SwitchIn event (sim/battle-actions.ts:237) for `first` and, with
+// `both`, its foe: each priority's handlers in that order, then at priority 0
+// Truant and every White Herb (onAnySwitchIn). Then the Update after the
+// action (sim/battle.ts:2971; none after the switch itself): the foe's Attract
+// ends if its source is gone (data/moves.ts:736), an immunity ability cures a
+// status from before it or a traced one, and the berries act.
+template <typename O>
+constexpr void run_switch(Battle& battle, Player first, bool both, O& options) {
+  const Player order[2] = {first, foe(first)};
+  const uint8_t n = both ? 2 : 1;
+  // The event's handlers are found before any runs: a traced Truant has none.
+  bool truant[2] = {};
+  for (uint8_t i = 0; i < n; i++) {
+    truant[i] = battle.side(order[i]).active.ability == Ability::Truant;
+  }
+  for (const uint8_t priority : {3, 2, 1}) {
+    for (uint8_t i = 0; i < n; i++) {
+      if (!battle.side(order[i]).get(1).fainted()) {
+        ability_switch_in(battle, order[i], priority, options);
+      }
     }
   }
-  if (spikes(battle, player, options)) return protocol::faints(options.log);
-  // Then the SwitchIn event (every White Herb checks), the ability's Start and
-  // the item's.
+  for (uint8_t i = 0; i < n; i++) {
+    // bsc:5258; at the battle start Truant acts on turn 1 (Showdown agrees).
+    if (truant[i]) battle.side(order[i]).active.volatiles.truant = battle.turn != 0;
+  }
   white_herbs(battle, options);
-  ActivePokemon& a = battle.side(player).active;
-  // bsc:5258; at the battle start Truant acts on turn 1 (Showdown agrees).
-  if (a.ability == Ability::Truant) a.volatiles.truant = battle.turn != 0;
-  ability_switch_in(battle, player, options);
-  // A traced immunity cures after runSwitch.
+  for (uint8_t i = 0; i < n; i++) {
+    Side& side = battle.side(order[i]);
+    Volatiles& v = battle.side(foe(order[i])).active.volatiles;
+    // Unless the source came back first (a switch-in that faints to Spikes
+    // runs no Update).
+    if (v.infatuated && side.attract_source != side.order[0]) {
+      v.infatuated = false;
+      protocol::end_effect(options.log, protocol::ident(battle, foe(order[i])),
+                           protocol::End::Attract);
+    }
+    side.attract_source = 0;
+  }
   ability_immunity(battle, options);
-  item_switch_in(battle, player, options);
+  const Player f = log_order(battle);
+  for (const Player p : {f, foe(f)}) {
+    if (!battle.side(p).get(1).fainted()) item_cure(battle, p, options);
+  }
 }
 
-// Whether two arrivals' order can change the result, so a Speed tie needs a
-// recorded draw: two different weathers, or Spikes, which can end the battle
-// first.
-constexpr bool arrival_order_matters(const Battle& battle) {
-  const Weather w1 = ability_weather(battle.sides[0].active.ability);
-  const Weather w2 = ability_weather(battle.sides[1].active.ability);
-  return (w1 != Weather::None && w2 != Weather::None && w1 != w2) ||
-         battle.sides[0].conditions.spikes != 0 ||
-         battle.sides[1].conditions.spikes != 0;
-}
-
-// Both Pokémon came in together (the start, or both replacing): each arrives in
-// Showdown's order (Speed, with the turn's Quick Claw after the start), and the
-// battle can end between them. The decomp orders replacements by battler ID
-// (util:1880).
+// One Pokémon's switch-in: it lands, then its runSwitch.
 template <typename O>
-constexpr void arrive_both(Battle& battle, bool start, O& options) {
-  const Player first =
-      arrival_order_matters(battle)
-          ? detail::first(battle, speeds(battle, Move::None, Move::None, !start),
-                          options)
-          : log_order(battle);
-  arrive(battle, first, options);
-  if (outcome(battle)) return;
-  // A first arrival that faints to Spikes cancels the second's switch-in
-  // effects, as Showdown's gen3 cancels every queued action
-  // (sim/battle.ts:2596; seen in its traces). Its toxic counter still resets
-  // here (enter()), where Showdown's carries on.
-  if (battle.side(first).get(1).fainted()) return;
-  arrive(battle, foe(first), options);
+constexpr void arrive(Battle& battle, Player player, O& options) {
+  if (land(battle, player, options)) run_switch(battle, player, false, options);
+}
+
+// Whether two weather abilities' order can change the result.
+constexpr bool weathers_differ(Ability a, Ability b) {
+  const Weather w1 = ability_weather(a);
+  const Weather w2 = ability_weather(b);
+  return w1 != Weather::None && w2 != Weather::None && w1 != w2;
 }
 
 // p's active Pokémon leaves for SLOT `slot`, which enters: a switch or a faint
@@ -533,8 +556,7 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
     }
   }
   ActivePokemon& f = battle.side(foe(player)).active;
-  const bool infatuated = f.volatiles.infatuated;
-  f.volatiles.infatuated = false;
+  if (f.volatiles.infatuated && side.attract_source == 0) side.attract_source = side.order[0];
   // The binder leaves: Showdown's partiallytrapped stays until its residual, no
   // longer trapping (Stage::Bind). Baton Pass too: the recipient isn't the
   // source.
@@ -549,19 +571,6 @@ constexpr void leave(Battle& battle, Player player, uint8_t slot, O& options,
                      protocol::ident(battle, player), side.get(1),
                      baton ? protocol::SwitchFrom::BatonPass
                            : protocol::SwitchFrom::None);
-  // Attract's onUpdate, once its source is gone.
-  if (infatuated) {
-    protocol::end_effect(options.log, protocol::ident(battle, foe(player)), protocol::End::Attract);
-  }
-}
-
-// A switch action: the Pokémon leaves, the new one enters and arrives before
-// the next action (sim/battle-queue.ts:181).
-template <typename O>
-constexpr void switch_to(Battle& battle, Player player, uint8_t slot,
-                         O& options) {
-  leave(battle, player, slot, options);
-  arrive(battle, player, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -581,12 +590,14 @@ constexpr Flow faints(Battle& battle, Phase phase) {
                       f2 ? Choice::Switch : Choice::Pass);
 }
 
-// The order two replacements enter in, which changes only the log: Showdown's
-// instaswitch actions (sim/side.ts:1012), by the fainted Pokémon's stored
-// Speed, since an inactive Pokémon has no handlers. Quick Claw counts only if
-// the turn already drew it, so no draw made here is reused unrecorded. A tie is
-// an unrecorded coin.
-constexpr Player replacement_order(Battle& battle) {
+// The order two replacements enter in: Showdown's instaswitch actions
+// (sim/side.ts:1012), by the fainted Pokémon's stored Speed, since an inactive
+// Pokémon has no handlers. Quick Claw counts only if the turn already drew it,
+// so no draw made here is reused unrecorded. Each lands with its switch, so a
+// tie is recorded where the order can change the result (`matters`: Spikes,
+// or two weathers), and is an unrecorded coin otherwise.
+template <typename O>
+constexpr Player replacement_order(Battle& battle, bool matters, O& options) {
   uint32_t s[2];
   for (const Player p : {Player::P1, Player::P2}) {
     const Side& side = battle.side(p);
@@ -597,47 +608,96 @@ constexpr Player replacement_order(Battle& battle) {
     }
   }
   if (s[0] != s[1]) return s[0] > s[1] ? Player::P1 : Player::P2;
+  if (matters) return rolls::speed_tie(battle, options);
   return battle.rng.chance(1, 2) ? Player::P1 : Player::P2;
 }
 
-// The replacements a faint request asked for: every replacement enters before
-// any arrives, as Showdown's instaswitch (sim/battle-queue.ts:177).
+// The replacements a faint request asked for, with one still waiting from
+// the request before (Request::next). Each enters and lands in turn, and the
+// battle can end between them; then one runSwitch for those standing (the
+// runSwitch actions follow the instaswitches, sim/battle-queue.ts:177). A first
+// replacement that faints to Spikes is asked for again at once, with the
+// other's still queued (data/mods/gen3/scripts.ts:16), as is a second while the
+// first's runSwitch waits.
 template <typename O>
-constexpr void replace(Battle& battle, Choice c1, Choice c2, O& options) {
-  const Choice choices[2] = {c1, c2};
-  const Player first = c1.type() == Choice::Switch && c2.type() == Choice::Switch
-                           ? replacement_order(battle)
-                           : Player::P1;
+constexpr Flow replace(Battle& battle, Choice c1, Choice c2, O& options) {
+  Request& r = battle.request;
+  Choice choices[2] = {c1, c2};
+  bool landed[2] = {false, false};
+  uint8_t pending = 0; // 1 + the player whose switch waits
+  if (r.next != 0) {
+    const uint8_t i = r.next >= Request::LANDED ? r.next - Request::LANDED : r.next - Request::PENDING;
+    assert(i < 2 && choices[i].type() == Choice::Pass);
+    if (r.next >= Request::LANDED) {
+      landed[i] = true;
+    } else {
+      choices[i] = r.choice[i];
+      pending = uint8_t(i + 1);
+    }
+  }
+  const Phase phase = r.phase;
+  r.phase = Phase::None;
+  r.next = 0;
+  const bool s1 = choices[0].type() == Choice::Switch;
+  const bool s2 = choices[1].type() == Choice::Switch;
+  Player first = s1 ? Player::P1 : Player::P2;
+  if (pending) {
+    // The new choice goes before the queued one (commitChoices,
+    // sim/battle.ts:3076).
+    first = foe(Player(pending - 1));
+  } else if (s1 && s2) {
+    const bool matters =
+        battle.sides[0].conditions.spikes != 0 || battle.sides[1].conditions.spikes != 0 ||
+        weathers_differ(battle.sides[0].get(choices[0].data()).ability,
+                        battle.sides[1].get(choices[1].data()).ability);
+    first = replacement_order(battle, matters, options);
+  }
   for (const Player p : {first, foe(first)}) {
     const Choice c = choices[index(p)];
     assert((c.type() == Choice::Switch) == battle.side(p).get(1).fainted());
-    if (c.type() == Choice::Switch) leave(battle, p, c.data(), options);
+    if (c.type() != Choice::Switch) continue;
+    leave(battle, p, c.data(), options);
+    if (land(battle, p, options)) {
+      landed[index(p)] = true;
+      continue;
+    }
+    if (Flow over = outcome(battle)) return over;
+    const uint8_t q = index(foe(p));
+    const bool waits = p == first && choices[q].type() == Choice::Switch;
+    if (!waits && !landed[q]) break;
+    r.phase = phase;
+    r.next = uint8_t((waits ? Request::PENDING : Request::LANDED) + q);
+    if (waits) r.choice[q] = choices[q];
+    return Result::init(Result::None, p == Player::P1 ? Choice::Switch : Choice::Pass,
+                        p == Player::P2 ? Choice::Switch : Choice::Pass);
   }
-  const bool s1 = c1.type() == Choice::Switch;
-  const bool s2 = c2.type() == Choice::Switch;
-  if (s1 && s2) {
-    arrive_both(battle, false, options);
-  } else {
-    arrive(battle, s1 ? Player::P1 : Player::P2, options);
+  if (landed[0] && landed[1]) {
+    run_switch(battle, log_order(battle), true, options);
+  } else if (landed[0] || landed[1]) {
+    run_switch(battle, landed[0] ? Player::P1 : Player::P2, false, options);
   }
-  battle.request.phase = Phase::None;
+  return std::nullopt;
 }
 
 // ---------------------------------------------------------------------------
 // The battle's start
 // ---------------------------------------------------------------------------
 
-// Turn 0, as libpkmn's start: both leads come in, then arrive in Speed order
-// without Quick Claw (arrive_both), as Showdown. The decomp's
-// TryDoEventsBeforeFirstTurn (main:3841) runs each kind of switch-in effect for
-// both in turn.
+// Turn 0, as libpkmn's start: both leads come in, then one runSwitch for both
+// in Speed order without Quick Claw, as Showdown; the order can change the
+// result only with two weathers. The decomp's TryDoEventsBeforeFirstTurn
+// (main:3841) runs each kind of switch-in effect for both in turn.
 template <typename O> constexpr Result start(Battle& battle, O& options) {
   for (const Player p : {Player::P1, Player::P2}) {
     enter(battle, p);
     protocol::switched(options.log, protocol::ArgType::Switch,
                        protocol::ident(battle, p), battle.side(p).get(1));
   }
-  arrive_both(battle, true, options);
+  const Player first =
+      weathers_differ(battle.sides[0].active.ability, battle.sides[1].active.ability)
+          ? detail::first(battle, speeds(battle, Move::None, Move::None, false), options)
+          : log_order(battle);
+  run_switch(battle, first, true, options);
   turn_cleanup(battle);
   battle.turn = 1;
   return Result::start();
@@ -1632,28 +1692,15 @@ constexpr bool pursues(const Battle& battle, Player player) {
 
 // Pursuit on `p`'s switching Pokémon (bs1:3088; Showdown's gen3
 // onFoeBeforeSwitchOut): the foe's move runs as useMove (no canceler, double
-// power, the full moveend) and uses up its action. Returns whether the
-// switching Pokémon survived.
+// power, the full moveend) and uses up its action. Its faints print before the
+// switch, which goes on, without a win check until the switch is done
+// (runPursuitActivation, sim/battle-actions.ts:62; resolveFaints,
+// sim/battle.ts:2627).
 template <typename O>
-constexpr bool pursuit(Battle& battle, Player p, Turn& turn, O& options) {
+constexpr void pursuit(Battle& battle, Player p, Turn& turn, O& options) {
   protocol::activate(options.log, protocol::ident(battle, p), protocol::Activate::Pursuit);
-  const Status status = battle.side(p).get(1).status;
   use_move(battle, foe(p), false, turn, options, true);
-  const bool ko = battle.side(p).get(1).fainted();
-  if (!ko) return true;
-  // After a KO, Showdown's SwitchOut prints Natural Cure's cure before the
-  // queued faint, and gen3's Update ends the foe's Attract before the switch
-  // line.
-  if (battle.side(p).active.ability == Ability::NaturalCure && status.any()) {
-    protocol::cure_status(options.log, protocol::ident(battle, p), status,
-                          protocol::Cure::NaturalCure);
-  }
   protocol::faints(options.log);
-  if (ActivePokemon& f = battle.side(foe(p)).active; f.volatiles.infatuated) {
-    protocol::end_effect(options.log, protocol::ident(battle, foe(p)), protocol::End::Attract);
-    f.volatiles.infatuated = false;
-  }
-  return false;
 }
 
 // RunTurnActionsFunctions (main:4937) from action `from`; a faint ends the
@@ -1661,8 +1708,8 @@ constexpr bool pursuit(Battle& battle, Player p, Turn& turn, O& options) {
 // action and before the faint check, as Showdown's runAction
 // (sim/battle.ts:2825); a dragged-out Pokémon's move is cancelled. A working
 // Baton Pass asks for the recipient after the faint check and resumes at the
-// next action. The switch still happens after Pursuit's KO (Showdown requeues
-// it, sim/battle.ts:2772); there is no Pursuit on Baton Pass, Roar or a
+// next action. The switch still happens after Pursuit's KO
+// (sim/battle-actions.ts:109); there is no Pursuit on Baton Pass, Roar or a
 // replacement.
 template <typename O>
 constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
@@ -1675,15 +1722,12 @@ constexpr Flow actions(Battle& battle, uint8_t from, O& options) {
     After after = After::None;
     if (c.type() == Choice::Switch) {
       pursued = i == 0 && pursues(battle, foe(p));
-      if (pursued && pursuit(battle, p, turn, options)) {
-        // A pursuer's faint (Rough Skin) prints after the switch line and
-        // before the queued runSwitch, which doesn't run if the battle ended
-        // (sim/battle.ts:2839).
-        leave(battle, p, c.data(), options);
-        protocol::faints(options.log);
-        if (!lost(battle.side(foe(p)))) arrive(battle, p, options);
-      } else {
-        switch_to(battle, p, c.data(), options);
+      if (pursued) pursuit(battle, p, turn, options);
+      // A pursuer that fainted (Rough Skin) and lost ends the battle before
+      // the queued runSwitch (sim/battle.ts:2892).
+      leave(battle, p, c.data(), options);
+      if (land(battle, p, options) && !lost(battle.side(foe(p)))) {
+        run_switch(battle, p, false, options);
       }
     } else {
       after = use_move(battle, p, i == 0, turn, options);
@@ -1980,7 +2024,8 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     if (over) return over;
   }
   // The future attacks, by the Speed of the Pokémon each lands on, with a
-  // recorded coin on a tie: either could end the battle.
+  // recorded coin on a tie: the first can KO the second's user, which then
+  // loses its accuracy stage.
   Player order = faster;
   if (s1 == s2) {
     const bool both = battle.sides[0].conditions.future_sight == 1 &&
@@ -1988,7 +2033,7 @@ template <typename O> constexpr Flow end_of_turn(Battle& battle, O& options) {
     order = both ? rolls::residual_tie(battle, false, options) : coin();
   }
   for (const Player p : {order, foe(order)}) {
-    if (Flow over = future_attack(battle, p, options)) return over;
+    future_attack(battle, p, options);
   }
   Player last = coin();
   for (const Player p : {last, foe(last)}) perish_count(battle, p, options);
@@ -2044,6 +2089,11 @@ constexpr Choice::Type requested(const Battle& battle, Player player) {
     return battle.turn == 0 ? Choice::Pass : Choice::Move;
   case Phase::BatonPass: return baton_passer(r) == player ? Choice::Switch : Choice::Pass;
   default:
+    // A replacement that waits (Request::next) passes.
+    if (r.next >= Request::PENDING && r.next < Request::LANDED &&
+        index(player) == r.next - Request::PENDING) {
+      return Choice::Pass;
+    }
     return battle.side(player).get(1).fainted() ? Choice::Switch
                                                 : Choice::Pass;
   }
@@ -2175,17 +2225,19 @@ constexpr Result update(Battle& battle, Choice c1, Choice c2, O&& options) {
   }
   case Phase::FaintAfterAction:
     if (phase == Phase::FaintAfterAction) {
-      replace(battle, c1, c2, options);
       // A replacement can faint to Spikes: replace it before going on.
-      if ((f = faints(battle, phase))) return finish(battle, *f, options);
+      if ((f = replace(battle, c1, c2, options)) || (f = faints(battle, phase))) {
+        return finish(battle, *f, options);
+      }
     }
     if ((f = end_of_turn(battle, options))) return finish(battle, *f, options);
     [[fallthrough]];
   case Phase::FaintAfterResiduals:
     if (phase == Phase::FaintAfterResiduals) {
-      replace(battle, c1, c2, options);
       // A replacement can faint to Spikes: replace it before going on.
-      if ((f = faints(battle, phase))) return finish(battle, *f, options);
+      if ((f = replace(battle, c1, c2, options)) || (f = faints(battle, phase))) {
+        return finish(battle, *f, options);
+      }
     }
     return finish(battle, next_turn(battle), options);
   }

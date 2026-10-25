@@ -1454,12 +1454,6 @@ template <typename O> constexpr void white_herbs(Battle& battle, O& options) {
   white_herb(battle, foe(first), options);
 }
 
-// ITEMEFFECT_ON_SWITCH_IN (util:3291): White Herb.
-template <typename O>
-constexpr void item_switch_in(Battle& battle, Player player, O& options) {
-  white_herb(battle, player, options);
-}
-
 // ---------------------------------------------------------------------------
 // Abilities and weather
 // ---------------------------------------------------------------------------
@@ -1563,15 +1557,13 @@ template <typename O>
   }
 }
 
-// ABILITYEFFECT_ON_SWITCHIN (util:2470) with Intimidate and Trace:
-// - Drizzle, Drought and Sand Stream set a permanent weather, unless an
-//   ability's is already there.
-// - Trace copies a standing foe's ability, which doesn't start in Gen III
-//   (sim/pokemon.ts:1941).
-// - Pressure announces itself, in the log only
-//   (data/mods/gen3/abilities.ts:148).
+// Drizzle, Drought and Sand Stream set a permanent weather, unless an
+// ability's is already there; Forecast takes the weather's type. Showdown's
+// gen3 runs them on landing after turn 0 (AfterEntryHazard,
+// sim/battle-actions.ts:204) and in the SwitchIn event at its priority 3 on
+// turn 0 (sim/battle.ts:1039; data/mods/gen3/abilities.ts:28).
 template <typename O>
-constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
+constexpr void weather_ability(Battle& battle, Player player, O& options) {
   ActivePokemon& a = battle.side(player).active;
   if (const Weather w = ability_weather(a.ability); w != Weather::None) {
     Field& field = battle.field;
@@ -1585,22 +1577,44 @@ constexpr void ability_switch_in(Battle& battle, Player player, O& options) {
     return;
   }
   if (a.ability == Ability::Forecast) {
-    return forecast(battle, player, effective_weather(battle), options);
+    forecast(battle, player, effective_weather(battle), options);
   }
-  if (a.ability == Ability::Intimidate) return intimidate(battle, player, options);
-  if (a.ability == Ability::Trace) {
-    const Side& f = battle.side(foe(player));
-    if (!f.get(1).fainted() && f.active.ability != Ability::None) {
-      a.ability = f.active.ability;
-      protocol::ability_copy(options.log, protocol::ident(battle, player), a.ability,
-                             Ability::Trace, protocol::AbilityFrom::Trace,
-                             protocol::ident(battle, foe(player)));
+}
+
+// ABILITYEFFECT_ON_SWITCHIN (util:2470) with Intimidate and Trace, as the
+// handlers of Showdown's SwitchIn event at one `priority`
+// (data/mods/gen3/abilities.ts): 3 the weather (turn 0 only) and Pressure, 2
+// Intimidate, 1 Trace.
+// - Trace copies a standing foe's ability, which doesn't start in Gen III
+//   (sim/pokemon.ts:1941).
+// - Pressure announces itself, in the log only
+//   (data/mods/gen3/abilities.ts:183).
+template <typename O>
+constexpr void ability_switch_in(Battle& battle, Player player, uint8_t priority, O& options) {
+  ActivePokemon& a = battle.side(player).active;
+  switch (priority) {
+  case 3:
+    if (battle.turn == 0) weather_ability(battle, player, options);
+    if (a.ability == Ability::Pressure) {
+      protocol::ability(options.log, protocol::ident(battle, player), Ability::Pressure,
+                        protocol::AbilityFrom::Pressure);
     }
     return;
-  }
-  if (a.ability == Ability::Pressure) {
-    protocol::ability(options.log, protocol::ident(battle, player), Ability::Pressure,
-                      protocol::AbilityFrom::Pressure);
+  case 2:
+    if (a.ability == Ability::Intimidate) intimidate(battle, player, options);
+    return;
+  default:
+    assert(priority == 1);
+    if (a.ability == Ability::Trace) {
+      const Side& f = battle.side(foe(player));
+      if (!f.get(1).fainted() && f.active.ability != Ability::None) {
+        a.ability = f.active.ability;
+        protocol::ability_copy(options.log, protocol::ident(battle, player), a.ability,
+                               Ability::Trace, protocol::AbilityFrom::Trace,
+                               protocol::ident(battle, foe(player)));
+      }
+    }
+    return;
   }
 }
 
@@ -1635,9 +1649,6 @@ constexpr void baton_pass_in(Battle& battle, Player player, uint8_t slot,
   n.lock_on = v.lock_on;
   n.lock_on_target = v.lock_on_target;
   n.wrapped_move = v.wrapped_move;
-  // Showdown's gen3 Update after the action, before the recipient's runSwitch:
-  // a berry takes what was passed.
-  item_cure(battle, player, options);
   arrive(battle, player, options);
 }
 
@@ -2803,9 +2814,10 @@ constexpr void self_effects(Battle& battle, Player player, MoveState& m, O& opti
 }
 
 // Showdown's onAfterHit, for a hit on the target itself with the user in: Knock
-// Off leaves Item::KnockedOff (bsc:2858; ENGINE.md decision 8), Thief and Covet
-// take the item for an empty hand (bsc:2738), handed over at moveend. Sticky
-// Hold keeps it. The target's Choice Band lock goes with the band.
+// Off leaves Item::KnockedOff and marks the Pokémon (bsc:2858; ENGINE.md
+// decision 8), Thief and Covet take the item for an empty hand, a knocked-off
+// one too (bsc:2738), handed over at moveend. Sticky Hold keeps it. The
+// target's Choice Band lock goes with the band.
 template <typename O>
 constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options) {
   const Effect effect = get(m.move).effect;
@@ -2813,7 +2825,8 @@ constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options
   Side& foe_side = battle.side(defender);
   Pokemon& target = foe_side.get(1);
   Pokemon& user = battle.side(player).get(1);
-  const bool takes = (effect == Effect::KnockOff || (effect == Effect::Thief && user.item == Item::None)) &&
+  const bool empty = user.item == Item::None || user.item == Item::KnockedOff;
+  const bool takes = (effect == Effect::KnockOff || (effect == Effect::Thief && empty)) &&
                      m.damaged && !user.fainted() && target.item != Item::None &&
                      target.item != Item::KnockedOff;
   if (!takes) return;
@@ -2827,6 +2840,7 @@ constexpr void after_hit(Battle& battle, Player player, MoveState& m, O& options
   if (effect == Effect::KnockOff) {
     protocol::end_item(options.log, robbed, item, protocol::EndItemFrom::KnockOff, thief);
     target.item = Item::KnockedOff;
+    foe_side.knocked_off = uint8_t(foe_side.knocked_off | (1 << (foe_side.order[0] - 1)));
     return;
   }
   target.item = Item::None;
@@ -4345,8 +4359,8 @@ constexpr void role_play(Battle& battle, Player player, MoveState& m, O& options
 }
 
 // Trick, as Showdown's: Sticky Hold makes the target immune, then a Substitute
-// stops it; it fails if either item was knocked off, neither has one, or either
-// holds Mail. A Choice Band lock outlives its band until the holder's next move
+// stops it; it fails if neither has an item (a knocked-off hand is empty) or
+// either holds Mail. A Choice Band lock outlives its band until the holder's next move
 // or the turn's end (cancel()), and a new band locks the user into Trick at
 // moveend.
 template <typename O>
@@ -4355,10 +4369,9 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
   Side& foe_side = battle.side(foe(player));
   Pokemon& user = side.get(1);
   Pokemon& target = foe_side.get(1);
-  const Item mine = user.item;
-  const Item theirs = target.item;
+  const Item mine = user.item == Item::KnockedOff ? Item::None : user.item;
+  const Item theirs = target.item == Item::KnockedOff ? Item::None : target.item;
   const bool swaps = !foe_side.active.volatiles.substitute &&
-                     mine != Item::KnockedOff && theirs != Item::KnockedOff &&
                      (mine != Item::None || theirs != Item::None) &&
                      mine != Item::Mail && theirs != Item::Mail;
   if (!try_hit(battle, player, m,
@@ -4390,8 +4403,6 @@ constexpr void trick(Battle& battle, Player player, MoveState& m, O& options) {
 
 // Recycle, as Showdown's: the item last used up in this position
 // (Side::recycle_item, lastItem) comes back to an empty or knocked-off hand.
-// Showdown's itemKnockedOff would still stop Trick and Thief from taking it;
-// here they can.
 template <typename O>
 constexpr void recycle(Battle& battle, Player player, MoveState& m, O& options) {
   Side& side = battle.side(player);
@@ -4875,13 +4886,16 @@ constexpr void perish_count(Battle& battle, Player player, O& options) {
 // uses the user's stage only while it is in, its ability wherever it is, and
 // the target's evasion. No Protect; Wonder Guard lets it through. The stored
 // damage takes its roll and goes through a Substitute, with Focus Band but no Endure
-// (data/mods/gen4/moves.ts:434), and no Destiny Bond. The decomp (util:1781)
-// lands it after the replacements, with its own request.
+// (data/mods/gen4/moves.ts:434), and no Destiny Bond. Its faint waits for the
+// residuals' end and can't end the battle before them: gen3's hit loop resolves
+// no faints, and a residual's end skips fieldEvent's (sim/battle-actions.ts:1035,
+// sim/battle.ts:520). The decomp (util:1781) lands it after the replacements,
+// with its own request.
 template <typename O>
-constexpr Flow future_attack(Battle& battle, Player player, O& options) {
+constexpr void future_attack(Battle& battle, Player player, O& options) {
   Side& side = battle.side(player);
   SideConditions& c = side.conditions;
-  if (c.future_sight == 0 || --c.future_sight != 0) return std::nullopt;
+  if (c.future_sight == 0 || --c.future_sight != 0) return;
   const Move move = side.future_sight_move;
   const uint32_t stored = side.future_sight_damage;
   const uint8_t position = c.future_user;
@@ -4889,7 +4903,7 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   side.future_sight_damage = 0;
   c.future_user = 0;
   Pokemon& target = side.get(1);
-  if (target.fainted()) return std::nullopt;
+  if (target.fainted()) return;
 
   const Player user = foe(player);
   const Side& user_side = battle.side(user);
@@ -4910,7 +4924,7 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
   }
   if (!lands) {
     protocol::miss(options.log, source, id);
-    return std::nullopt;
+    return;
   }
   MoveState m{};
   m.move = move;
@@ -4940,14 +4954,6 @@ constexpr Flow future_attack(Battle& battle, Player player, O& options) {
     if (target.fainted()) faint(battle, player, options);
     rage(battle, user, m, options);
   }
-  protocol::faints(options.log);
-  // The hit loop's Update after faintMessages (sim/battle-actions.ts:996) ends
-  // the foe's Attract once its source has fainted.
-  if (ActivePokemon& f = battle.side(user).active; target.fainted() && f.volatiles.infatuated) {
-    protocol::end_effect(options.log, protocol::ident(battle, user), protocol::End::Attract);
-    f.volatiles.infatuated = false;
-  }
-  return outcome(battle);
 }
 
 // The durations with no residual order, which Showdown runs after every other

@@ -133,24 +133,17 @@ take, it's recorded here. Where the decomp branches on link battles, the
 default is the link path, as Showdown aims to match Emerald link battles;
 entries here are the exceptions.
 
-- **Knock Off: the non-link path** (decision 8). An exception to the default
-  (link battles; see CLAUDE.md, "Mechanics references"). Showdown departs from the
-  link path here, and we match Showdown. A knocked-off Pokémon holds
-  `Item::KnockedOff` for the rest of the battle and can never gain an item.
-  - The cartridge in link battles differs. Knock Off clears the battle copy
-    of the item and sets `knockedOffMons` (bsc:2880–2884). Thief/Covet
-    (bsc:2757–2766) and Trick (`Cmd_tryswapitems`, bsc:9206–9216) check that
-    bit only outside `BATTLE_TYPE_LINK` and friends. So in a link battle a
-    knocked-off Pokémon can steal or Trick for an item, which is also written
-    to the party (bsc:2786). Nothing clears the bit in battle, and switch-in
-    clears the item whenever it's set (bsc:4641–4645), so the gained item is
-    lost again at the next switch-in. (That last step is inferred from the
-    bit never being cleared.)
-  - Showdown 0.11.10: Knock Off marks the item `knockedOff`
-    (`data/mods/gen4/moves.ts:875`, inherited by gen3), and `setItem` refuses
-    a knocked-off Pokémon (`sim/pokemon.ts:1811`). Its hint: "In Gens 3-4,
-    Knock Off only makes the target's item unusable; it cannot obtain a new
-    item."
+- **Knock Off: the link path, as Showdown since 2026-10-09** (decision 8;
+  smogon/pokemon-showdown#12374). Knock Off leaves `Item::KnockedOff` and
+  sets the Pokémon's bit in `Side::knocked_off` (`knockedOffMons`,
+  bsc:2880–2884). A knocked-off Pokémon can still steal or Trick for an
+  item (Thief and Covet, bsc:2757; Trick, bsc:9206, which check the bit only
+  outside link battles), and loses it at its next switch-in, as the bit is
+  never cleared (bsc:4641–4645). Showdown: `itemKnockedOff`
+  (`data/mods/gen4/moves.ts:725`), `takeItem` blocks it in Gen 4 only
+  (`sim/pokemon.ts:1874`), and `switchIn` drops the item
+  (`sim/battle-actions.ts:163`). Before that commit Showdown took the
+  non-link path: the item gone for good.
 
 - **Two switches go in speed order with Quick Claw, as Showdown** (decided
   2026-10-07; Quick Claw corrected the same day: gen3 Showdown's
@@ -159,15 +152,21 @@ entries here are the exceptions.
   them in battler-ID order and only compares speed between moves
   (main:4756). It matters because the first switch-in's Intimidate hits the
   foe that's about to leave.
-- **Switch-in effects follow Showdown's `runSwitch`** (decided 2026-10-07).
-  Each Pokémon's Spikes, switch-in ability (weather, Intimidate, Trace) and
-  item run together when it arrives (gen4's `runSwitch`, inherited by gen3).
-  The decomp flags Intimidate and Trace and runs them after the action
-  (util:1945). When two Pokémon enter together (the battle start, both
-  sides replacing), both enter, then each arrives in speed order (Quick
-  Claw except at the start, a random tie) and the battle can end between
-  them; the decomp uses `GetWhoStrikesFirst` at the start
-  (main:3841) and battler-ID order for replacements (util:1880).
+- **Switch-ins follow Showdown's gen3 `switchIn` and `runSwitch`**
+  (smogon/pokemon-showdown#11185, 2026-10-17, which brought them to the
+  cartridge's order). A Pokémon *lands* with its switch: Spikes, then after
+  turn 0 its weather ability (Drizzle, Drought, Sand Stream, Forecast;
+  `AfterEntryHazard`), as `Cmd_switchineffects` (bsc:5180). Its `runSwitch`
+  then runs one SwitchIn event for every Pokémon that landed together, by
+  priority: the turn-0 weather and Pressure, Intimidate, Trace, then Truant
+  and every White Herb; then the Update (Attract's end, immunity abilities,
+  berries). The decomp's start (`TryDoEventsBeforeFirstTurn`, main:3841)
+  has the same order: each switch-in ability fastest first, then
+  Intimidate, Trace and the items; mid-turn it flags Intimidate and Trace
+  and runs them after the action (util:1945), with the berries. No Update
+  follows the switch itself. Two replacements land one after the other
+  (Showdown's speed order; the decomp's battler-ID order, util:1880) and
+  share one runSwitch, so an Intimidate waits for the other replacement.
 
 ### Turn frame
 
@@ -216,14 +215,18 @@ a value (a request or the end of the battle) is returned.
   residuals, the first to faint loses. Sand, hail and Perish Song hit both
   first, so both last fainting there is a tie, as is both last fainting in
   one action (Explosion included: `Cmd_checkteamslost`, bsc:3563, and
-  Showdown's `checkWin` before gen 4).
+  Showdown's `checkWin` before gen 4). A future attack's KO is the
+  exception (Showdown since c0845f3): its faint waits for the residuals'
+  end, so the battle goes on through them (`future_attack`).
 - **Spikes** (`spikes()`, `Cmd_switchineffects`, bsc:5180) hit every
-  switch-in: voluntary, replacement, Baton Pass, Roar's drag. They come
-  before the switch-in ability and item, which a Spikes faint skips; that
-  faint raises another request in the same phase. When both sides replace
-  at once, both enter, then each takes Spikes and its switch-in effects in
-  speed order, and a first arrival that faints cancels the second's
-  switch-in effects (`arrive_both`).
+  switch-in as it lands: voluntary, replacement, Baton Pass, Roar's drag.
+  A Spikes faint skips the rest of the switch-in and raises another request
+  in the same phase. When both sides replace and one faints to Spikes, that
+  side is asked again at once while the other's replacement waits, not yet
+  in or landed and waiting for the shared runSwitch (`Request::next`;
+  Showdown's gen3 `checkFainted`, `data/mods/gen3/scripts.ts:16`; the
+  decomp's `BattleScript_SpikesOnFaintedBattlerFainted`, bs1:3427). The new
+  choice goes first.
 - **Sleep Clause and Freeze Clause** (Smogon's mods, always on) are
   compile-time rules with no field. A foe's sleep fails while a living
   Pokémon on the target's side sleeps from the foe (`sleep_clause`; Rest
@@ -244,11 +247,11 @@ is the same and only the messages differ.
 | Crit vs immunity | crit drawn before the type check | immunity first, no crit draw |
 | Quick Claw | `gRandomTurnNumber < 0xFFFF * 20 / 100`, about 1/5; moves only | exactly 1/5; also orders two switches |
 | Two switches | battler-ID order | speed order |
-| Switch-in effects | Intimidate and Trace after the action | Spikes, ability, item on arrival, in speed order |
+| Replacement order | battler ID | speed order |
 | Confusion self-hit | Reflect and type items apply; no Focus Band behind a Substitute | typeless 40 power; Focus Band always |
-| Knock Off | link battles: a stolen item can come back | the item is gone for good (decision 8) |
+| Destiny Bond's faints | the user's faint line before the target's | the target's first (log only) |
 | Perish Song | own pass after Future Sight | counts in the residual pass |
-| Future Sight, Doom Desire | typed damage, no roll; lands after the residual faints are replaced, with its own request | typeless, rolled at the use; lands in the residual pass (order 11), its accuracy drawn then |
+| Future Sight, Doom Desire | typed damage, no roll; lands after the residual faints are replaced, with its own request | typeless, rolled at the use; lands in the residual pass (order 11), its accuracy drawn then; its faint after the residuals |
 | Binder leaving | frees the victim at once | the victim stays bound, untrapped, until its residual, which ends it |
 | Stockpile family | Stockpile raises nothing; failures print | the same; failures are silent; Spit Up rolls |
 | Leech Seed KO of the last Pokémon | no `checkteamslost` | the battle ends there |
@@ -757,11 +760,11 @@ main = `src/battle_main.c`.
 7. **Types live on `Pokemon`** and switch-in copies them. Equivalent to the
    decomp, which recomputes them from the species.
 8. **Knock Off sets the item to the sentinel `Item::KnockedOff`** (inert, no
-   hold effect); there's no Knocked Off flag. Non-link path; see "Mechanics"
-   above. It comes after `Other` in `src/data/items.hpp`. Only identity
-   checks (`item == Item::None`) must handle it; Thief, Covet and Trick
-   will need to refuse a knocked-off Pokémon. Open: grep the decomp's
-   `ITEM_NONE` comparisons to confirm nothing else cares (Recycle?).
+   hold effect) and the Pokémon's bit in `Side::knocked_off`. Link path;
+   see "Mechanics" above. It comes after `Other` in `src/data/items.hpp`.
+   Thief, Covet and Trick treat a knocked-off hand as empty, and `enter()`
+   drops an item gained since. Open: grep the decomp's `ITEM_NONE`
+   comparisons to confirm nothing else cares (Recycle?).
 9. **Battler-ID fields become victim-side state.** In singles the other
    battler is always the foe, so clearing at the right foe switch replaces
    the IDs:

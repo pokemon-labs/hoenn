@@ -176,7 +176,8 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (54 games, 2026-10-17), replayed by ctest's
+the step 6-8 runs (54 games, 2026-10-17) and the Showdown c0845f3 port (10,
+2026-10-24), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -185,6 +186,14 @@ and the games for later fixes fail with it. Games are renumbered within
 the file, and the search seed depends on the game number, so a renumbered
 game must be checked again. The worst step needs about 72,000 of the
 1,000,000 tries.
+
+When the pin moves, re-record the file on the new Showdown:
+`node tools/showdown_traces.cjs --replay tools/fixtures/showdown.jsonl
+--showdown .showdown/<pin>` replays each game's choices (at the old pin it
+reproduces the file exactly) and fails if one became illegal. A game whose
+state changes may stop guarding its bug; check those. At c0845f3: 41 games'
+logs changed, 3 states (games 11 and 51, White Herb after Intimidate; 18,
+the Future Sight faint), and game 49's guard reversed.
 
 Adding one: take the failing game from the run's traces, keep the header
 (drop `p1.file` and `p2.file`, add `fixture`) and the steps through one
@@ -392,8 +401,12 @@ Rationale:
 
 ## CI
 
-Built 2026-10-17, GitHub Actions (`.github/workflows/`), not yet run
-there. The repo is public, so the standard runners (4 vCPUs, 16 GB, 6-hour
+Built 2026-10-17, GitHub Actions (`.github/workflows/`); `test` passes on
+every push since 2026-10-19, and CI runs the suites, not this machine
+(CLAUDE.md). `report` failed from 2026-10-18 until the 2026-10-24 port of
+Showdown c0845f3 (smogon/pokemon-showdown#11185 and #12374): the run's logs
+and artifacts (traces of the failing shards) are what a failure is
+diagnosed from. The repo is public, so the standard runners (4 vCPUs, 16 GB, 6-hour
 job limit) cost nothing.
 
 - **`test.yml`, gating:** on pushes to main, pull requests and by hand.
@@ -536,8 +549,6 @@ Showdown change closes gets crossed off here.
   survivor's old toxic stage (it lives on the status); ours resets in
   `enter()`. Needs a per-Pokémon counter (layout). 2 group 2 games, 1
   of the first OU 10,000-game run.
-- **Recycle after Knock Off:** Showdown's `itemKnockedOff` still blocks
-  Trick and Thief after the recycled item comes back; ours doesn't.
 - **Leftovers order on an exact Speed tie** (7 group 8 games). The coin is
   a fair 50/50 per stage (verified); probably few state-matching tries,
   unconfirmed.

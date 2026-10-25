@@ -474,11 +474,11 @@ void cant(L& log, ID id, Cant reason, Move m = Move::None, ID of = NO_ID) {
   }
 }
 
-// Queues the Faint of a Pokémon that just reached 0 HP (FaintQueue). After
-// its faint line, Showdown's faintMessages runs the Faint event, then the
-// ability's End: with `bond` its Destiny Bond takes the foe (-activate|P|
-// move: Destiny Bond). Flash Fire's End prints nothing at 0 HP
-// (removeVolatile returns early, sim/pokemon.ts:2036).
+// Queues the Faint of a Pokémon that just reached 0 HP (FaintQueue). Before
+// its faint line, Showdown's gen3 resolveFaints runs the Faint event
+// (sim/battle.ts:2595): with `bond` its Destiny Bond takes the foe
+// (-activate|P|move: Destiny Bond). After it, the ability's End; Flash Fire's
+// prints nothing at 0 HP (removeVolatile returns early, sim/pokemon.ts:2036).
 template <typename L>
 void faint(L& log, ID id, bool bond = false) {
   if constexpr (L::enabled) {
@@ -499,9 +499,6 @@ template <typename L> void faints(L& log) {
   if constexpr (L::enabled) {
     auto& q = log.faints;
     for (uint8_t i = 0; i < q.n; i++) {
-      log.write(ArgType::Faint);
-      log.write_byte(q.ids[i].bits);
-      q.written = uint16_t(q.written | (1u << q.ids[i].bits));
       if (q.bond & (1u << q.ids[i].bits)) {
         log.write(ArgType::Activate);
         log.write_byte(q.ids[i].bits);
@@ -513,6 +510,9 @@ template <typename L> void faints(L& log) {
         log.write_byte(uint8_t(Activate::Grudge));
         log.write_int(q.grudge_move);
       }
+      log.write(ArgType::Faint);
+      log.write_byte(q.ids[i].bits);
+      q.written = uint16_t(q.written | (1u << q.ids[i].bits));
       if (q.forme_after.bits != 0 && q.forme_after == q.ids[i]) {
         log.write(ArgType::FormeChange);
         log.write_byte(q.forme.bits);

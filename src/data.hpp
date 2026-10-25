@@ -287,7 +287,13 @@ enum class Phase : uint8_t {
 // `next` is the index into the turn order (0 or 1, or 2 for end of turn) of
 // the action to run after a Baton Pass. It is 0 in every other phase: a faint
 // replacement cancels the rest of the actions, and residual faints don't
-// interrupt the residual passes, so nothing else needs a position.
+// interrupt the residual passes, so nothing else needs a position. Except in a
+// faint phase whose request came between two replacements, as Showdown's
+// gen3 checkFainted after each switch (data/mods/gen3/scripts.ts:16): the
+// first fainted to Spikes and is asked again, and the other's replacement
+// waits. Then `next` is PENDING + i while side i's switch to `choice[i]`
+// waits, or LANDED + i while its replacement has landed and waits for the
+// shared runSwitch.
 //
 // `quick_claw` is the turn's Quick Claw draw (gRandomTurnNumber, main:4013),
 // None until it's drawn. It's drawn at the first read where it can change the
@@ -304,6 +310,8 @@ struct Request {
   Optional quick_claw;
 
   static constexpr uint8_t END_OF_ACTIONS = 2;
+  static constexpr uint8_t PENDING = 1;
+  static constexpr uint8_t LANDED = 3;
 
   // A well-formed request. Asserted in debug builds.
   constexpr bool valid() const {
@@ -312,7 +320,11 @@ struct Request {
     if (!choice[0].valid() || !choice[1].valid()) return false;
     if (quick_claw > Optional::False) return false;
     if (phase == Phase::BatonPass) return next == 1 || next == END_OF_ACTIONS;
-    return next == 0;
+    if (phase == Phase::None) return next == 0;
+    if (next >= PENDING && next < LANDED) {
+      return choice[next - PENDING].type() == Choice::Switch;
+    }
+    return next < LANDED + 2;
   }
 
   friend constexpr bool operator==(const Request&, const Request&) = default;
@@ -324,6 +336,8 @@ static_assert(Request{}.valid());
 static_assert(!Request{{}, {}, Phase::BatonPass, Player::P1, 0, Optional::None}.valid());
 static_assert(Request{{}, {}, Phase::BatonPass, Player::P2, 2, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 1, Optional::None}.valid());
+static_assert(Request{{}, {}, Phase::FaintAfterAction, Player::P1, 4, Optional::None}.valid());
+static_assert(!Request{{}, {}, Phase::FaintAfterAction, Player::P1, 5, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase(4), Player::P1, 0, Optional::None}.valid());
 static_assert(!Request{{}, {}, Phase::None, Player::P1, 0, Optional(3)}.valid());
 // The frame (mechanics.hpp) falls through the phases in this order.
@@ -819,6 +833,10 @@ struct Side {
   uint8_t order[6];             // by SLOT; 1-based indexes into pokemon
   SideConditions conditions;
   Item recycle_item;            // usedHeldItems (per position, for Recycle)
+  uint8_t knocked_off;          // knockedOffMons: bit i for pokemon[i]
+  // 1 + the party index of the Pokémon whose Attract on the foe outlived its
+  // switch-out, until the side's next runSwitch (run_switch).
+  uint8_t attract_source;
 
   // The Pokémon in SLOT s (1-6).
   constexpr Pokemon& get(uint8_t s) { return pokemon[order[s - 1] - 1]; }
@@ -841,7 +859,10 @@ struct Side {
                                : counter != 0 && !get(1).status.badly_poisoned()) {
       return false;
     }
-    return active.valid() && conditions.valid() &&
+    for (uint8_t i = 0; i < 6; i++) {
+      if (pokemon[i].item == Item::KnockedOff && !(knocked_off & (1 << i))) return false;
+    }
+    return active.valid() && conditions.valid() && knocked_off < (1 << 6) && attract_source <= 6 &&
            detail::valid(future_sight_move) && detail::valid(recycle_item) &&
            (conditions.future_sight == 0) == (future_sight_move == Move::None);
   }

@@ -6,6 +6,13 @@
 //
 //   node tools/showdown_traces.cjs [--games N] [--seed N] [--format gen3ou|custom]
 //       [--showdown PATH] [TEAM_FILE...] > traces.jsonl
+//   node tools/showdown_traces.cjs --replay TRACES.jsonl [--showdown PATH] > traces.jsonl
+//
+// --replay plays each game of a trace file again with its seed, teams and
+// chosen choices, for as many steps as it has, and writes it with this
+// Showdown's logs and states; the header's other fields (`fixture`) carry
+// over. It re-records tools/fixtures/showdown.jsonl after the pin moves
+// (docs/TESTING.md, "The fixture"), and fails if a choice became illegal.
 //
 // The teams in every TEAM_FILE are pooled, duplicates included. Defaults:
 // 100 games, seed 1, gen3ou, every teams/ou/*.txt, showdown/ (0.11.11;
@@ -58,6 +65,7 @@ function parseArgs(argv) {
     seed: '1',
     format: 'gen3ou',
     showdown: path.join(__dirname, '../showdown'),
+    replay: null,
     files: [],
   };
   for (let i = 0; i < argv.length; i++) {
@@ -67,7 +75,7 @@ function parseArgs(argv) {
     }
     const key = argv[i].slice(2);
     if (!(key in opts) || key === 'files' || i + 1 >= argv.length) {
-      console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--format gen3ou|custom] [--showdown PATH] [TEAM_FILE...]');
+      console.error('usage: showdown_traces.cjs [--games N] [--seed N] [--format gen3ou|custom] [--showdown PATH] [TEAM_FILE...] | --replay TRACES.jsonl');
       process.exit(1);
     }
     // The seed stays a string: a u64 doesn't fit a double.
@@ -178,9 +186,76 @@ function result(battle) {
   return battle.winner === 'p1' ? 'p1' : battle.winner === 'p2' ? 'p2' : 'tie';
 }
 
+// One update with both choices made; throws if Showdown rejects one.
+function commit(battle, g, chosen) {
+  for (const side of battle.sides) {
+    if (chosen[side.id] === 'pass') continue;
+    if (!side.choose(chosen[side.id])) {
+      throw new Error(`game ${g}: ${side.id} rejected ${chosen[side.id]}: ${side.choice.error}`);
+    }
+  }
+  if (!battle.allChoicesDone()) throw new Error(`game ${g}: choices not done`);
+  battle.commitChoices();
+}
+
+function stepLine(battle, logged, choices, forced, chosen) {
+  return JSON.stringify({
+    type: 'step', turn: battle.turn, choices, forced, chosen,
+    log: battle.log.slice(logged).filter(l => !l.startsWith('|t:|')), state: state(battle), result: result(battle),
+  });
+}
+
+function replay(opts, {Battle, Teams, TeamValidator}) {
+  const games = [];
+  for (const line of fs.readFileSync(opts.replay, 'utf8').split('\n')) {
+    if (!line) continue;
+    const d = JSON.parse(line);
+    if (d.type === 'game') games.push({header: d, steps: []});
+    else games[games.length - 1].steps.push(d);
+  }
+  for (const {header, steps} of games) {
+    const custom = steps[0].log.some(l => l.startsWith('|tier|') && l.includes('Custom Game'));
+    const validator = custom ? null : TeamValidator.get('gen3ou');
+    const pack = text => {
+      const team = Teams.import(text);
+      if (validator) validator.validateTeam(team);
+      return Teams.pack(team);
+    };
+    const battle = new Battle({formatid: custom ? CUSTOM : 'gen3ou', seed: header.seed});
+    battle.setPlayer('p1', {name: 'p1', team: pack(header.p1.text)});
+    battle.setPlayer('p2', {name: 'p2', team: pack(header.p2.text)});
+    const out = [JSON.stringify({
+      ...header,
+      p1: {...header.p1, sets: sets(battle.p1)}, p2: {...header.p2, sets: sets(battle.p2)},
+    })];
+    let logged = 0;
+    for (const [k, s] of steps.entries()) {
+      const choices = {}, forced = {};
+      if (k === 0) {
+        Object.assign(choices, {p1: ['pass'], p2: ['pass']});
+        Object.assign(forced, {p1: false, p2: false});
+      } else {
+        if (battle.ended) throw new Error(`game ${header.game}: ended before step ${k}`);
+        for (const side of battle.sides) {
+          const l = legal(side);
+          choices[side.id] = l.list;
+          forced[side.id] = l.forced;
+        }
+        commit(battle, header.game, s.chosen);
+      }
+      out.push(stepLine(battle, logged, choices, forced, s.chosen));
+      logged = battle.log.length;
+    }
+    process.stdout.write(out.join('\n') + '\n');
+  }
+  console.error({games: games.length});
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const {Battle, Dex, PRNG, Teams, TeamValidator} = require(path.resolve(opts.showdown));
+  const showdown = require(path.resolve(opts.showdown));
+  if (opts.replay) return replay(opts, showdown);
+  const {Battle, Dex, PRNG, Teams, TeamValidator} = showdown;
   const teams = loadTeams(opts.files, opts.format, Dex, Teams, TeamValidator);
   console.error({teams: teams.length});
   // A 64-bit seed, one u16 per PRNG seed word (below 2^32, the old [0, 0, hi, lo]).
@@ -207,10 +282,7 @@ function main() {
     }));
     let logged = 0;
     const step = (choices, forced, chosen) => {
-      out.push(JSON.stringify({
-        type: 'step', turn: battle.turn, choices, forced, chosen,
-        log: battle.log.slice(logged).filter(l => !l.startsWith('|t:|')), state: state(battle), result: result(battle),
-      }));
+      out.push(stepLine(battle, logged, choices, forced, chosen));
       logged = battle.log.length;
       counts.steps++;
     };
@@ -227,14 +299,7 @@ function main() {
         forced[side.id] = l.forced;
         chosen[side.id] = prng.sample(l.list);
       }
-      for (const side of battle.sides) {
-        if (chosen[side.id] === 'pass') continue;
-        if (!side.choose(chosen[side.id])) {
-          throw new Error(`game ${g}: ${side.id} rejected ${chosen[side.id]}: ${side.choice.error}`);
-        }
-      }
-      if (!battle.allChoicesDone()) throw new Error(`game ${g}: choices not done`);
-      battle.commitChoices();
+      commit(battle, g, chosen);
       step(choices, forced, chosen);
     }
     counts.games++;

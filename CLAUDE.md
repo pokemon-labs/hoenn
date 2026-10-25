@@ -125,21 +125,32 @@ then `cmake --build --preset X` and `ctest --preset X`. Tests build with
 `node tools/damage_oracle.cjs > tools/damage_cases.inc`. Everything else
 (suites, bars, CI) is in `docs/TESTING.md`.
 
+**CI runs the tests, not you.** Don't run the suites or the environments
+locally: build, push, and read the results of the GitHub Actions run
+(`test.yml` on every push to main).
+
 `teams/ou/` holds the Smogon OU teams; `tools/teams/` the synthetic group
 teams; `tools/fixtures/showdown.jsonl` one committed game per fixed failure.
 `src/data/` was generated once from the decomp and is edited by hand now.
 
-## Status (2026-10-21)
+## Status (2026-10-24)
 
 The engine is complete: every move, item and the log are written. All three
 environments pass their bars (OU 99.96%, OU-legal 99.89%, random 99.92% at
-619f1e4, with 4 fixes since). Work is fixing what the tests find and speed:
-three optimizations (2026-10-17) gave about +22% on `bench --log`; PGO and
+619f1e4). The pin moved to Showdown c0845f3 (2026-10-24), whose gen3
+switch-in overhaul and Knock Off fix are ported (`docs/ENGINE.md`,
+"Mechanics"); on that run's master traces OU 99.98%, OU-legal 99.81%,
+random 99.85% before the last fixes. Work is fixing what the tests find
+and speed: three optimizations (2026-10-17) gave about +22% on
+`bench --log`; PGO and
 the next candidates are in `docs/OPTIMIZATION.md`. Chance merges lethal
 hits and multi-hit counts that leave the same state (2026-10-21;
 `docs/ENGINE.md`, "Hit backbone").
 
 **Open:**
+- The Truant gap (`docs/TESTING.md`, Known gaps): Showdown's per-Pokémon
+  `truantTurn`, 6 bits packed with `Side::knocked_off` and
+  `attract_source` (decided 2026-10-24).
 - OU game 15 (toxic, unconfirmed); `docs/TESTING.md`, step 8.
 - `build/runs/classify.py`'s KNOWN list is out of date.
 - `MAX_LOG_SIZE` is a placeholder 2048 until the bound is derived (the debug
