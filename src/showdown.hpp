@@ -6,7 +6,7 @@
 //   - EVs default to 0 and IVs to 31.
 //   - "Hidden Power [T]" with no IVs line takes T's HPivs spread
 //     (data/typechart.ts). Unlike Showdown, a [T] that the IVs don't produce
-//     is an error, not ignored.
+//     is an error, not ignored. A "Hidden Power: T" line is the same check.
 //   - Happiness: a "Happiness:" line wins. Otherwise 0 if the set has
 //     Frustration and not Return, else 255. Showdown gives 0 whenever the set
 //     has Frustration, even with Return.
@@ -15,8 +15,8 @@
 //     the caller's RNG.
 //   - Nature: none given is Hardy (any neutral nature is equivalent).
 //   - Ability: none given is allowed only for a species with one ability.
-// Lines Showdown knows but that change nothing in Gen III (Shiny, Pokeball
-// and so on) are skipped. Any other line is an error.
+// Lines Showdown knows but that change nothing in Gen III (Shiny, Pokeball,
+// Tera Type) are skipped. Any other line is an error.
 
 #pragma once
 
@@ -259,6 +259,7 @@ inline Parsed<helpers::Pokemon> parse_set(std::string_view text, RNG& rng) {
         const auto type = find<Type>(names::TYPE_IDS, id.substr(11));
         if (!type && id.substr(11) != "normal") return fail("unknown Hidden Power type: " + id);
         if (!type || *type == Type::Mystery) return fail("no Hidden Power of type " + id.substr(11));
+        if (hp_type && *hp_type != *type) return fail("conflicting Hidden Power types");
         hp_type = *type;
         move = Move::HiddenPower;
       } else {
@@ -267,7 +268,18 @@ inline Parsed<helpers::Pokemon> parse_set(std::string_view text, RNG& rng) {
         move = *found;
       }
       p.moves[moves++] = move;
-    } else if (starts_with(line, "Shiny: ") || starts_with(line, "Pokeball: ")) {
+    } else if (starts_with(line, "Hidden Power: ")) {
+      // Newer exports' set.hpType, checked against the IVs as "[T]" is
+      // (Showdown plays it over the IVs, sim/pokemon.ts:431).
+      const std::string t = to_id(line.substr(14));
+      const auto type = find<Type>(names::TYPE_IDS, t);
+      if (!type || *type == Type::Mystery || *type == Type::Normal) {
+        return fail("no Hidden Power of type " + t);
+      }
+      if (hp_type && *hp_type != *type) return fail("conflicting Hidden Power types");
+      hp_type = *type;
+    } else if (starts_with(line, "Shiny: ") || starts_with(line, "Pokeball: ") ||
+               starts_with(line, "Tera Type: ")) {
       // No effect in Gen III battles.
     } else {
       return fail("unknown line: " + std::string(line));
