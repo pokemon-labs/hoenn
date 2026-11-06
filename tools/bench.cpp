@@ -7,7 +7,11 @@
 // choices. The clock starts at the first battle's first update and stops
 // after the last battle's last update, so parsing and building aren't timed.
 //
-// Usage: bench [--battles N] [--seed N] [--log] TEAM_FILE...
+// --ovo runs the one-Pokémon engine, with every Pokémon of the teams as a team
+// of one. --singles runs main on those same teams, so the two compare like for
+// like: one-Pokémon games are short, and turn 0 weighs more in them.
+//
+// Usage: bench [--battles N] [--seed N] [--log] [--ovo | --singles] TEAM_FILE...
 
 #include <array>
 #include <chrono>
@@ -22,15 +26,15 @@
 #include "log.hpp"
 #include "calc.hpp"
 #include "chance.hpp"
+#include "engine.hpp"
 #include "helpers.hpp"
-#include "mechanics.hpp"
 #include "showdown.hpp"
 
 using namespace hoenn;
 
 namespace {
 
-using Bench = Options<protocol::NullLog, Chance<>, NullCalc>;
+template <typename E> using Bench = Options<protocol::NullLog, typename E::Chance, NullCalc>;
 using Logged = Options<protocol::FixedLog, NullChance, NullCalc>;
 
 // xorshift64: cheap, and good enough for picking teams and choices.
@@ -54,19 +58,20 @@ struct Count {
 };
 
 // Plays every battle to the end. `before` runs before each update.
-template <typename O, typename F>
-Count play(std::vector<Battle>& all, Cheap& rng, O& o, F before) {
-  std::array<Choice, MAX_CHOICES> c1{}, c2{};
+template <typename E, typename O, typename F>
+Count play(std::vector<E>& all, Cheap& rng, O& o, F before) {
+  std::array<Choice, E::MAX_CHOICES> c1{}, c2{};
   Count count;
-  for (Battle& battle : all) {
+  for (E& e : all) {
+    typename E::Battle& battle = e.start;
     before();
-    Result r = update(battle, Choice::pass(), Choice::pass(), o);
+    Result r = e.update(battle, Choice::pass(), Choice::pass(), o);
     count.updates++;
     while (!r.over()) {
       const uint8_t n1 = choices(battle, Player::P1, r.p1(), c1);
       const uint8_t n2 = choices(battle, Player::P2, r.p2(), c2);
       before();
-      r = update(battle, c1[rng.range(n1)], c2[rng.range(n2)], o);
+      r = e.update(battle, c1[rng.range(n1)], c2[rng.range(n2)], o);
       count.updates++;
     }
     count.turns += battle.turn;
@@ -74,49 +79,18 @@ Count play(std::vector<Battle>& all, Cheap& rng, O& o, F before) {
   return count;
 }
 
-} // namespace
+using Teams = std::vector<std::vector<helpers::Pokemon>>;
 
-int main(int argc, char** argv) {
-  uint64_t battles = 10000;
-  uint64_t seed = 1;
-  bool log = false;
-  std::vector<std::string> files;
-  for (int i = 1; i < argc; i++) {
-    const std::string arg = argv[i];
-    if (arg == "--battles" && i + 1 < argc) {
-      battles = std::strtoull(argv[++i], nullptr, 10);
-    } else if (arg == "--seed" && i + 1 < argc) {
-      seed = std::strtoull(argv[++i], nullptr, 10);
-    } else if (arg == "--log") {
-      log = true;
-    } else {
-      files.push_back(arg);
-    }
-  }
-
-  std::vector<std::vector<helpers::Pokemon>> teams;
-  RNG parse_rng{0};
-  for (const std::string& file : files) {
-    std::ifstream in(file);
-    std::stringstream ss;
-    ss << in.rdbuf();
-    for (const auto& team : showdown::parse_teams(ss.str(), parse_rng)) {
-      if (team.value) teams.push_back(team.value->pokemon);
-    }
-  }
-  if (teams.empty() || battles == 0) {
-    std::fprintf(stderr, "usage: bench [--battles N] [--seed N] [--log] TEAM_FILE... "
-                         "(no teams, or no battles)\n");
-    return 2;
-  }
-
+// Builds the battles, then times them.
+template <typename E> Count run(const Teams& teams, uint64_t battles, uint64_t seed,
+                                bool log, double& seconds) {
   Cheap rng{seed ? seed : 1};
-  std::vector<Battle> all;
+  std::vector<E> all;
   all.reserve(battles);
   for (uint64_t i = 0; i < battles; i++) {
     const uint32_t a = rng.range(uint32_t(teams.size()));
     const uint32_t b = rng.range(uint32_t(teams.size()));
-    all.push_back(*helpers::init_battle(rng.next(), teams[a], teams[b]));
+    all.push_back(*E::init(rng.next(), teams[a], teams[b]));
   }
 
   std::vector<uint8_t> buffer(protocol::MAX_LOG_SIZE);
@@ -127,17 +101,65 @@ int main(int argc, char** argv) {
     Logged o{protocol::fixed_log(writer), {}, {}};
     count = play(all, rng, o, [&] { writer.reset(); });
   } else {
-    Bench o{};
+    Bench<E> o{};
     count = play(all, rng, o, [] {});
   }
-  const double seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
-          .count();
+  seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  return count;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+  uint64_t battles = 10000;
+  uint64_t seed = 1;
+  bool log = false;
+  bool ovo = false;
+  bool singles = false;
+  std::vector<std::string> files;
+  for (int i = 1; i < argc; i++) {
+    const std::string arg = argv[i];
+    if (arg == "--battles" && i + 1 < argc) {
+      battles = std::strtoull(argv[++i], nullptr, 10);
+    } else if (arg == "--seed" && i + 1 < argc) {
+      seed = std::strtoull(argv[++i], nullptr, 10);
+    } else if (arg == "--log") {
+      log = true;
+    } else if (arg == "--ovo") {
+      ovo = true;
+    } else if (arg == "--singles") {
+      singles = true;
+    } else {
+      files.push_back(arg);
+    }
+  }
+
+  Teams teams;
+  RNG parse_rng{0};
+  for (const std::string& file : files) {
+    std::ifstream in(file);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    for (const auto& team : showdown::parse_teams(ss.str(), parse_rng)) {
+      if (team.value) teams.push_back(team.value->pokemon);
+    }
+  }
+  if (teams.empty() || battles == 0) {
+    std::fprintf(stderr, "usage: bench [--battles N] [--seed N] [--log] [--ovo | --singles] TEAM_FILE... "
+                         "(no teams, or no battles)\n");
+    return 2;
+  }
+
+  if (ovo || singles) teams = tools::singles(teams);
+  double seconds = 0;
+  const Count count = ovo ? run<tools::Ovo>(teams, battles, seed, log, seconds)
+                          : run<tools::Full>(teams, battles, seed, log, seconds);
 
   const uint64_t updates = count.updates, turns = count.turns;
-  std::printf("bench%s: %llu battles, %llu updates in %.3f s: %.0f updates/s "
+  std::printf("bench%s%s: %llu battles, %llu updates in %.3f s: %.0f updates/s "
               "(%.1f turns per battle)\n",
-              log ? " --log" : "", (unsigned long long)battles, (unsigned long long)updates,
+              ovo ? " --ovo" : singles ? " --singles" : "", log ? " --log" : "",
+              (unsigned long long)battles, (unsigned long long)updates,
               seconds, double(updates) / seconds,
               double(turns) / double(battles));
   return 0;

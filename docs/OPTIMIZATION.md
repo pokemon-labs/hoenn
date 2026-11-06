@@ -32,6 +32,20 @@ over-approximation (below), which no sampled game reached. Worth committing
 as `tools/check_same.cpp` for future work: build it against two trees and
 diff the outputs.
 
+## hoenn::ovo against main
+
+`bench --ovo` against `bench --singles`: the same one-Pokémon games (2,901,046
+updates on both), `teams/ou`, 250,000 battles, g++-14 -O3, pinned, 8
+alternating rounds, 2026-11-05.
+
+| | main, teams of one | ovo | |
+|---|---|---|---|
+| `bench` | 2.172M/s (460 ns) | 2.518M/s (397 ns) | +15.9%, 8 of 8 rounds |
+| `bench --log` | 1.900M/s (526 ns) | 2.257M/s (443 ns) | +18.8%, 8 of 8 rounds |
+
+These are updates in play from a stored battle, so they don't show what
+ovo's smaller Battle (168 bytes) saves on copies in search.
+
 ## How to measure
 
 - `bench` and `bench --log` in the release preset, pinned (`taskset -c N`),

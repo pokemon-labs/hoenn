@@ -58,7 +58,8 @@ target_link_libraries(check_frame PRIVATE hoenn hoenn_warnings)
 add_executable(soak tools/soak.cpp)
 target_link_libraries(soak PRIVATE hoenn hoenn_warnings)
 
-# Updates per second, null log, Chance on (tools/bench.cpp). Release only.
+# Updates per second, null log, Chance on, on either engine (tools/bench.cpp).
+# Release only.
 add_executable(bench tools/bench.cpp)
 target_link_libraries(bench PRIVATE hoenn hoenn_warnings)
 
