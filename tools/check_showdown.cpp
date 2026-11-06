@@ -622,11 +622,12 @@ std::string mismatch(const E& e, const typename E::Battle& battle, Result result
       const std::string_view id =
           species_id(active ? ours_side.active.species : p.species);
       // m[4] is Showdown's base slots. ovo has only the live ones, which
-      // Transform and Mimic rewrite, so it reads Showdown's live slots.
+      // Transform and Mimic rewrite, so it reads Showdown's live slots. Not
+      // once fainted: Showdown puts the base slots back, and ovo has none.
       std::vector<int64_t> theirs_pp;
       if constexpr (E::OVO) {
         const json::Value& sa = step["state"][std::string(side) + "active"];
-        if (!sa.is_null()) {
+        if (!sa.is_null() && !p.fainted()) {
           for (const json::Value& x : sa["moves"].array) theirs_pp.push_back(x[1].integer());
         }
       } else {
