@@ -134,8 +134,9 @@ constexpr Type boosted_type(HoldEffect effect) {
 // An unfainted active Pokémon has the ability (Showdown's getAllActive and
 // suppressingWeather skip fainted ones; the decomp's ABILITY_ON_FIELD2
 // doesn't).
-constexpr bool on_field(const Battle& battle, Ability ability) {
-  for (const Side& side : battle.sides) {
+template <typename B> constexpr bool on_field(const B& battle, Ability ability) {
+  for (const Player p : {Player::P1, Player::P2}) {
+    const auto& side = battle.side(p);
     if (side.active.ability == ability && !side.get(1).fainted()) return true;
   }
   return false;
@@ -143,7 +144,7 @@ constexpr bool on_field(const Battle& battle, Ability ability) {
 
 // The weather, unless an unfainted Cloud Nine or Air Lock suppresses it
 // (Field.effectiveWeather).
-constexpr Weather effective_weather(const Battle& battle) {
+template <typename B> constexpr Weather effective_weather(const B& battle) {
   if (on_field(battle, Ability::CloudNine) || on_field(battle, Ability::AirLock)) {
     return Weather::None;
   }
@@ -175,9 +176,10 @@ constexpr bool typeless(const Hit& hit) {
 // The decomp computes the same sum (Cmd_critcalc, bsc:1253), except that
 // Showdown gives Razor Wind critRatio 2 too, and this follows it. The roll
 // itself is a roll helper in effects.hpp.
-constexpr uint8_t crit_stage(const Battle& battle, Player player, Move move) {
-  const Side& side = battle.side(player);
-  const ActivePokemon& active = side.active;
+template <typename B>
+constexpr uint8_t crit_stage(const B& battle, Player player, Move move) {
+  const auto& side = battle.side(player);
+  const auto& active = side.active;
   const HoldEffect item = detail::item_data(side.get(1).item).effect;
   const Effect effect = get(move).effect;
 
@@ -196,7 +198,7 @@ constexpr uint8_t crit_stage(const Battle& battle, Player player, Move move) {
 }
 
 // Whether the hit can crit at all: not into Battle Armor or Shell Armor.
-constexpr bool can_crit(const Battle& battle, Player player) {
+template <typename B> constexpr bool can_crit(const B& battle, Player player) {
   const Ability ability = battle.side(foe(player)).active.ability;
   return ability != Ability::BattleArmor && ability != Ability::ShellArmor;
 }
@@ -211,11 +213,13 @@ constexpr bool can_crit(const Battle& battle, Player player) {
 //
 // The absorbing abilities (Flash Fire, Volt Absorb, Water Absorb) are the
 // backbone's, before this.
-constexpr uint8_t matchup(const Battle& battle, Player player, const Hit& hit) {
+template <typename B>
+constexpr uint8_t matchup(const B& battle, Player player, const Hit& hit) {
   assert(battle.valid() && hit.move != Move::None);
   if (detail::typeless(hit)) return 0;
 
-  const ActivePokemon& defender = battle.side(foe(player)).active;
+  const auto& foe_side = battle.side(foe(player));
+  const auto& defender = foe_side.active;
   const Type type = hit.type;
   const uint8_t n = defender.types[0] == defender.types[1] ? 1 : 2;
 
@@ -252,8 +256,8 @@ constexpr uint8_t matchup(const Battle& battle, Player player, const Hit& hit) {
 // The divisor is never zero for a valid Pokémon: the lowest Def or SpD at
 // any level is 4 (Chansey's base 5 Def, 0 IV, 0 EV, -Def nature), which is 1
 // at -6. A stat of 0-3 is corrupt state, so it's asserted, not checked.
-constexpr uint32_t damage(const Battle& battle, Player player, Player target,
-                          const Hit& hit) {
+template <typename B>
+constexpr uint32_t damage(const B& battle, Player player, Player target, const Hit& hit) {
   using namespace detail;
   assert(battle.valid());
   assert(hit.move != Move::None && hit.power != 0);
@@ -264,12 +268,12 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   assert(target == player ||
          !(matchup(battle, player, hit) & MoveResult::DOESNT_AFFECT_FOE));
 
-  const Side& side = battle.side(player);
-  const Side& foe_side = battle.side(target);
-  const ActivePokemon& attacker = side.active;
-  const ActivePokemon& defender = foe_side.active;
-  const Pokemon& attacker_mon = side.get(1);
-  const Pokemon& defender_mon = foe_side.get(1);
+  const auto& side = battle.side(player);
+  const auto& foe_side = battle.side(target);
+  const auto& attacker = side.active;
+  const auto& defender = foe_side.active;
+  const auto& attacker_mon = side.get(1);
+  const auto& defender_mon = foe_side.get(1);
   assert(attacker.species != Species::None &&
          defender.species != Species::None);
 
@@ -290,7 +294,8 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   if (attacker.volatiles.charged_up && type == Type::Electric) {
     m = chain(m, mod::DOUBLE);
   }
-  for (const Side& s : battle.sides) {
+  for (const Player p : {Player::P1, Player::P2}) {
+    const auto& s = battle.side(p);
     if (s.active.volatiles.mud_sport && type == Type::Electric) m = chain(m, mod::HALF);
     if (s.active.volatiles.water_sport && type == Type::Fire) m = chain(m, mod::HALF);
   }
@@ -451,7 +456,7 @@ constexpr uint32_t damage(const Battle& battle, Player player, Player target,
   // Astonish, Needle Arm and Extrasensory (data/mods/gen3/moves.ts), the
   // decomp's EFFECT_FLINCH_MINIMIZE_HIT (bs1:1898).
   const Move move = hit.move;
-  const Volatiles& v = defender.volatiles;
+  const auto& v = defender.volatiles;
   using K = Volatiles::Kind;
   if ((v.kind == K::Underground && (move == Move::Earthquake || move == Move::Magnitude)) ||
       (v.kind == K::Underwater && (move == Move::Surf || move == Move::Whirlpool)) ||
@@ -474,7 +479,8 @@ constexpr uint32_t apply_roll(uint32_t damage, uint8_t index) {
 }
 
 // The usual case: a hit on the foe.
-constexpr uint32_t damage(const Battle& battle, Player player, const Hit& hit) {
+template <typename B>
+constexpr uint32_t damage(const B& battle, Player player, const Hit& hit) {
   return damage(battle, player, foe(player), hit);
 }
 

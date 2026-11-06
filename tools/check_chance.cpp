@@ -24,7 +24,10 @@
 // encore; repeatable) leaves that part out of mask_hidden, an ablation that
 // should produce collisions wherever the effect is active.
 //
-// Usage: check_chance [--seed N] [--games N] [--samples N] [--replays N]
+// --ovo checks the one-Pokémon engine, with every Pokémon of the teams as a
+// team of one.
+//
+// Usage: check_chance [--ovo] [--seed N] [--games N] [--samples N] [--replays N]
 //                     [--every N] [--unmask NAME]... [--replay GAME_SEED]
 //                     team files...
 
@@ -46,7 +49,7 @@
 #include "calc.hpp"
 #include "data/names.hpp"
 #include "helpers.hpp"
-#include "mechanics.hpp"
+#include "engine.hpp"
 #include "showdown.hpp"
 
 using namespace hoenn;
@@ -55,15 +58,15 @@ using namespace hoenn::names;
 namespace {
 
 using Teams = std::vector<std::vector<helpers::Pokemon>>;
-using Observed = Options<protocol::NullLog, Chance<>, NullCalc>;
+template <typename E> using Observed = Options<protocol::NullLog, typename E::Chance, NullCalc>;
 
 // Raw bytes, as search keys on them, so no padding may differ.
 static_assert(std::has_unique_object_representations_v<Actions>);
 using Key = std::tuple<uint8_t, uint8_t, std::array<uint8_t, sizeof(Actions)>>;
 
-struct Value {
-  Battle battle;
-  Durations durations;
+template <typename E> struct Value {
+  typename E::Battle battle;
+  typename E::Durations durations;
   Result result;
   double probability;
 
@@ -129,11 +132,14 @@ void print_key(const Key& key) {
 }
 
 // The state a collision happened at: each side's active Pokémon.
-void print_state(const Battle& battle, const Durations& durations) {
+template <typename E>
+void print_state(const E& e, const typename E::Battle& battle,
+                 const typename E::Durations& durations) {
+  const auto& view = e.view(battle);
   for (int s = 0; s < 2; s++) {
-    const Side& side = battle.sides[s];
-    const ActivePokemon& a = side.active;
-    const Pokemon& p = side.get(1);
+    const auto& side = view.side(Player(s));
+    const auto& a = side.active;
+    const auto& p = side.get(1);
     std::printf("  p%d %.*s hp %u/%u status %u ability %.*s item %u, moves",
                 s + 1, int(SPECIES_IDS[uint16_t(a.species)].size()),
                 SPECIES_IDS[uint16_t(a.species)].data(), p.hp, p.stats.hp,
@@ -143,15 +149,19 @@ void print_state(const Battle& battle, const Durations& durations) {
       const std::string_view id = MOVE_IDS[uint16_t(m.id)];
       std::printf(" %.*s", int(id.size()), id.data());
     }
-    const Durations::Side& d = durations.get(Player(s));
+    const auto& d = durations.get(Player(s));
     std::printf(", sleep counts");
-    for (uint8_t c : d.sleep) std::printf(" %u", c);
+    if constexpr (E::OVO) {
+      std::printf(" %u", d.sleep);
+    } else {
+      for (uint8_t c : d.sleep) std::printf(" %u", c);
+    }
     std::printf("\n");
   }
 }
 
 // Names the parts of two values that differ.
-void print_diff(const Value& a, const Value& b) {
+void print_diff(const Value<tools::Full>& a, const Value<tools::Full>& b) {
   std::printf("  results %u/%u, differs in:", unsigned(a.result.type()),
               unsigned(b.result.type()));
   if (a.result != b.result) std::printf(" result");
@@ -200,6 +210,29 @@ void print_diff(const Value& a, const Value& b) {
   std::printf("\n");
 }
 
+void print_diff(const Value<tools::Ovo>& a, const Value<tools::Ovo>& b) {
+  std::printf("  results %u/%u, differs in:", unsigned(a.result.type()),
+              unsigned(b.result.type()));
+  if (a.result != b.result) std::printf(" result");
+  if (a.probability != b.probability) std::printf(" probability");
+  if (!(a.durations == b.durations)) std::printf(" durations");
+  if (a.battle.turn != b.battle.turn) std::printf(" turn");
+  if (!(a.battle.field == b.battle.field)) std::printf(" field");
+  for (int s = 0; s < 2; s++) {
+    const ovo::Side& x = a.battle.sides[s];
+    const ovo::Side& y = b.battle.sides[s];
+    if (x.hp != y.hp) std::printf(" p%d.hp(%u/%u)", s + 1, x.hp, y.hp);
+    if (x.status != y.status) {
+      std::printf(" p%d.status(%u/%u)", s + 1, x.status.bits, y.status.bits);
+    }
+    if (!(x.volatiles == y.volatiles)) std::printf(" p%d.volatiles", s + 1);
+    if (!(x.boosts == y.boosts)) std::printf(" p%d.boosts", s + 1);
+    if (!(x.conditions == y.conditions)) std::printf(" p%d.conditions", s + 1);
+    if (!(x == y)) std::printf(" (p%d side)", s + 1);
+  }
+  std::printf("\n");
+}
+
 // The hidden parts of the battle the value leaves out, as mask_hidden, each
 // of which --unmask can leave in. An ablation: leaving one in should make
 // collisions appear wherever that effect is active, which shows the test can
@@ -224,7 +257,7 @@ constexpr std::pair<const char*, Mask> MASK_NAMES[] = {
 
 uint16_t masked = ALL;
 
-void mask(Battle& battle) {
+void mask(hoenn::Battle& battle) {
   if (masked == ALL) return mask_hidden(battle);
   const auto one = [](uint8_t c) { return uint8_t(c != 0); };
   if (masked & SEED) battle.rng = {};
@@ -247,23 +280,42 @@ void mask(Battle& battle) {
   }
 }
 
+void mask(ovo::Battle& battle) {
+  if (masked == ALL) return ovo::mask_hidden(battle);
+  const auto one = [](uint8_t c) { return uint8_t(c != 0); };
+  if (masked & SEED) battle.rng = {};
+  for (ovo::Side& side : battle.sides) {
+    if ((masked & SLEEP) && side.status.asleep() && !side.status.self_inflicted()) {
+      side.status = Status::slp(1);
+    }
+    ovo::Volatiles& v = side.volatiles;
+    if (masked & CONFUSION) v.confusion = one(v.confusion);
+    if (masked & BINDING) v.wrapped = one(v.wrapped);
+    if ((masked & UPROAR) && v.kind == Volatiles::Kind::Uproar) v.lock = one(v.lock);
+    if ((masked & THRASH) && v.kind == Volatiles::Kind::Thrash) v.lock = one(v.lock);
+    if (masked & DISABLE) v.disable_timer = one(v.disable_timer);
+    if (masked & ENCORE) v.encore_timer = one(v.encore_timer);
+  }
+}
+
 // One update from the state, from a fresh seed after randomize_hidden.
-template <typename O>
-std::pair<Key, Value> sample(const Battle& battle, const Durations& durations,
-                             Choice x, Choice y, RNG& rng, O& o) {
-  Battle copy = battle;
+template <typename E, typename O>
+std::pair<Key, Value<E>> sample(const E& e, const typename E::Battle& battle,
+                                const typename E::Durations& durations,
+                                Choice x, Choice y, RNG& rng, O& o) {
+  typename E::Battle copy = battle;
   copy.rng.seed = rng.next();
   randomize_hidden(copy, durations);
   o.chance.durations = durations;
-  const Result result = update(copy, x, y, o);
+  const Result result = e.update(copy, x, y, o);
   mask(copy);
   Key key{x.bits, y.bits, {}};
   std::memcpy(std::get<2>(key).data(), &o.chance.actions, sizeof(Actions));
-  return {key, Value{copy, o.chance.durations, result,
-                     o.chance.probability.p / o.chance.probability.q}};
+  return {key, Value<E>{copy, o.chance.durations, result,
+                        o.chance.probability.p / o.chance.probability.q}};
 }
 
-using Forced = Options<protocol::NullLog, Chance<>, Calc>;
+template <typename E> using Forced = Options<protocol::NullLog, typename E::Chance, Calc>;
 
 // The chance of a Binomial(n, p) count at least as far from n * p as k, at
 // most exp(-n KL(k/n || p)) (the Chernoff bound, either tail).
@@ -318,17 +370,19 @@ constexpr double BIN_ALPHA = 1e-7;
 // small branches go unseen), so it's tested on `samples` held-out draws: the
 // number landing on a key not yet found must be consistent with it. Returns
 // false on a failure.
-bool check_state(const Battle& battle, const Durations& durations, Result r,
+template <typename E>
+bool check_state(const E& engine, const typename E::Battle& battle,
+                 const typename E::Durations& durations, Result r,
                  RNG& rng, uint32_t samples, uint32_t replays,
                  uint64_t game_seed) {
-  std::array<Choice, MAX_CHOICES> c1{}, c2{};
+  std::array<Choice, E::MAX_CHOICES> c1{}, c2{};
   const uint8_t n1 = choices(battle, Player::P1, r.p1(), c1);
   const uint8_t n2 = choices(battle, Player::P2, r.p2(), c2);
   stats.states++;
   for (uint8_t i = 0; i < n1; i++) {
     for (uint8_t j = 0; j < n2; j++) {
       struct Entry {
-        Value value;
+        Value<E> value;
         uint32_t free = 0;
         uint32_t total = 0;
         // Found before the held-out draws, which are classified against
@@ -336,7 +390,7 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
         bool before = false;
       };
       std::map<Key, Entry> seen;
-      const auto add = [&](const std::pair<Key, Value>& kv, bool free) {
+      const auto add = [&](const std::pair<Key, Value<E>>& kv, bool free) {
         auto [it, inserted] = seen.try_emplace(kv.first, Entry{kv.second});
         it->second.total++;
         if (free) it->second.free++;
@@ -344,7 +398,7 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
         std::printf("game %llu, turn %u: collision%s\n",
                     (unsigned long long)game_seed, battle.turn,
                     free ? "" : " (forced replay)");
-        print_state(battle, durations);
+        print_state(engine, battle, durations);
         print_key(kv.first);
         print_diff(it->second.value, kv.second);
         stats.collisions++;
@@ -352,8 +406,8 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
       };
 
       for (uint32_t k = 0; k < samples; k++) {
-        Observed o{};
-        if (!add(sample(battle, durations, c1[i], c2[j], rng, o), true)) {
+        Observed<E> o{};
+        if (!add(sample(engine, battle, durations, c1[i], c2[j], rng, o), true)) {
           return false;
         }
       }
@@ -361,10 +415,10 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
       for (const auto& [key, e] : seen) keys.push_back(key);
       for (const Key& key : keys) {
         for (uint32_t k = 0; k < replays; k++) {
-          Forced o{};
+          Forced<E> o{};
           std::memcpy(&o.calc.overrides, std::get<2>(key).data(),
                       sizeof(Actions));
-          const auto kv = sample(battle, durations, c1[i], c2[j], rng, o);
+          const auto kv = sample(engine, battle, durations, c1[i], c2[j], rng, o);
           if (kv.first != key) stats.unreproduced++;
           if (!add(kv, false)) return false;
         }
@@ -385,7 +439,7 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
                       "probability %g\n",
                       (unsigned long long)game_seed, battle.turn, e.free,
                       samples, e.value.probability);
-          print_state(battle, durations);
+          print_state(engine, battle, durations);
           print_key(key);
           stats.frequency++;
           ok = false;
@@ -400,8 +454,8 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
       mass[Totals::UNSEEN] = rest;
       uint32_t hits[Totals::BINS] = {};
       for (uint32_t k = 0; k < samples; k++) {
-        Observed o{};
-        const auto kv = sample(battle, durations, c1[i], c2[j], rng, o);
+        Observed<E> o{};
+        const auto kv = sample(engine, battle, durations, c1[i], c2[j], rng, o);
         const auto it = seen.find(kv.first);
         hits[it == seen.end() || !it->second.before
                  ? Totals::UNSEEN
@@ -422,7 +476,7 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
                     (unsigned long long)game_seed, battle.turn,
                     unsigned(c1[i].bits), unsigned(c2[j].bits), seen.size(),
                     total, fresh, samples);
-        print_state(battle, durations);
+        print_state(engine, battle, durations);
         if (std::getenv("HOENN_DUMP_KEYS")) {
           for (const auto& [key, e] : seen) {
             std::printf("  p %.6g free %u", e.value.probability, e.free);
@@ -444,19 +498,21 @@ bool check_state(const Battle& battle, const Durations& durations, Result r,
 
 // One game from its seed, checking every `every`th state. Stops at the
 // first collision.
+template <typename E>
 void play(const Teams& teams, uint64_t game_seed, uint32_t samples,
           uint32_t replays, uint32_t every) {
   RNG rng{game_seed};
   const uint32_t a = rng.range(uint32_t(teams.size()));
   const uint32_t b = rng.range(uint32_t(teams.size()));
-  Battle battle = *helpers::init_battle(rng.next(), teams[a], teams[b]);
-  Observed o{};
+  const E e = *E::init(rng.next(), teams[a], teams[b]);
+  typename E::Battle battle = e.start;
+  Observed<E> o{};
   RNG sampler{rng.next()};
-  Result r = update(battle, Choice::pass(), Choice::pass(), o);
-  std::array<Choice, MAX_CHOICES> c1{}, c2{};
+  Result r = e.update(battle, Choice::pass(), Choice::pass(), o);
+  std::array<Choice, E::MAX_CHOICES> c1{}, c2{};
   for (uint32_t n = 0; !r.over(); n++) {
     if (n % every == 0 &&
-        !check_state(battle, o.chance.durations, r, sampler, samples,
+        !check_state(e, battle, o.chance.durations, r, sampler, samples,
                      replays, game_seed)) {
       return;
     }
@@ -464,7 +520,7 @@ void play(const Teams& teams, uint64_t game_seed, uint32_t samples,
     const uint8_t n2 = choices(battle, Player::P2, r.p2(), c2);
     const Choice x = c1[rng.range(n1)];
     const Choice y = c2[rng.range(n2)];
-    r = update(battle, x, y, o);
+    r = e.update(battle, x, y, o);
   }
 }
 
@@ -492,6 +548,7 @@ int main(int argc, char** argv) {
   uint32_t every = 1;
   bool replay = false;
   uint64_t replay_seed = 0;
+  bool ovo = false;
   std::vector<std::string> files;
   for (int i = 1; i < argc; i++) {
     const std::string arg = argv[i];
@@ -518,23 +575,32 @@ int main(int argc, char** argv) {
     } else if (arg == "--replay" && i + 1 < argc) {
       replay = true;
       replay_seed = std::strtoull(argv[++i], nullptr, 10);
+    } else if (arg == "--ovo") {
+      ovo = true;
     } else {
       files.push_back(arg);
     }
   }
   if (every == 0) every = 1;
 
-  const Teams teams = load(files);
+  const Teams teams = ovo ? tools::singles(load(files)) : load(files);
   if (teams.empty()) {
     std::fprintf(stderr, "check_chance: no teams (pass Showdown export files)\n");
     return 2;
   }
 
+  const auto one = [&](uint64_t game_seed) {
+    if (ovo) {
+      play<tools::Ovo>(teams, game_seed, samples, replays, every);
+    } else {
+      play<tools::Full>(teams, game_seed, samples, replays, every);
+    }
+  };
   if (replay) {
-    play(teams, replay_seed, samples, replays, every);
+    one(replay_seed);
   } else {
     RNG seeds{seed};
-    for (uint64_t i = 0; i < games; i++) play(teams, seeds.next(), samples, replays, every);
+    for (uint64_t i = 0; i < games; i++) one(seeds.next());
   }
   std::printf("check_chance: %llu states, %llu choice pairs, %.1f keys per "
               "pair (max %llu), %llu collisions\n",

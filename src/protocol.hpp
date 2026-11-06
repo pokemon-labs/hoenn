@@ -386,7 +386,7 @@ enum class AbilityFrom : uint8_t {
 };
 
 // The ID of p's active Pokémon: its party position, which never changes.
-constexpr ID ident(const Battle& battle, Player p) {
+template <typename B> constexpr ID ident(const B& battle, Player p) {
   return ID::init(p, battle.side(p).order[0]);
 }
 
@@ -394,7 +394,7 @@ inline constexpr ID NO_ID{0};
 
 namespace detail {
 
-template <typename L> void hp(L& log, const Pokemon& mon) {
+template <typename L, typename Mon> void hp(L& log, const Mon& mon) {
   log.template write_int<uint16_t>(mon.hp);
   log.template write_int<uint16_t>(mon.stats.hp);
   log.write_byte(mon.status.bits);
@@ -449,8 +449,8 @@ template <typename L> void miss(L& log, ID source, ID target, bool attr = true) 
   }
 }
 
-template <typename L>
-void switched(L& log, ArgType type, ID id, const Pokemon& mon,
+template <typename L, typename Mon>
+void switched(L& log, ArgType type, ID id, const Mon& mon,
               SwitchFrom from = SwitchFrom::None) {
   if constexpr (L::enabled) {
     log.write(type);
@@ -755,7 +755,7 @@ template <typename L> void field_activate(L& log, FieldActivate effect) {
 }
 
 // -sethp|P|HP|[from] move: Pain Split, with [silent] for the target's.
-template <typename L> void set_hp(L& log, ID id, const Pokemon& mon, bool silent) {
+template <typename L, typename Mon> void set_hp(L& log, ID id, const Mon& mon, bool silent) {
   if constexpr (L::enabled) {
     log.write(ArgType::SetHP);
     log.write_byte(id.bits);
@@ -1057,8 +1057,8 @@ template <typename L> void end(L& log) {
   }
 }
 
-template <typename L>
-void damage(L& log, ID id, const Pokemon& mon, Damage reason = Damage::None) {
+template <typename L, typename Mon>
+void damage(L& log, ID id, const Mon& mon, Damage reason = Damage::None) {
   if constexpr (L::enabled) {
     assert(reason != Damage::LeechSeed && reason != Damage::Bound &&
            reason != Damage::Ability);
@@ -1070,8 +1070,8 @@ void damage(L& log, ID id, const Pokemon& mon, Damage reason = Damage::None) {
 }
 
 // Damage [from] Leech Seed, [of] the seeder.
-template <typename L>
-void damage_seeded(L& log, ID id, const Pokemon& mon, ID of) {
+template <typename L, typename Mon>
+void damage_seeded(L& log, ID id, const Mon& mon, ID of) {
   if constexpr (L::enabled) {
     log.write(ArgType::Damage);
     log.write_byte(id.bits);
@@ -1081,8 +1081,8 @@ void damage_seeded(L& log, ID id, const Pokemon& mon, ID of) {
   }
 }
 
-template <typename L>
-void damage_bound(L& log, ID id, const Pokemon& mon, Move m) {
+template <typename L, typename Mon>
+void damage_bound(L& log, ID id, const Mon& mon, Move m) {
   if constexpr (L::enabled) {
     log.write(ArgType::Damage);
     log.write_byte(id.bits);
@@ -1092,8 +1092,8 @@ void damage_bound(L& log, ID id, const Pokemon& mon, Move m) {
   }
 }
 
-template <typename L>
-void damage_ability(L& log, ID id, const Pokemon& mon, Ability a, ID of) {
+template <typename L, typename Mon>
+void damage_ability(L& log, ID id, const Mon& mon, Ability a, ID of) {
   if constexpr (L::enabled) {
     log.write(ArgType::Damage);
     log.write_byte(id.bits);
@@ -1104,8 +1104,8 @@ void damage_ability(L& log, ID id, const Pokemon& mon, Ability a, ID of) {
   }
 }
 
-template <typename L>
-void heal(L& log, ID id, const Pokemon& mon, Heal reason = Heal::None) {
+template <typename L, typename Mon>
+void heal(L& log, ID id, const Mon& mon, Heal reason = Heal::None) {
   if constexpr (L::enabled) {
     assert(reason == Heal::None || reason == Heal::Silent || reason == Heal::Ingrain);
     log.write(ArgType::Heal);
@@ -1115,7 +1115,7 @@ void heal(L& log, ID id, const Pokemon& mon, Heal reason = Heal::None) {
   }
 }
 
-template <typename L> void heal_drain(L& log, ID id, const Pokemon& mon, ID of) {
+template <typename L, typename Mon> void heal_drain(L& log, ID id, const Mon& mon, ID of) {
   if constexpr (L::enabled) {
     log.write(ArgType::Heal);
     log.write_byte(id.bits);
@@ -1125,8 +1125,8 @@ template <typename L> void heal_drain(L& log, ID id, const Pokemon& mon, ID of) 
   }
 }
 
-template <typename L>
-void heal_item(L& log, ID id, const Pokemon& mon, Item item, ID of = NO_ID) {
+template <typename L, typename Mon>
+void heal_item(L& log, ID id, const Mon& mon, Item item, ID of = NO_ID) {
   if constexpr (L::enabled) {
     log.write(ArgType::Heal);
     log.write_byte(id.bits);
@@ -1137,8 +1137,8 @@ void heal_item(L& log, ID id, const Pokemon& mon, Item item, ID of = NO_ID) {
   }
 }
 
-template <typename L>
-void heal_ability(L& log, ID id, const Pokemon& mon, Ability a, ID of = NO_ID) {
+template <typename L, typename Mon>
+void heal_ability(L& log, ID id, const Mon& mon, Ability a, ID of = NO_ID) {
   if constexpr (L::enabled) {
     log.write(ArgType::Heal);
     log.write_byte(id.bits);
@@ -1149,8 +1149,8 @@ void heal_ability(L& log, ID id, const Pokemon& mon, Ability a, ID of = NO_ID) {
   }
 }
 
-template <typename L>
-void heal_wish(L& log, ID id, const Pokemon& mon, uint8_t wisher) {
+template <typename L, typename Mon>
+void heal_wish(L& log, ID id, const Mon& mon, uint8_t wisher) {
   if constexpr (L::enabled) {
     log.write(ArgType::Heal);
     log.write_byte(id.bits);

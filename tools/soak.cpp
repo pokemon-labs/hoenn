@@ -7,7 +7,10 @@
 // seed and every choice), so a failing game replays alone with --replay.
 // When a game dies to an assert or a sanitizer, its seed is printed first.
 //
-// Usage: soak [--seed N] [--games N] [--replay GAME_SEED] team files...
+// --ovo plays the one-Pokémon engine, with every Pokémon of the teams as a team
+// of one.
+//
+// Usage: soak [--ovo] [--seed N] [--games N] [--replay GAME_SEED] team files...
 
 #include <array>
 #include <chrono>
@@ -40,7 +43,7 @@
 #include "options.hpp"
 #include "log.hpp"
 #include "helpers.hpp"
-#include "mechanics.hpp"
+#include "engine.hpp"
 #include "showdown.hpp"
 
 using namespace hoenn;
@@ -48,7 +51,7 @@ using namespace hoenn;
 namespace {
 
 using Teams = std::vector<std::vector<helpers::Pokemon>>;
-using Observed = Options<protocol::NullLog, Chance<>, Calc>;
+template <typename E> using Observed = Options<protocol::NullLog, typename E::Chance, Calc>;
 
 // The game in progress, for the crash handlers. Written before each game.
 char current[128] = "no game started";
@@ -94,17 +97,18 @@ struct Game {
 // One game from its seed. The draws come in a fixed order (team pair, battle
 // seed, then P1's choice before P2's), so a seed replays the same way under
 // any compiler.
-Game play(const Teams& teams, uint64_t game_seed) {
+template <typename E> Game play(const Teams& teams, uint64_t game_seed) {
   RNG rng{game_seed};
   const uint32_t a = rng.range(uint32_t(teams.size()));
   const uint32_t b = rng.range(uint32_t(teams.size()));
   std::snprintf(current, sizeof(current), "game seed %llu (teams %u and %u)",
                 (unsigned long long)game_seed, a, b);
 
-  Battle battle = *helpers::init_battle(rng.next(), teams[a], teams[b]);
-  Observed o{};
-  Result r = update(battle, Choice::pass(), Choice::pass(), o);
-  std::array<Choice, MAX_CHOICES> c1{}, c2{};
+  const E e = *E::init(rng.next(), teams[a], teams[b]);
+  typename E::Battle battle = e.start;
+  Observed<E> o{};
+  Result r = e.update(battle, Choice::pass(), Choice::pass(), o);
+  std::array<Choice, E::MAX_CHOICES> c1{}, c2{};
   uint64_t updates = 1;
   while (!r.over()) {
     const uint8_t n1 = choices(battle, Player::P1, r.p1(), c1);
@@ -112,9 +116,9 @@ Game play(const Teams& teams, uint64_t game_seed) {
     CHECK(n1 >= 1 && n2 >= 1, game_seed);
     const Choice x = c1[rng.range(n1)];
     const Choice y = c2[rng.range(n2)];
-    r = update(battle, x, y, o);
+    r = e.update(battle, x, y, o);
     updates++;
-    CHECK(battle.valid(), game_seed);
+    CHECK(e.valid(battle), game_seed);
     CHECK(battle.turn <= Battle::MAX_TURNS, game_seed);
     const auto& p = o.chance.probability;
     CHECK(p.p >= 1 && p.p <= p.q, game_seed);
@@ -143,6 +147,7 @@ int main(int argc, char** argv) {
   uint64_t games = 100;
   bool replay = false;
   uint64_t replay_seed = 0;
+  bool ovo = false;
   std::vector<std::string> files;
   for (int i = 1; i < argc; i++) {
     const std::string arg = argv[i];
@@ -153,12 +158,14 @@ int main(int argc, char** argv) {
     } else if (arg == "--replay" && i + 1 < argc) {
       replay = true;
       replay_seed = std::strtoull(argv[++i], nullptr, 10);
+    } else if (arg == "--ovo") {
+      ovo = true;
     } else {
       files.push_back(arg);
     }
   }
 
-  const Teams teams = load(files);
+  const Teams teams = ovo ? tools::singles(load(files)) : load(files);
   if (teams.empty()) {
     std::fprintf(stderr, "soak: no teams (pass Showdown export files)\n");
     return 2;
@@ -172,8 +179,12 @@ int main(int argc, char** argv) {
   __sanitizer_set_death_callback(report);
 #endif
 
+  const auto one = [&](uint64_t game_seed) {
+    return ovo ? play<tools::Ovo>(teams, game_seed) : play<tools::Full>(teams, game_seed);
+  };
+
   if (replay) {
-    const Game g = play(teams, replay_seed);
+    const Game g = one(replay_seed);
     std::printf("game seed %llu: %llu updates, turn %u, result %u\n",
                 (unsigned long long)replay_seed,
                 (unsigned long long)g.updates, g.turns, unsigned(g.result));
@@ -185,7 +196,7 @@ int main(int argc, char** argv) {
   uint64_t outcomes[5] = {};
   const auto start = std::chrono::steady_clock::now();
   for (uint64_t i = 0; i < games; i++) {
-    const Game g = play(teams, seeds.next());
+    const Game g = one(seeds.next());
     updates += g.updates;
     turns += g.turns;
     if (g.turns >= Battle::MAX_TURNS) capped++;

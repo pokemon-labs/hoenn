@@ -6,7 +6,8 @@
                              [--out DIR] [--keep-traces]
 
 ENV is a table in tools/criteria.toml, with team files (`teams`) or a pool
-that tools/gen_teams.cjs draws from the run seed (`generate`). The suites, each split into --jobs
+that tools/gen_teams.cjs draws from the run seed (`generate`); `ovo = true`
+runs hoenn::ovo on every Pokémon of them as a team of one. The suites, each split into --jobs
 shards run in parallel: check_showdown (traces from Showdown, then the
 check), soak (debug) and check_chance (release). A fresh 64-bit seed is
 drawn unless --seed is given; every shard's seed derives from it, so the run
@@ -122,18 +123,20 @@ def default_trace_jobs(jobs):
     return max(1, min(jobs, free // TRACE_BUDGET))
 
 
-def showdown_shard(i, seed, games, crit, files, sd, out, keep):
+def showdown_shard(i, seed, games, crit, files, sd, out, keep, ovo):
     trace = os.path.join(out, f'traces{i}.jsonl')
     with traces_running, open(trace, 'w') as f:
         t = subprocess.run(['node', 'tools/showdown_traces.cjs', '--games',
                             str(games), '--seed', str(seed), '--format',
                             crit.get('format', 'gen3ou'), '--showdown', sd,
+                            *(['--singles'] if ovo else []),
                             *files], cwd=ROOT, stdout=f, stderr=subprocess.PIPE,
                            text=True)
     if t.returncode:
         return ('showdown', i, seed, t.returncode, t.stderr, trace)
     c = subprocess.run(['build/release/check_showdown', '--quiet', '--tries',
-                        str(crit['tries']), '--seed', str(seed), trace],
+                        str(crit['tries']), '--seed', str(seed),
+                        *(['--ovo'] if ovo else []), trace],
                        cwd=ROOT, capture_output=True, text=True)
     failed = c.returncode != 0 or '\ngame ' in '\n' + c.stdout
     if not keep and not failed:
@@ -141,17 +144,17 @@ def showdown_shard(i, seed, games, crit, files, sd, out, keep):
     return ('showdown', i, seed, c.returncode, c.stdout, trace)
 
 
-def soak_shard(i, seed, games, files):
+def soak_shard(i, seed, games, files, ovo):
     c = subprocess.run(['build/debug/soak', '--games', str(games), '--seed',
-                        str(seed), *files], cwd=ROOT, capture_output=True,
+                        str(seed), *(['--ovo'] if ovo else []), *files], cwd=ROOT, capture_output=True,
                        text=True)
     return ('soak', i, seed, c.returncode, c.stdout + c.stderr, None)
 
 
-def chance_shard(i, seed, games, crit, files):
+def chance_shard(i, seed, games, crit, files, ovo):
     c = subprocess.run(['build/release/check_chance', '--games', str(games),
                         '--samples', str(crit['samples']), '--seed', str(seed),
-                        *files], cwd=ROOT, capture_output=True, text=True)
+                        *(['--ovo'] if ovo else []), *files], cwd=ROOT, capture_output=True, text=True)
     return ('chance', i, seed, c.returncode, c.stdout + c.stderr, None)
 
 
@@ -264,6 +267,7 @@ def main():
                  str(gen['teams']), '--seed', str(next(seeds)), '--showdown', sd],
                 stdout=f, stderr=subprocess.DEVNULL)
         print(f'  {gen["teams"]} {gen["mode"]} teams in {files[0]}', flush=True)
+    ovo = env.get('ovo', False)
     scaled = lambda g: max(1, round(g * args.scale))
     jobs = []
     with cf.ThreadPoolExecutor(max_workers=n) as pool:
@@ -271,15 +275,15 @@ def main():
         for i, g in enumerate(split(scaled(sdc['games']), n)):
             if g:
                 jobs.append(pool.submit(showdown_shard, i, next(seeds), g, sdc,
-                                        files, sd, out, args.keep_traces))
+                                        files, sd, out, args.keep_traces, ovo))
         for i, g in enumerate(split(scaled(env['soak']['games']), n)):
             if g:
-                jobs.append(pool.submit(soak_shard, i, next(seeds), g, files))
+                jobs.append(pool.submit(soak_shard, i, next(seeds), g, files, ovo))
         cc = env['chance']
         for i, g in enumerate(split(scaled(cc['games']), n)):
             if g:
                 jobs.append(pool.submit(chance_shard, i, next(seeds), g, cc,
-                                        files))
+                                        files, ovo))
         results = []
         for done, job in enumerate(cf.as_completed(jobs), 1):
             r = job.result()

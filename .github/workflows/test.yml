@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [ou, ou_legal, random]
+        env: [ou, ou_legal, random, ovo_ou, ovo_ou_legal, ovo_random]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

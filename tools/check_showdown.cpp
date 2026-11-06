@@ -30,7 +30,7 @@
 // A failure to match within the cap can be a bug or bad luck: rerun it with
 // a higher --tries.
 //
-// Usage: check_showdown [--tries N] [--seed N] [--game G] [--quiet] [--why]
+// Usage: check_showdown [--ovo] [--tries N] [--seed N] [--game G] [--quiet] [--why]
 //                       [--no-log] traces.jsonl...
 //
 // A failing step reports the longest log prefix among the tries whose state
@@ -56,7 +56,7 @@
 #include "data/names.hpp"
 #include "format.hpp"
 #include "helpers.hpp"
-#include "mechanics.hpp"
+#include "engine.hpp"
 #include "showdown.hpp"
 #include "json.hpp"
 
@@ -65,7 +65,7 @@ using namespace hoenn::names;
 
 namespace {
 
-using Observed = Options<protocol::FixedLog, Chance<>, Calc>;
+template <typename E> using Observed = Options<protocol::FixedLog, typename E::Chance, Calc>;
 
 // Metronome's pick, read from Showdown's move line ([from] Metronome) and
 // forced through Calc: a random search can't find two picks (1/336 each)
@@ -254,6 +254,7 @@ struct Config {
   bool quiet = false;
   bool why = false; // tally every try's mismatch at a failing step
   bool log = true;  // compare the log
+  bool ovo = false; // the one-Pokémon engine, on traces of one-Pokémon teams
 };
 
 struct Counts {
@@ -294,7 +295,7 @@ Item item_of(std::string_view id) {
 }
 
 // As Showdown's Pokemon.status, which is "fnt" once fainted.
-const char* status_id(const Pokemon& p) {
+template <typename P> const char* status_id(const P& p) {
   const Status s = p.status;
   if (p.hp == 0) return "fnt";
   if (s.sleep()) return "slp";
@@ -373,9 +374,12 @@ void print_log(const json::Value& step) {
 }
 
 // Our active Pokémon's moves beside Showdown's, after the previous step.
-void print_active(const Battle& battle, Player p, const json::Value* prev) {
+template <typename E>
+void print_active(const E& e, const typename E::Battle& battle, Player p,
+                  const json::Value* prev) {
   const char* side = p == Player::P1 ? "p1" : "p2";
-  const ActivePokemon& a = battle.side(p).active;
+  const auto& ours = e.view(battle).side(p);
+  const auto& a = ours.active;
   std::printf("  ours:");
   for (const MoveSlot& m : a.moves) {
     const std::string_view id = MOVE_IDS[uint16_t(m.id)];
@@ -399,58 +403,61 @@ void print_active(const Battle& battle, Player p, const json::Value* prev) {
 
 // The volatiles the guard compares, by Showdown's name, and whether our
 // active Pokémon has each.
-struct VolatileName {
+template <typename A> struct VolatileName {
   const char* name;
-  bool (*has)(const ActivePokemon&);
+  bool (*has)(const A&);
 };
 
-constexpr VolatileName VOLATILES[] = {
-    {"confusion", [](const ActivePokemon& a) { return a.volatiles.confusion != 0; }},
-    {"substitute", [](const ActivePokemon& a) { return a.volatiles.substitute; }},
-    {"leechseed", [](const ActivePokemon& a) { return a.volatiles.leech_seed; }},
-    {"encore", [](const ActivePokemon& a) { return a.volatiles.encored_move != Move::None; }},
-    {"taunt", [](const ActivePokemon& a) { return a.volatiles.taunt != 0; }},
-    {"disable", [](const ActivePokemon& a) { return a.volatiles.disabled_move != Move::None; }},
-    {"focusenergy", [](const ActivePokemon& a) { return a.volatiles.focus_energy; }},
-    {"ingrain", [](const ActivePokemon& a) { return a.volatiles.rooted; }},
-    {"perishsong", [](const ActivePokemon& a) { return a.volatiles.perish_song != 0; }},
-    {"curse", [](const ActivePokemon& a) { return a.volatiles.cursed; }},
-    {"nightmare", [](const ActivePokemon& a) { return a.volatiles.nightmare; }},
-    {"yawn", [](const ActivePokemon& a) { return a.volatiles.yawn != 0; }},
-    {"attract", [](const ActivePokemon& a) { return a.volatiles.infatuated; }},
-    {"trapped", [](const ActivePokemon& a) { return a.volatiles.escape_prevention; }},
-    {"partiallytrapped", [](const ActivePokemon& a) { return a.volatiles.wrapped != 0; }},
-    {"flashfire", [](const ActivePokemon& a) { return a.volatiles.flash_fire; }},
-    {"choicelock", [](const ActivePokemon& a) { return a.volatiles.choice_move != Move::None; }},
-    {"foresight", [](const ActivePokemon& a) { return a.volatiles.foresight; }},
-    {"torment", [](const ActivePokemon& a) { return a.volatiles.torment; }},
-    {"charge", [](const ActivePokemon& a) { return a.volatiles.charged_up; }},
-    {"grudge", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Grudge; }},
-    {"mustrecharge", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Recharge; }},
+template <typename A> constexpr VolatileName<A> VOLATILES[] = {
+    {"confusion", [](const auto& a) { return a.volatiles.confusion != 0; }},
+    {"substitute", [](const auto& a) { return a.volatiles.substitute; }},
+    {"leechseed", [](const auto& a) { return a.volatiles.leech_seed; }},
+    {"encore", [](const auto& a) { return a.volatiles.encored_move != Move::None; }},
+    {"taunt", [](const auto& a) { return a.volatiles.taunt != 0; }},
+    {"disable", [](const auto& a) { return a.volatiles.disabled_move != Move::None; }},
+    {"focusenergy", [](const auto& a) { return a.volatiles.focus_energy; }},
+    {"ingrain", [](const auto& a) { return a.volatiles.rooted; }},
+    {"perishsong", [](const auto& a) { return a.volatiles.perish_song != 0; }},
+    {"curse", [](const auto& a) { return a.volatiles.cursed; }},
+    {"nightmare", [](const auto& a) { return a.volatiles.nightmare; }},
+    {"yawn", [](const auto& a) { return a.volatiles.yawn != 0; }},
+    {"attract", [](const auto& a) { return a.volatiles.infatuated; }},
+    {"trapped", [](const auto& a) { return a.volatiles.escape_prevention; }},
+    {"partiallytrapped", [](const auto& a) { return a.volatiles.wrapped != 0; }},
+    {"flashfire", [](const auto& a) { return a.volatiles.flash_fire; }},
+    {"choicelock", [](const auto& a) { return a.volatiles.choice_move != Move::None; }},
+    {"foresight", [](const auto& a) { return a.volatiles.foresight; }},
+    {"torment", [](const auto& a) { return a.volatiles.torment; }},
+    {"charge", [](const auto& a) { return a.volatiles.charged_up; }},
+    {"grudge", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Grudge; }},
+    {"mustrecharge", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Recharge; }},
     // Step 5 group 4: the locked moves and Rage.
-    {"lockedmove", [](const ActivePokemon& a) {
+    {"lockedmove", [](const auto& a) {
        return a.volatiles.kind == Volatiles::Kind::Thrash;
      }},
-    {"uproar", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Uproar; }},
-    {"bide", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Bide; }},
-    {"rollout", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Rollout && a.volatiles.locked_move == Move::Rollout; }},
-    {"iceball", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Rollout && a.volatiles.locked_move == Move::IceBall; }},
-    {"furycutter", [](const ActivePokemon& a) { return a.volatiles.fury_cutter != 0; }},
-    {"rage", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Rage; }},
+    {"uproar", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Uproar; }},
+    {"bide", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Bide; }},
+    {"rollout", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Rollout && a.volatiles.locked_move == Move::Rollout; }},
+    {"iceball", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Rollout && a.volatiles.locked_move == Move::IceBall; }},
+    {"furycutter", [](const auto& a) { return a.volatiles.fury_cutter != 0; }},
+    {"rage", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Rage; }},
     // The semi-invulnerable turn, by the move's own volatile. Not
     // twoturnmove: Showdown keeps it until the residuals after the second
     // turn, so a request in between would differ.
-    {"fly", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::OnAir && a.volatiles.locked_move == Move::Fly; }},
-    {"bounce", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::OnAir && a.volatiles.locked_move == Move::Bounce; }},
-    {"dig", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Underground; }},
-    {"dive", [](const ActivePokemon& a) { return a.volatiles.kind == Volatiles::Kind::Underwater; }},
+    {"fly", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::OnAir && a.volatiles.locked_move == Move::Fly; }},
+    {"bounce", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::OnAir && a.volatiles.locked_move == Move::Bounce; }},
+    {"dig", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Underground; }},
+    {"dive", [](const auto& a) { return a.volatiles.kind == Volatiles::Kind::Underwater; }},
 };
 
 // The active Pokémon's boosts and guarded volatiles against Showdown's.
-std::string active_mismatch(const Battle& battle, Player p,
+template <typename E>
+std::string active_mismatch(const E& e, const typename E::Battle& battle, Player p,
                             const json::Value& sa, bool over) {
-  const ActivePokemon& a = battle.side(p).active;
-  const Pokemon& mon = battle.side(p).get(1);
+  const auto& view = e.view(battle);
+  const auto& ours_side = view.side(p);
+  const auto& a = ours_side.active;
+  const auto& mon = ours_side.get(1);
   if (sa.is_null() || mon.hp == 0) return "";
   const char* side = p == Player::P1 ? "p1" : "p2";
   std::string why;
@@ -480,17 +487,18 @@ std::string active_mismatch(const Battle& battle, Player p,
            std::to_string(a.volatiles.substitute_hp) + ", Showdown " +
            std::to_string(sa["subhp"].integer()) + ";";
   }
-  for (const VolatileName& v : VOLATILES) {
+  using A = std::remove_cvref_t<decltype(a)>;
+  for (const VolatileName<A>& v : VOLATILES<A>) {
     // Showdown locks a Baton Passer with a Choice Band; the decomp doesn't.
     // It leaves at once, so the lock is never seen.
-    if (battle.request.phase == Phase::BatonPass &&
+    if (E::phase(battle) == Phase::BatonPass &&
         std::string_view(v.name) == "choicelock") {
       continue;
     }
     // A lock whose band was traded or knocked away stays in Showdown until
     // the holder's next DisableMove, inert.
     if (std::string_view(v.name) == "choicelock" && a.volatiles.choice_move == Move::None &&
-        !detail::holds(battle.side(p), HoldEffect::ChoiceBand)) {
+        detail::item_data(mon.item).effect != HoldEffect::ChoiceBand) {
       continue;
     }
     bool theirs = false;
@@ -504,11 +512,15 @@ std::string active_mismatch(const Battle& battle, Player p,
 
 // Each side's conditions (Spikes layers, and whether each screen is up) and
 // the weather, against Showdown's.
-std::string field_mismatch(const Battle& battle, const json::Value& state) {
+template <typename E>
+std::string field_mismatch(const E& e, const typename E::Battle& battle,
+                           const json::Value& state) {
+  const auto& view = e.view(battle);
   std::string why;
   for (int s = 0; s < 2; s++) {
     const std::string side = s == 0 ? "p1" : "p2";
-    const SideConditions& c = battle.sides[s].conditions;
+    const auto& side_ = view.side(Player(s));
+    const auto& c = side_.conditions;
     const json::Value& sc = state[side + "side"];
     if (c.spikes != sc["spikes"].integer()) {
       why += " " + side + " Spikes " + std::to_string(c.spikes) + ", Showdown " +
@@ -518,7 +530,6 @@ std::string field_mismatch(const Battle& battle, const json::Value& state) {
     // traces). Showdown's is rolled at the use, ours at the landing, so it
     // must be one of our base's rolls.
     if (const json::Value& f = sc["future"]; !f.array.empty()) {
-      const Side& side_ = battle.sides[s];
       const int64_t turns = c.future_sight, damage = side_.future_sight_damage;
       bool rolled = damage == 0 && f.array[1].integer() == 0;
       for (uint8_t k = 0; k < 16 && !rolled && damage != 0; k++) {
@@ -552,8 +563,10 @@ std::string field_mismatch(const Battle& battle, const json::Value& state) {
 
 // Why `result` and `battle` don't match the step, or "" if they do. `next`
 // is the following step, or null after the last.
-std::string mismatch(const Battle& battle, Result result, Phase before,
-                     const json::Value& step, const json::Value* next) {
+template <typename E>
+std::string mismatch(const E& e, const typename E::Battle& battle, Result result,
+                     Phase before, const json::Value& step, const json::Value* next) {
+  const auto& view = e.view(battle);
   const json::Value& want = step["result"];
   if (!want.is_null()) {
     const Result::Type t = want.string == "p1"   ? Result::Win
@@ -585,38 +598,57 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
                                  before == Phase::FaintAfterAction;
   if (reaches_residuals && !result.over() &&
       (result.p1() == Choice::Switch || result.p2() == Choice::Switch) &&
-      battle.request.phase != Phase::BatonPass) {
+      E::phase(battle) != Phase::BatonPass) {
     bool upkeep = false;
     for (const json::Value& l : step["log"].array) upkeep |= l.string == "|upkeep";
-    const bool residuals = battle.request.phase == Phase::FaintAfterResiduals;
+    const bool residuals = E::phase(battle) == Phase::FaintAfterResiduals;
     if (upkeep != residuals) {
       why += residuals ? " the request comes after the residuals, Showdown's before;"
                        : " the request comes before the residuals, Showdown's after;";
     }
   }
-  why += active_mismatch(battle, Player::P1, step["state"]["p1active"], result.over());
-  why += active_mismatch(battle, Player::P2, step["state"]["p2active"], result.over());
-  why += field_mismatch(battle, step["state"]);
+  why += active_mismatch(e, battle, Player::P1, step["state"]["p1active"], result.over());
+  why += active_mismatch(e, battle, Player::P2, step["state"]["p2active"], result.over());
+  why += field_mismatch(e, battle, step["state"]);
   for (int s = 0; s < 2; s++) {
     const char* side = s == 0 ? "p1" : "p2";
     const json::Value& mons = step["state"][side];
     for (uint8_t slot = 1; slot <= mons.size(); slot++) {
       const json::Value& m = mons[slot - 1];
-      const Pokemon& p = battle.sides[s].get(slot);
+      const auto& ours_side = view.side(Player(s));
+      const auto& p = ours_side.get(slot);
       // Showdown's species is the active one, which Transform changes.
       const bool active = slot == 1 && !p.fainted() && battle.turn > 0;
       const std::string_view id =
-          species_id(active ? battle.sides[s].active.species : p.species);
+          species_id(active ? ours_side.active.species : p.species);
+      // m[4] is Showdown's base slots. ovo has only the live ones, which
+      // Transform and Mimic rewrite, so it reads Showdown's live slots.
+      std::vector<int64_t> theirs_pp;
+      if constexpr (E::OVO) {
+        const json::Value& sa = step["state"][std::string(side) + "active"];
+        if (!sa.is_null()) {
+          for (const json::Value& x : sa["moves"].array) theirs_pp.push_back(x[1].integer());
+        }
+      } else {
+        for (const json::Value& x : m[4].array) theirs_pp.push_back(x.integer());
+      }
+      const auto& slots = [&]() -> const auto& {
+        if constexpr (E::OVO) {
+          return ours_side.active.moves;
+        } else {
+          return p.moves;
+        }
+      }();
       bool pp = true;
-      for (size_t i = 0; i < m[4].size(); i++) {
-        pp = pp && p.moves[i].pp == m[4][i].integer();
+      for (size_t i = 0; i < theirs_pp.size(); i++) {
+        pp = pp && slots[i].pp == theirs_pp[i];
       }
       if (!pp) {
         why += std::string(" ") + side + " slot " + std::to_string(slot) +
                ": PP ours";
-        for (const MoveSlot& ms : p.moves) why += " " + std::to_string(ms.pp);
+        for (const MoveSlot& ms : slots) why += " " + std::to_string(ms.pp);
         why += ", Showdown";
-        for (const json::Value& x : m[4].array) why += " " + std::to_string(x.integer());
+        for (const int64_t x : theirs_pp) why += " " + std::to_string(x);
         why += ";";
       }
       if (p.item != item_of(m[5].string)) {
@@ -629,8 +661,8 @@ std::string mismatch(const Battle& battle, Result result, Phase before,
       std::string sd_id = m[0].string;
       if (sd_id.starts_with("castform")) {
         if (slot == 1 && !p.fainted() &&
-            battle.sides[s].active.ability == Ability::Forecast) {
-          const Type t = battle.sides[s].active.types[0];
+            ours_side.active.ability == Ability::Forecast) {
+          const Type t = ours_side.active.types[0];
           const char* forme = t == Type::Fire    ? "castformsunny"
                               : t == Type::Water ? "castformrainy"
                               : t == Type::Ice   ? "castformsnowy"
@@ -698,13 +730,15 @@ bool build_team(const json::Value& header, const char* side, RNG& rng,
 }
 
 // Our stats against Showdown's, in its order (hp, atk, def, spa, spd, spe).
-bool check_stats(const Battle& battle, const json::Value& header) {
+template <typename E> bool check_stats(const E& e, const json::Value& header) {
+  const auto& view = e.view(e.start);
   bool ok = true;
   for (int s = 0; s < 2; s++) {
     const char* side = s == 0 ? "p1" : "p2";
     const json::Value& sets = header[side]["sets"];
     for (size_t i = 0; i < sets.size(); i++) {
-      const Stats& x = battle.sides[s].pokemon[i].stats;
+      const auto& ours_side = view.side(Player(s));
+      const Stats& x = ours_side.get(uint8_t(i + 1)).stats;
       const uint16_t ours[6] = {x.hp, x.atk, x.def, x.spa, x.spd, x.spe};
       const json::Value& theirs = sets[i]["stats"];
       for (int k = 0; k < 6; k++) {
@@ -721,6 +755,7 @@ bool check_stats(const Battle& battle, const json::Value& header) {
   return ok;
 }
 
+template <typename E>
 void play(const json::Value& header, const std::vector<json::Value>& steps,
           const Config& config) {
   const long long game = header["game"].integer();
@@ -732,13 +767,14 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     stats.setup++;
     return;
   }
-  std::optional<Battle> init = helpers::init_battle(rng.next(), p1, p2);
+  const std::optional<E> init = E::init(rng.next(), p1, p2);
   if (!init) {
     std::printf("game %lld: init_battle failed\n", game);
     stats.setup++;
     return;
   }
-  if (!check_stats(*init, header)) {
+  const E& e = *init;
+  if (!check_stats(e, header)) {
     stats.setup++;
     return;
   }
@@ -759,10 +795,10 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
   format::Formatter formatter(names, exact_hp);
   std::vector<uint8_t> buffer(protocol::MAX_LOG_SIZE);
 
-  Battle battle = *init;
-  Durations durations{};
+  typename E::Battle battle = e.start;
+  typename E::Durations durations{};
   Result r{};
-  std::array<Choice, MAX_CHOICES> c1{}, c2{};
+  std::array<Choice, E::MAX_CHOICES> c1{}, c2{};
   for (size_t k = 0; k < steps.size(); k++) {
     const json::Value& step = steps[k];
     const json::Value* next = k + 1 < steps.size() ? &steps[k + 1] : nullptr;
@@ -785,7 +821,7 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
           std::printf("\n  Showdown:");
           for (const auto& c : theirs) std::printf(" [%s]", c.c_str());
           std::printf("\n");
-          print_active(battle, p, k > 0 ? &steps[k - 1] : nullptr);
+          print_active(e, battle, p, k > 0 ? &steps[k - 1] : nullptr);
           stats.choices++;
           return;
         }
@@ -811,15 +847,15 @@ void play(const json::Value& header, const std::vector<json::Value>& steps,
     }());
     uint64_t t = 0;
     for (; t < config.tries && !matched; t++) {
-      Battle copy = battle;
+      typename E::Battle copy = battle;
       copy.rng.seed = rng.next();
       randomize_hidden(copy, durations);
       protocol::Writer writer{buffer.data(), buffer.size(), 0};
-      Observed o{protocol::fixed_log(writer), {}, {}};
+      Observed<E> o{protocol::fixed_log(writer), {}, {}};
       o.chance.durations = durations;
       force_metronome(step["log"], o.calc);
-      const Result result = update(copy, x, y, o);
-      std::string w = mismatch(copy, result, battle.request.phase, step, next);
+      const Result result = e.update(copy, x, y, o);
+      std::string w = mismatch(e, copy, result, E::phase(battle), step, next);
       // The log lines this try matches before its first difference, and
       // that difference.
       const auto compare = [&](std::string& diff) {
@@ -929,13 +965,15 @@ int main(int argc, char** argv) {
       config.why = true;
     } else if (arg == "--no-log") {
       config.log = false;
+    } else if (arg == "--ovo") {
+      config.ovo = true;
     } else {
       files.push_back(arg);
     }
   }
   if (files.empty()) {
     std::fprintf(stderr, "usage: check_showdown [--tries N] [--seed N] "
-                         "[--game G] [--quiet] traces.jsonl...\n");
+                         "[--game G] [--quiet] [--ovo] traces.jsonl...\n");
     return 2;
   }
 
@@ -950,7 +988,11 @@ int main(int argc, char** argv) {
     const auto finish = [&] {
       if (!header.is_null() &&
           (config.game < 0 || header["game"].integer() == config.game)) {
-        play(header, steps, config);
+        if (config.ovo) {
+          play<tools::Ovo>(header, steps, config);
+        } else {
+          play<tools::Full>(header, steps, config);
+        }
       }
       steps.clear();
     };

@@ -72,3 +72,63 @@ games = 100000
 games = 1000
 samples = 128
 alpha = 1e-7
+
+# hoenn::ovo on the same pools, every Pokémon a team of one. No run has set
+# these bars yet: they're the parent environments'.
+[ovo_ou]
+ovo = true
+teams = "teams/ou"
+
+[ovo_ou.showdown]
+games = 10000
+tries = 1000000
+matched = 0.999
+log_only_counts = true
+choices = 0
+
+[ovo_ou.soak]
+games = 100000
+
+[ovo_ou.chance]
+games = 1000
+samples = 128
+alpha = 1e-7
+
+[ovo_ou_legal]
+ovo = true
+generate = { mode = "ou-legal", teams = 2000 }
+
+[ovo_ou_legal.showdown]
+games = 10000
+tries = 1000000
+matched = 0.998
+log_only_counts = true
+choices = 0
+
+[ovo_ou_legal.soak]
+games = 100000
+
+[ovo_ou_legal.chance]
+games = 1000
+samples = 128
+alpha = 1e-7
+
+[ovo_random]
+ovo = true
+generate = { mode = "random", teams = 2000 }
+
+[ovo_random.showdown]
+format = "custom"       # showdown_traces.cjs --format
+games = 10000
+tries = 1000000
+matched = 0.998
+log_only_counts = true
+choices = 0
+
+[ovo_random.soak]
+games = 100000
+
+[ovo_random.chance]
+games = 1000
+samples = 128
+alpha = 1e-7

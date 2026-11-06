@@ -492,12 +492,12 @@ static_assert(std::is_trivial_v<Durations> &&
 // copies it along with the battle). The roll helpers in effects.hpp write
 // these fields directly behind `if constexpr (enabled)` (CLAUDE.md, "Chance",
 // Hooks); there are no per-site methods.
-template <typename R = Rational<double>> struct Chance {
+template <typename R = Rational<double>, typename D = Durations> struct Chance {
   static constexpr bool enabled = true;
 
   R probability;
   Actions actions;
-  Durations durations;
+  D durations;
 
   constexpr void reset() {
     probability.reset();
