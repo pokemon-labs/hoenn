@@ -706,9 +706,9 @@ template <typename O> constexpr Result start(Battle& battle, O& options) {
 // Moves
 // ---------------------------------------------------------------------------
 
-// Showdown's |move| line (data/mods/gen3/scripts.ts:165), once past the
-// canceler: [from] the caller for a called move, [from] Pursuit on a switching
-// target, [from] lockedmove for a forced turn.
+// Showdown's |move| line (data/mods/gen3/scripts.ts:183), once past the
+// canceler: [from] move: the caller for a called move, [from] move: Pursuit
+// on a switching target, [from] lockedmove for a forced turn.
 template <typename O>
 constexpr void log_move(const Battle& battle, Player player, const MoveState& m,
                         O& options) {

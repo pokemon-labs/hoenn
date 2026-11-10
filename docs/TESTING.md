@@ -488,7 +488,7 @@ built.
 - **`check_showdown`, Metronome only:** the random search must hit
   Showdown's exact branch, and a game with two Metronome picks (1/336
   each) plus damage rolls runs past the try cap. The pick is public (it's
-  on Showdown's `[from] Metronome` line), so forcing it hides nothing the
+  on Showdown's `[from] move: Metronome` line), so forcing it hides nothing the
   test is for: given that pick, our engine must still produce Showdown's
   log, with every other draw searched. What it skips is whether we could
   draw that pick at all. A forced pick Metronome can't call asserts

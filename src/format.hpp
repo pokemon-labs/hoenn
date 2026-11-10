@@ -193,7 +193,7 @@ class Formatter {
       std::string s = "|move|" + ident(source) + "|" + move_name(m) + "|" +
                       (target == protocol::NO_ID ? "" : ident(target));
       if (from == protocol::MoveFrom::From) {
-        s += "|[from] " + move_name(Move(r.u16()));
+        s += "|[from] move: " + move_name(Move(r.u16()));
       } else if (from == protocol::MoveFrom::LockedMove) {
         s += "|[from] lockedmove";
       }

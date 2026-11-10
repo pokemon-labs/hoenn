@@ -67,13 +67,13 @@ namespace {
 
 using Observed = Options<protocol::FixedLog, Chance<>, Calc>;
 
-// Metronome's pick, read from Showdown's move line ([from] Metronome) and
+// Metronome's pick, read from Showdown's move line ([from] move: Metronome) and
 // forced through Calc: a random search can't find two picks (1/336 each)
 // plus their rolls within the try cap. Only the pick is forced.
 void force_metronome(const json::Value& log, Calc& calc) {
   for (const json::Value& l : log.array) {
     const std::string& line = l.string;
-    if (!line.starts_with("|move|p") || line.find("|[from] Metronome") == std::string::npos) {
+    if (!line.starts_with("|move|p") || line.find("|[from] move: Metronome") == std::string::npos) {
       continue;
     }
     const Player p = line[7] == '1' ? Player::P1 : Player::P2;
