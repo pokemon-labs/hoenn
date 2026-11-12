@@ -490,7 +490,8 @@ table below follows 0.11.11, which differs from 0.11.10 in:
 - Recoil's `-damage` has no `[of]`.
 - Hyper Cutter's `-fail|P|unboost` names the stat by ID (`atk`).
 - `move`'s `[from]` is the source's `fullname`: `[from] move: Sleep Talk`,
-  `[from] move: Pursuit`, but `[from] lockedmove` (a condition)
+  `[from] move: Pursuit`, but `[from] lockedmove`, `[from] Magic Coat` and
+  `[from] Snatch` (conditions: the last two call from their volatiles)
   (`data/mods/gen3/scripts.ts:183`, since Showdown 202b6b3).
 - `move: Light Screen` in `-sidestart` and `-sideend` (Reflect stays
   `Reflect`); `Mud Sport` in `-start`; `Disable` in `-end`.

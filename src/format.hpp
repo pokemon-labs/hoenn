@@ -193,7 +193,12 @@ class Formatter {
       std::string s = "|move|" + ident(source) + "|" + move_name(m) + "|" +
                       (target == protocol::NO_ID ? "" : ident(target));
       if (from == protocol::MoveFrom::From) {
-        s += "|[from] move: " + move_name(Move(r.u16()));
+        // A Showdown sourceEffect's fullname: Magic Coat and Snatch call from
+        // their volatiles (data/moves.ts:10720, :17125), and a condition's has
+        // no "move: ".
+        const Move by = Move(r.u16());
+        s += by == Move::MagicCoat || by == Move::Snatch ? "|[from] " : "|[from] move: ";
+        s += move_name(by);
       } else if (from == protocol::MoveFrom::LockedMove) {
         s += "|[from] lockedmove";
       }

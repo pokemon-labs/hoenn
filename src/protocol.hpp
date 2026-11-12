@@ -89,7 +89,7 @@ inline constexpr size_t MAX_LOG_SIZE = 2048;
 // |move|'s [from].
 enum class MoveFrom : uint8_t {
   None,
-  From,       // [from] move: MOVE (Sleep Talk, Pursuit)
+  From,       // [from] move: MOVE (Sleep Talk, Pursuit); bare for Magic Coat, Snatch
   LockedMove, // [from] lockedmove
 };
 
@@ -490,6 +490,16 @@ void faint(L& log, ID id, bool bond = false) {
     }
     assert(q.n < 2);
     q.ids[q.n++] = id;
+  }
+}
+
+// Whether `id`'s Faint was written this update (Showdown's faintMessages has
+// made it inactive). False without a log.
+template <typename L> constexpr bool faint_written(const L& log, ID id) {
+  if constexpr (L::enabled) {
+    return (log.faints.written & (1u << id.bits)) != 0;
+  } else {
+    return false;
   }
 }
 

@@ -1998,7 +1998,8 @@ constexpr void inflict(Battle& battle, Player target, Secondary s,
   }
   protocol::status(options.log, protocol::ident(battle, target), status, src);
   // Showdown's Lum Berry eats at once (onAfterSetStatus), except for a
-  // Synchronize holder, which waits for moveend.
+  // Synchronize holder, which waits for its Synchronize (contact(), or
+  // moveend).
   if (item_data(side.get(1).item).effect == HoldEffect::CureStatus &&
       side.active.ability != Ability::Synchronize) {
     item_cure(battle, target, options);
@@ -2683,8 +2684,18 @@ constexpr Hit base_hit(const Battle& battle, Player player, const MoveState& m) 
 template <typename O>
 constexpr void contact(Battle& battle, Player player, MoveState& m, uint8_t i, O& options) {
   defrost(battle, player, m, options);
+  const uint8_t before = battle.side(player).get(1).status.bits;
   ability_on_damage(battle, player, m, i, options);
   synchronize(battle, player, m, options);
+  // A Synchronize user's Lum Berry, which inflict() leaves to its Synchronize,
+  // eats right after it, passed back or not (a fainted target): Showdown's
+  // onAfterSetStatus runs Synchronize (priority 0), then Lum Berry (-1), so
+  // before the recoil.
+  Side& side = battle.side(player);
+  if (before == 0 && side.get(1).status.bits != 0 &&
+      side.active.ability == Ability::Synchronize && !side.get(1).fainted()) {
+    item_cure(battle, player, options);
+  }
 }
 
 // Present's heal (bs1:1664), as Showdown's: a quarter of the target's max HP
@@ -4910,10 +4921,16 @@ constexpr void future_attack(Battle& battle, Player player, O& options) {
 
   const Player user = foe(player);
   const Side& user_side = battle.side(user);
-  const bool in = user_side.order[0] == position && !user_side.get(1).fainted();
+  const bool slot = user_side.order[0] == position;
+  const bool in = slot && !user_side.get(1).fainted();
   const ID id = protocol::ident(battle, player);
-  const ID source = in ? protocol::ident(battle, user)
-                       : protocol::benched(ID::init(user, position));
+  // The user's position letter while Showdown still has it active
+  // (Pokemon.isActive): in its slot, its Faint not yet written. One KO'd
+  // earlier in these residuals is still p1a; faintMessages clears it.
+  const ID active = protocol::ident(battle, user);
+  const ID source = slot && !protocol::faint_written(options.log, active)
+                        ? active
+                        : protocol::benched(ID::init(user, position));
   protocol::end_effect(options.log, id, protocol::End::FutureMove, move);
   const ActivePokemon& t = side.active;
   // The user's Lock-On, while it's in, reaches a semi-invulnerable target too.
