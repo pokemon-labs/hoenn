@@ -176,8 +176,8 @@ luck. A failing game found this way becomes a committed fixture.
 ### The fixture
 
 `tools/fixtures/showdown.jsonl` holds one Showdown game per bug fixed from
-the step 6-8 runs (54 games, 2026-10-17) and the Showdown c0845f3 port (14,
-2026-10-24), replayed by ctest's
+the step 6-8 runs (54 games, 2026-10-17), the Showdown c0845f3 port (14,
+2026-10-24) and the e5d2628 pin (4, 2026-11-12), replayed by ctest's
 `check_showdown_fixture` at `--seed 1`. Each game is cut one step after
 the step that failed (the next step gives the request check), and its
 header's `fixture` field names the bug, the commit that fixed it and the
@@ -779,6 +779,23 @@ turn, each measured before its bars are fixed.
    already at 0 HP (random 339, Rough Skin) and still prints on a move with
    0 PP (random 233); Destiny Bond takes nothing when recoil fainted the
    user first (random 180). All six match.
+
+   Report on `eeebfe1` (run 43271285730, Showdown master 965a535, one
+   commit past the e5d2628 pin, 2026-11-12): OU passed; OU-legal 9775/9903
+   (98.71%) and random 9512/9605 (99.03%) failed the 99.80% bar. Of the 221
+   failures, 214 were the |move| tag of a move Magic Coat bounced or Snatch
+   stole: Showdown 202b6b3 prints the source effect's fullname, a bare
+   `[from] Magic Coat` / `[from] Snatch` for those volatiles, which `eeebfe1`
+   wrote as `[from] move: X`. Fixed in `ba9c3d8` with 2 more: a Synchronize
+   user's Lum Berry eats right after Static paralyzes it, before its recoil,
+   when the target fainted (OU-legal 516); Future Sight's `-miss` names a
+   user KO'd earlier in the same residuals as `p1a` (OU-legal 501). Fixture
+   games 68-71 (Snatch, Magic Coat, Lum, Future Sight); each fails at
+   `eeebfe1`. Left, unmatched (5 games): a resisted crit's damage (OU-legal
+   330, random 122: ours lower), Perish Song's order after a Doom Desire KO
+   (random 46), Ice Ball's state after Wonder Guard's immunity (random 209),
+   Disable kept through Transform (random 113). After the fix the run's
+   failures replay to OU-legal 9902/9903 and random 9601/9605.
 9. CI: the gating and reporting workflows ("CI"); `test` runs on every push to main (passing since at least 2026-10-19).
 
 ## Decisions
