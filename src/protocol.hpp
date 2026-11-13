@@ -89,7 +89,7 @@ inline constexpr size_t MAX_LOG_SIZE = 2048;
 // |move|'s [from].
 enum class MoveFrom : uint8_t {
   None,
-  From,       // [from] move: MOVE (Sleep Talk, Pursuit); bare for Magic Coat, Snatch
+  From,       // [from] move: MOVE (Sleep Talk); bare for Pursuit, Magic Coat, Snatch
   LockedMove, // [from] lockedmove
 };
 

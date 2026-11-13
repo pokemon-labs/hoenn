@@ -195,9 +195,11 @@ class Formatter {
       if (from == protocol::MoveFrom::From) {
         // A Showdown sourceEffect's fullname: Magic Coat and Snatch call from
         // their volatiles (data/moves.ts:10720, :17125), and a condition's has
-        // no "move: ".
+        // no "move: "; Pursuit on a switching target is bare too
+        // (data/mods/gen3/scripts.ts:186).
         const Move by = Move(r.u16());
-        s += by == Move::MagicCoat || by == Move::Snatch ? "|[from] " : "|[from] move: ";
+        const bool bare = by == Move::MagicCoat || by == Move::Snatch || by == Move::Pursuit;
+        s += bare ? "|[from] " : "|[from] move: ";
         s += move_name(by);
       } else if (from == protocol::MoveFrom::LockedMove) {
         s += "|[from] lockedmove";
