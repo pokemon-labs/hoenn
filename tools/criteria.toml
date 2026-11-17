@@ -8,7 +8,7 @@
 # symlink. --showdown-commit or --master runs another.
 [showdown]
 repo = "https://github.com/smogon/pokemon-showdown.git"
-commit = "c0845f33d381402dfcb18ce324c20a94f18af075"
+commit = "5c28e341ef9f9730a35874390cc3bc2aead7a16e"
 
 [ou]
 teams = "teams/ou"      # every *.txt in it

@@ -489,8 +489,12 @@ table below follows 0.11.11, which differs from 0.11.10 in:
 - Natural Cure's `-curestatus` adds `[silent]` (gen4 mod).
 - Recoil's `-damage` has no `[of]`.
 - Hyper Cutter's `-fail|P|unboost` names the stat by ID (`atk`).
-- `move`'s `[from]` has a space: `[from] Sleep Talk`, `[from] lockedmove`,
-  `[from] Pursuit`.
+- `move`'s `[from]` is the source's `fullname`: `[from] move: Sleep Talk`,
+  but `[from] lockedmove`, `[from] Magic Coat` and `[from] Snatch`
+  (conditions: the last two call from their volatiles)
+  (`data/mods/gen3/scripts.ts:183`, since Showdown 202b6b3). Pursuit on a
+  switching target is a bare `[from] Pursuit`
+  (`data/mods/gen3/scripts.ts:186`, since Showdown 5c28e34).
 - `move: Light Screen` in `-sidestart` and `-sideend` (Reflect stays
   `Reflect`); `Mud Sport` in `-start`; `Disable` in `-end`.
 - Beat Up's `-activate` is `move: Beat Up|[of] NAME`.

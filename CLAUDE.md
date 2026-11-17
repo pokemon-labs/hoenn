@@ -136,8 +136,10 @@ teams; `tools/fixtures/showdown.jsonl` one committed game per fixed failure.
 ## Status (2026-10-24)
 
 The engine is complete: every move, item and the log are written. The pin
-is Showdown c0845f3 (2026-10-24), whose gen3 switch-in overhaul and Knock
-Off fix are ported (`docs/ENGINE.md`, "Mechanics"). All three environments
+is Showdown 5c28e34 (2026-11-13; its bare `[from] Pursuit` tag for Pursuit
+on a switching target is followed, as e5d2628's `[from] move:` for called
+moves); c0845f3's gen3 switch-in overhaul and Knock Off fix are ported
+(`docs/ENGINE.md`, "Mechanics"). All three environments
 pass their bars (OU 99.99%, OU-legal 99.96%, random 99.97% at bf6ba4e).
 Work is fixing what the tests find
 and speed: three optimizations (2026-10-17) gave about +22% on
